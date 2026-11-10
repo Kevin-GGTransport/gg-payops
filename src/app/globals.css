@@ -171,12 +171,13 @@
 
 /* ==========================================================================
    后台骨架 · 舱单书脊
+   视口锁定双栏：左侧书脊不随内容滚动，右侧台账面板独立滚动
    ========================================================================== */
 .dashboard {
-  @apply grid min-h-screen grid-cols-[232px_minmax(0,1fr)];
+  @apply grid h-dvh grid-cols-[232px_minmax(0,1fr)] overflow-hidden;
 }
 .rail {
-  @apply flex flex-col bg-navy p-4;
+  @apply flex flex-col overflow-y-auto bg-navy p-4;
 }
 .rail-brand {
   @apply mb-4 flex items-center gap-2.5 border-b border-white/15 pb-4;
@@ -213,7 +214,11 @@
   @apply mt-2.5;
 }
 .main {
-  @apply min-w-0 p-6 pb-16 md:px-9;
+  @apply min-w-0 overflow-y-auto p-6 pb-16 md:px-9;
+}
+/* Content column: centered and capped so wide ledgers stay readable on ultrawide */
+.main > * {
+  @apply mx-auto w-full max-w-[1360px];
 }
 
 /* ==========================================================================
@@ -596,10 +601,11 @@ td.num {
    ========================================================================== */
 @media (max-width: 800px) {
   .dashboard {
-    @apply grid-cols-[minmax(0,1fr)];
+    @apply block h-auto overflow-visible;
   }
+  /* Mobile: the spine becomes a sticky top bar so the menu stays reachable */
   .rail {
-    @apply static;
+    @apply sticky top-0 z-30;
   }
   .rail-brand {
     @apply mb-3 pb-3;
@@ -618,7 +624,7 @@ td.num {
     @apply hidden;
   }
   .main {
-    @apply p-4 pb-10;
+    @apply overflow-visible p-4 pb-10;
   }
   .tabs a {
     @apply px-2.5 py-1.5 text-[13px];
