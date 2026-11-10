@@ -1,0 +1,17 @@
+.DS_Store
+node_modules/
+.next/
+out/
+build/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+.local/
+.playwright-mcp/
+.claude/settings.local.json
+npm-debug.log*
+pnpm-debug.log*
+prisma/*.db

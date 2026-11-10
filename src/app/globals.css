@@ -1,0 +1,642 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* ==========================================================================
+   G&G PayOps — 「调度台账」
+   shadcn/ui (new-york, neutral) + Tailwind v4
+   品牌色：navy 舱单海军蓝 / route 航线蓝 / amber 车主琥珀 / audit 台账青
+   设计语言：货运舱单 + 记账规范 —— 仪表读数带、表头强规则、合计上单线/下双线
+   ========================================================================== */
+
+:root {
+  --radius: 0.375rem;
+  --background: oklch(0.985 0.002 240);
+  --foreground: oklch(0.205 0.02 250);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.205 0.02 250);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.205 0.02 250);
+  --primary: oklch(0.24 0.04 250);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.95 0.004 240);
+  --secondary-foreground: oklch(0.3 0.02 250);
+  --muted: oklch(0.95 0.004 240);
+  --muted-foreground: oklch(0.52 0.02 250);
+  --accent: oklch(0.95 0.004 240);
+  --accent-foreground: oklch(0.3 0.02 250);
+  --destructive: oklch(0.55 0.18 30);
+  --border: oklch(0.9 0.005 240);
+  --input: oklch(0.86 0.006 240);
+  --ring: oklch(0.45 0.09 245);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  /* 品牌 */
+  --color-navy: #0c1f30;
+  --color-route: #1d5d8a;
+  --color-amber: #e79a2f;
+  --color-line: #d8dee5;
+  --color-audit: #0f7c82;
+  --font-sans: var(--font-geist-sans), var(--font-noto-sans-sc), "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: var(--font-geist-mono), "SF Mono", Menlo, Consolas, monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    margin: 0;
+    min-height: 100vh;
+  }
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 2px solid var(--color-route);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+}
+
+/* ---------- 数字统一等宽（账本人格） ---------- */
+.num,
+.mono,
+.metric strong,
+.panel-cap b,
+.gauge-value {
+  @apply font-mono tabular-nums;
+}
+
+/* ==========================================================================
+   登录页 · 舱单封面
+   ========================================================================== */
+.auth-page {
+  @apply relative grid min-h-screen place-items-center overflow-hidden bg-navy p-6;
+}
+/* 舱单格线纹理 */
+.auth-page::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 44px 44px;
+  pointer-events: none;
+}
+.auth-manifest {
+  @apply relative w-full max-w-[440px] overflow-hidden rounded-lg bg-card shadow-2xl;
+}
+.auth-head {
+  @apply flex items-center gap-3 bg-navy px-5 py-4;
+}
+.auth-mark {
+  @apply grid size-10 shrink-0 place-items-center rounded-[3px] border border-amber/70 font-mono text-[13px] font-bold text-amber-200;
+}
+.auth-title h1 {
+  @apply m-0 text-[15px] font-bold tracking-tight text-white;
+}
+.auth-title p {
+  @apply m-0 mt-0.5 text-[10px] tracking-[0.22em] text-slate-400;
+}
+.auth-form {
+  @apply ml-auto shrink-0 self-start rounded-[2px] border border-white/25 px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-slate-400;
+}
+.auth-body {
+  @apply px-6 pb-5 pt-5;
+}
+.field {
+  @apply mb-3.5 grid gap-1.5;
+}
+.field > label {
+  @apply text-[13px] font-medium text-muted-foreground;
+}
+.field input {
+  @apply h-10 w-full rounded-md border border-input bg-card px-3 text-sm outline-none transition-colors focus-visible:border-route focus-visible:ring-2 focus-visible:ring-route/30;
+}
+.button {
+  @apply inline-flex h-10 w-full cursor-pointer items-center justify-center rounded-md bg-navy font-semibold text-white transition-colors hover:bg-route focus-visible:ring-2 focus-visible:ring-route focus-visible:ring-offset-2 focus-visible:outline-none;
+}
+.error {
+  @apply mb-3.5 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-[13px] text-destructive;
+}
+.hint {
+  @apply mt-3.5 border-t border-dashed border-line pt-3 text-xs text-muted-foreground;
+}
+.auth-foot {
+  @apply flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line bg-muted/40 px-6 py-2.5 text-[11px] text-muted-foreground;
+}
+.auth-foot .mono {
+  @apply tracking-wider;
+}
+
+/* 404 · 单页缺失 */
+.nf {
+  @apply px-8 py-10 text-center;
+}
+.nf-code {
+  @apply m-0 font-mono text-[46px] leading-none font-bold tracking-[0.06em] text-navy;
+}
+.nf-title {
+  @apply mt-3 text-lg font-bold tracking-tight;
+}
+.nf-desc {
+  @apply m-0 mt-1.5 text-[13px] text-muted-foreground;
+}
+.nf-back {
+  @apply mx-auto mt-6 w-auto px-5;
+}
+
+/* ==========================================================================
+   后台骨架 · 舱单书脊
+   ========================================================================== */
+.dashboard {
+  @apply grid min-h-screen grid-cols-[232px_minmax(0,1fr)];
+}
+.rail {
+  @apply flex flex-col bg-navy p-4;
+}
+.rail-brand {
+  @apply mb-4 flex items-center gap-2.5 border-b border-white/15 pb-4;
+}
+.rail-mark {
+  @apply grid size-10 shrink-0 place-items-center rounded-[3px] border border-amber/70 font-mono text-[13px] font-bold text-amber-200;
+}
+.rail-brand h1 {
+  @apply m-0 text-[15px] font-bold tracking-tight text-white;
+}
+.rail-brand p {
+  @apply m-0 mt-0.5 text-[10px] tracking-[0.22em] text-slate-400;
+}
+.nav {
+  @apply grid gap-0.5;
+}
+.nav a {
+  @apply rounded-sm px-3 py-2.5 text-[14px] text-slate-300 no-underline transition-colors hover:bg-white/10 hover:text-white;
+}
+.nav a[aria-current="page"] {
+  @apply bg-white/10 font-semibold text-white;
+  box-shadow: inset 2.5px 0 0 0 var(--color-amber);
+}
+.user-box {
+  @apply mt-auto border-t border-white/15 pt-3.5;
+}
+.user-name {
+  @apply text-[13px] font-semibold text-white;
+}
+.user-roles {
+  @apply mt-0.5 text-[11px] text-slate-400;
+}
+.user-box form {
+  @apply mt-2.5;
+}
+.main {
+  @apply min-w-0 p-6 pb-16 md:px-9;
+}
+
+/* ==========================================================================
+   按钮变体（页面辅助类，底层 shadcn Button 亦可直用）
+   ========================================================================== */
+.button-quiet {
+  @apply w-auto border-line bg-card text-foreground hover:border-route hover:text-route hover:bg-card;
+}
+.button-dark {
+  @apply w-auto px-4;
+}
+.button-danger {
+  @apply border-destructive/40 text-destructive hover:border-destructive hover:text-destructive hover:bg-destructive/10;
+}
+.button:disabled {
+  @apply cursor-not-allowed opacity-50 hover:bg-navy;
+}
+.button-quiet.button-danger:disabled:hover {
+  @apply border-destructive/40 bg-transparent;
+}
+.ghost {
+  @apply h-9 cursor-pointer rounded-md border border-white/30 bg-transparent px-3 text-slate-100 transition-colors hover:border-white/60 hover:text-white;
+}
+.linklike {
+  @apply cursor-pointer border-0 bg-none px-0 font-semibold text-route;
+}
+.linklike:hover {
+  @apply underline;
+}
+.linklike.danger {
+  @apply text-destructive;
+}
+
+/* ==========================================================================
+   工具条：页签 + 搜索
+   ========================================================================== */
+.toolbar {
+  @apply mb-2.5 flex flex-wrap items-center justify-between gap-3;
+}
+.tabs {
+  @apply inline-flex gap-0.5 rounded-md border border-line bg-card p-0.5;
+}
+.tabs a {
+  @apply flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-sm font-semibold text-muted-foreground no-underline;
+}
+.tabs a b {
+  @apply rounded-full bg-muted px-1.5 font-mono text-xs tabular-nums text-secondary-foreground;
+}
+.tabs a:hover {
+  @apply text-foreground;
+}
+.tabs a[aria-current="page"] {
+  @apply bg-navy text-white;
+}
+.tabs a[aria-current="page"] b {
+  @apply bg-white/20 text-white;
+}
+.search {
+  @apply flex gap-1.5;
+}
+.search input {
+  @apply h-9.5 w-[clamp(220px,26vw,320px)] rounded-md border border-input bg-card px-2.5 text-sm outline-none focus-visible:border-route focus-visible:ring-2 focus-visible:ring-route/30;
+}
+.search button {
+  @apply h-9.5 cursor-pointer rounded-md border border-navy bg-navy px-3.5 font-semibold text-white transition-colors hover:bg-route;
+}
+
+/* 多选筛选：方角钢印芯片（勾选即选中，navy 填充） */
+.trip-filter {
+  @apply mb-3.5 flex flex-wrap items-center gap-x-3 gap-y-2;
+}
+.filter-actions {
+  @apply flex items-center gap-2.5;
+}
+.filter-actions button {
+  @apply h-8.5 cursor-pointer rounded-md border border-navy bg-navy px-3.5 text-[13px] font-semibold text-white transition-colors hover:bg-route;
+}
+.filter-actions a {
+  @apply text-[13px] font-semibold text-route no-underline;
+}
+.filter-actions a:hover {
+  @apply underline;
+}
+.filter-select {
+  @apply h-9.5 cursor-pointer rounded-md border border-input bg-card px-2.5 text-sm outline-none focus-visible:border-route focus-visible:ring-2 focus-visible:ring-route/30;
+}
+
+/* 筛选下拉（FilterSelect）：触发按钮 + Popover 复选/单选列表面板 */
+.filter-trigger {
+  @apply flex w-40 items-center justify-between gap-1.5 text-left font-normal;
+}
+.filter-trigger[data-state="open"] .trigger-caret {
+  @apply rotate-180;
+}
+.trigger-caret {
+  @apply size-3.5 shrink-0 text-muted-foreground transition-transform;
+}
+.filter-pop {
+  @apply z-50 min-w-48 rounded-[3px] border border-line bg-card p-1 shadow-md;
+}
+.filter-pop-list {
+  @apply max-h-64 overflow-y-auto;
+}
+.filter-pop-item {
+  @apply flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-foreground hover:bg-muted;
+}
+.filter-pop-label {
+  @apply flex-1 truncate;
+}
+.filter-pop-item .tick {
+  @apply ml-auto size-3.5 text-route;
+}
+.filter-pop-foot {
+  @apply mt-1 flex items-center justify-between border-t border-line px-2 pt-1.5;
+}
+.filter-pop-foot .linklike {
+  @apply text-[13px] font-semibold;
+}
+
+/* 台账底栏：批量操作 + 共计 + 分页 */
+.table-foot {
+  @apply mt-2.5 flex flex-wrap items-center justify-between gap-3;
+}
+.foot-left {
+  @apply flex items-center gap-3 text-[13px] text-muted-foreground;
+}
+.pager {
+  @apply flex items-center gap-1;
+}
+.pager a {
+  @apply flex h-8 min-w-8 items-center justify-center rounded-md border border-line bg-card px-2 font-mono text-[13px] font-semibold text-muted-foreground no-underline transition-colors hover:border-route hover:text-foreground;
+}
+.pager a.on {
+  @apply border-navy bg-navy text-white;
+}
+.pager-gap {
+  @apply px-1 text-[13px] text-muted-foreground;
+}
+
+/* 行选择复选框 */
+.check-cell {
+  @apply w-10 text-center;
+}
+.row-check {
+  @apply size-4 cursor-pointer accent-navy;
+}
+.notes-cell {
+  @apply max-w-52 truncate text-muted-foreground;
+}
+
+/* ==========================================================================
+   账本面板与表格（shadcn Table 之上的语义层，记账规范）
+   ========================================================================== */
+.panel {
+  @apply overflow-hidden rounded-md border border-line bg-card shadow-sm;
+}
+.panel-cap {
+  @apply flex items-center justify-between gap-3 border-b border-line bg-muted/40 px-3 py-2 text-[11px] font-semibold tracking-[0.06em] text-muted-foreground;
+}
+.panel-cap b {
+  @apply font-normal tracking-normal text-muted-foreground/80;
+}
+.table-wrap {
+  @apply overflow-x-auto;
+}
+table {
+  @apply w-full border-collapse font-mono text-sm tabular-nums;
+}
+th,
+td {
+  @apply border-b border-line px-3 py-2 text-left align-middle whitespace-nowrap;
+}
+/* 表头强规则：2px 舱单蓝 */
+th {
+  @apply border-b-2 border-b-navy bg-transparent px-3 py-2.5 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground;
+}
+th.num,
+td.num {
+  @apply text-right;
+}
+.roster tbody tr {
+  transition: background-color 120ms ease;
+}
+.roster tbody tr:hover {
+  @apply bg-muted/50;
+}
+.roster .strong {
+  @apply font-semibold text-foreground;
+}
+.roster .row-off td {
+  @apply text-muted-foreground/70;
+}
+.roster .row-off:hover {
+  @apply bg-muted/30;
+}
+.roster .actions {
+  @apply flex items-center gap-2.5;
+}
+.roster .actions a {
+  @apply font-semibold text-route no-underline;
+}
+.roster .actions a:hover {
+  @apply underline;
+}
+.empty {
+  @apply px-4! py-8! text-center text-muted-foreground whitespace-normal!;
+}
+.cell-link {
+  @apply font-semibold text-route no-underline;
+}
+.cell-link:hover {
+  @apply underline;
+}
+.muted-inline {
+  @apply ml-2 text-xs text-muted-foreground;
+}
+.route-arrow {
+  @apply mx-0.5 text-slate-400;
+}
+.lic-class {
+  @apply ml-1.5 rounded-sm border border-line px-1 text-[11px] text-muted-foreground;
+}
+.lic-flag {
+  @apply ml-1.5 text-[11px] text-destructive;
+}
+.roster .expired {
+  @apply font-semibold text-destructive;
+}
+.roster .expiring {
+  @apply text-amber-700;
+}
+/* 合计行：上方单线、下方双线（记账结账规范） */
+.matrix-total td {
+  @apply border-t-[1.5px] border-t-navy bg-transparent font-bold;
+  border-bottom: 3px double var(--color-navy);
+}
+
+/* ==========================================================================
+   仪表读数带（工作台签名元素）
+   ========================================================================== */
+.gauge {
+  @apply mb-4 overflow-hidden rounded-md bg-navy shadow-sm;
+}
+.gauge-head {
+  @apply flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 pt-3.5 pb-2.5;
+}
+.gauge-title {
+  @apply text-[13px] font-semibold tracking-[0.08em] text-white;
+}
+.gauge-range {
+  @apply font-mono text-xs tabular-nums text-slate-400;
+}
+/* 仪表盘刻度分隔 */
+.gauge-ticks {
+  height: 5px;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.3) 0,
+    rgba(255, 255, 255, 0.3) 1px,
+    transparent 1px,
+    transparent 9px
+  );
+}
+.gauge-grid {
+  @apply grid grid-cols-2 md:grid-cols-4;
+}
+.gauge-cell {
+  @apply px-4 py-3.5;
+}
+.gauge-cell:nth-child(even) {
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+}
+.gauge-cell:nth-child(n + 3) {
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+@media (min-width: 768px) {
+  .gauge-cell:nth-child(n) {
+    border-top: none;
+  }
+  .gauge-cell:nth-child(even) {
+    border-left: none;
+  }
+  .gauge-cell + .gauge-cell {
+    border-left: 1px solid rgba(255, 255, 255, 0.14);
+  }
+}
+.gauge-label {
+  @apply block text-[11px] font-medium tracking-[0.08em] text-slate-400;
+}
+.gauge-value {
+  @apply mt-1 block text-[28px] leading-none font-semibold text-white;
+}
+.gauge-value em {
+  @apply ml-1 font-sans text-xs font-normal not-italic text-slate-400;
+}
+.gauge-sub {
+  @apply mt-1.5 block text-[11px] text-slate-400;
+}
+/* 末端读数 = 计费资源，琥珀点亮 */
+.gauge-hot .gauge-value {
+  color: var(--color-amber);
+}
+
+/* ==========================================================================
+   页头 / 通知
+   ========================================================================== */
+.page-head {
+  @apply mb-5 flex flex-wrap items-end justify-between gap-x-4 gap-y-3 border-b border-line pb-3.5;
+}
+.page-head h2 {
+  @apply m-0 text-[22px] font-bold tracking-tight;
+}
+.page-head p {
+  @apply m-0 mt-1 text-[13px] text-muted-foreground;
+}
+.notice {
+  @apply mt-4 border-l-2 border-amber bg-amber-50/70 px-3.5 py-2.5 text-[13px] text-amber-900/85;
+}
+.notice a {
+  @apply font-semibold text-route;
+}
+.notice a:hover {
+  @apply underline;
+}
+
+/* ==========================================================================
+   加载骨架与错误边界
+   ========================================================================== */
+.loading-skeleton {
+  @apply grid gap-3.5 py-2;
+}
+.skeleton {
+  @apply animate-pulse rounded-md bg-muted;
+}
+.skeleton-title {
+  @apply h-8.5 w-64;
+}
+.skeleton-gauge {
+  @apply h-30;
+}
+.skeleton-table {
+  @apply h-80;
+}
+.error-boundary {
+  @apply grid gap-2.5 justify-items-start rounded-md border border-line bg-card p-7;
+}
+.error-boundary h2 {
+  @apply m-0;
+}
+.error-boundary p {
+  @apply m-0 text-muted-foreground;
+}
+.error-boundary .button {
+  @apply w-auto px-4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   响应式
+   ========================================================================== */
+@media (max-width: 800px) {
+  .dashboard {
+    @apply grid-cols-[minmax(0,1fr)];
+  }
+  .rail {
+    @apply static;
+  }
+  .rail-brand {
+    @apply mb-3 pb-3;
+  }
+  .nav {
+    @apply flex overflow-x-auto;
+    scrollbar-width: none;
+  }
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+  .nav a {
+    @apply shrink-0;
+  }
+  .user-box {
+    @apply hidden;
+  }
+  .main {
+    @apply p-4 pb-10;
+  }
+  .tabs a {
+    @apply px-2.5 py-1.5 text-[13px];
+  }
+  .tabs a b {
+    @apply px-1;
+  }
+  th,
+  td {
+    @apply px-2 py-1.5;
+  }
+  .toolbar {
+    @apply flex-col items-stretch;
+  }
+  .tabs {
+    @apply max-w-full overflow-x-auto;
+  }
+  .search {
+    @apply w-full;
+  }
+  .search input {
+    @apply w-full flex-1;
+  }
+  .day-log {
+    @apply grid-cols-1;
+  }
+  .day-rail {
+    @apply flex-row items-baseline gap-2 border-r-0 border-b-2 px-0 pt-1 pb-2;
+  }
+  .day-rail b {
+    @apply text-base;
+  }
+  .day-rail em {
+    @apply ml-auto mt-0;
+  }
+}
