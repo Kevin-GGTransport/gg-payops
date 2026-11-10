@@ -76,6 +76,25 @@ export async function listTrips(filter: {
   `;
 }
 
+export type PeriodGauge = {
+  legs: number;
+  total_miles: string;
+  active_drivers: number;
+};
+
+/** Workbench gauge: one index-only aggregate scan instead of fetching every period row */
+export async function periodGauge(period: Period) {
+  const rows = await prisma.$queryRaw<PeriodGauge[]>`
+    SELECT count(*)::int AS legs,
+           COALESCE(SUM(t.miles), 0)::text AS total_miles,
+           count(DISTINCT t.driver_id)::int AS active_drivers
+    FROM pay.trips t
+    WHERE t.trip_date >= ${period.start}::date
+      AND t.trip_date <= ${period.end}::date
+  `;
+  return rows[0] ?? { legs: 0, total_miles: "0", active_drivers: 0 };
+}
+
 export type PayrollMatrixRow = {
   driver_id: string;
   driver_code: string;

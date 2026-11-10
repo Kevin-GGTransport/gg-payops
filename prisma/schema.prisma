@@ -129,6 +129,7 @@ model Trip {
   updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([driverId, tripDate], map: "idx_trips_driver_date")
+  @@index([tripDate], map: "idx_trips_date")
   @@map("trips")
   @@schema("pay")
 }

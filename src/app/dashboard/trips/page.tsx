@@ -16,7 +16,7 @@ import { CleanForm } from "@/components/clean-form";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { allValues, firstValue, formField, type SearchParams } from "@/lib/search-params";
-import { dateIso, miles as fmtMiles, money } from "@/lib/format";
+import { todayIso, miles as fmtMiles, money } from "@/lib/format";
 import { OPERATION_META, type OperationType } from "@/lib/labels";
 import { listTrips } from "@/lib/queries/trips";
 import { activeDriverOptions } from "@/lib/queries/drivers";
@@ -69,7 +69,7 @@ export default async function TripsPage({
 
   const errorCode = firstValue(sp.error);
   const isAdd = firstValue(sp.add) === "1";
-  const today = dateIso(new Date());
+  const today = todayIso();
   const q = (firstValue(sp.q) ?? "").trim();
   const dateFrom = dateParam(firstValue(sp.from));
   const dateTo = dateParam(firstValue(sp.to));
@@ -77,14 +77,13 @@ export default async function TripsPage({
   const operation = operationParam && operationParam in OPERATION_META ? operationParam : undefined;
   const page = intFromParam(firstValue(sp.page));
 
-  const drivers = await activeDriverOptions();
-
-  // Keep only ids from the active driver list; guards against dirty URL params
-  const driverIdSet = new Set(drivers.map(d => d.id));
-  const selectedIds = allValues(sp.driver).filter(id => driverIdSet.has(id));
+  // Sanitize driver ids from the URL (bigint identities are digits only);
+  // doing this locally lets all three queries start in parallel
+  const selectedIds = allValues(sp.driver).filter(id => /^\d+$/.test(id));
   const hasFilter = selectedIds.length > 0 || Boolean(operation) || Boolean(q) || Boolean(dateFrom) || Boolean(dateTo);
 
-  const [trips, locations] = await Promise.all([
+  const [drivers, trips, locations] = await Promise.all([
+    activeDriverOptions(),
     listTrips({
       ...(selectedIds.length > 0 ? { driverIds: selectedIds } : {}),
       ...(operation ? { operation } : {}),

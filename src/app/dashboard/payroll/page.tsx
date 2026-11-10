@@ -5,7 +5,7 @@ import { LedgerPanel, LedgerEmpty } from "@/components/ledger";
 import { DriverTypeBadge, OperationBadge } from "@/components/badges";
 import { requireUser } from "@/lib/auth";
 import { firstValue, type SearchParams } from "@/lib/search-params";
-import { dateIso, miles as fmtMiles, money } from "@/lib/format";
+import { todayIso, miles as fmtMiles, money } from "@/lib/format";
 import { currentPeriod, periodLabel, periodOf, shiftPeriod, type Period } from "@/lib/period";
 import {
   payrollMatrix,
@@ -67,8 +67,15 @@ export default async function PayrollPage({
   const thisWeek = currentPeriod();
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
-  const today = dateIso(new Date());
+  const today = todayIso();
   const navHref = (p: Period) => `/dashboard/payroll?period=${p.start}`;
+
+  // Drill-down: start fetching before the matrix so both run in parallel;
+  // bigint identities are digits only, other values are dirty params we skip
+  const pickedId = firstValue(sp.driver);
+  const pickedLegsPromise = pickedId && /^\d+$/.test(pickedId)
+    ? driverPeriodTrips(period, pickedId)
+    : null;
 
   const [rows, periodTotals] = await Promise.all([payrollMatrix(period), periodPayTotals()]);
   const totals = rows.reduce(
@@ -86,12 +93,11 @@ export default async function PayrollPage({
     { drivers: 0, days: 0, del: 0, live: 0, empty: 0, bobtail: 0, legs: 0, miles: 0, pay: 0 }
   );
 
-  // Drill-down: only honor a driver that exists in this period's matrix
-  const pickedId = firstValue(sp.driver);
+  // Only honor a driver that exists in this period's matrix; otherwise drop the prefetched legs
   const picked: PayrollMatrixRow | undefined = pickedId
     ? rows.find(r => r.driver_id === pickedId)
     : undefined;
-  const pickedLegs = picked ? await driverPeriodTrips(period, picked.driver_id) : [];
+  const pickedLegs = picked && pickedLegsPromise ? await pickedLegsPromise : [];
   const pickedDays = groupByDay(pickedLegs);
   const pickedHref = (d: string | undefined) =>
     `/dashboard/payroll?period=${period.start}${d ? `&driver=${d}` : ""}`;

@@ -27,6 +27,11 @@ export function dateIso(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+/** Business "today" in US Pacific time (the fleet's home base) as YYYY-MM-DD */
+export function todayIso() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
+}
+
 /** Days from today (negative = past) */
 export function daysUntil(date: string) {
   return Math.floor((Date.parse(`${date}T00:00:00Z`) - Date.now()) / 86_400_000);

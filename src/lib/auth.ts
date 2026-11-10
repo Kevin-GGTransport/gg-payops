@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
@@ -82,7 +83,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   }
 });
 
-export async function getCurrentUser(): Promise<SessionUser | null> {
+// Per-request dedupe: layout + page both call requireUser(); without cache()
+// the JWT would be decoded once per call instead of once per request.
+export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
   const session = await auth();
   if (!session?.user?.id) return null;
   return {
@@ -91,7 +94,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     email: session.user.email ?? "",
     roles: session.user.roles ?? []
   };
-}
+});
 
 export async function requireUser(): Promise<SessionUser> {
   const user = await getCurrentUser();

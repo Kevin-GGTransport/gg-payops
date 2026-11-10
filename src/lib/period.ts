@@ -1,4 +1,4 @@
-import { dateIso } from "./format";
+import { dateIso, todayIso } from "./format";
 
 export type Period = { start: string; end: string };
 
@@ -16,9 +16,9 @@ export function periodOf(date: string): Period {
   return { start: dateIso(start), end: dateIso(end) };
 }
 
-/** 今天所在的周期 */
+/** Period containing today (US Pacific business day) */
 export function currentPeriod(): Period {
-  return periodOf(dateIso(new Date()));
+  return periodOf(todayIso());
 }
 
 /** 周期平移：n=1 下一个周期，n=-1 上一个周期 */

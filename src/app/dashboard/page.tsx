@@ -6,7 +6,7 @@ import { DriverTypeBadge, OperationBadge } from "@/components/badges";
 import { requireUser } from "@/lib/auth";
 import { miles as fmtMiles } from "@/lib/format";
 import { currentPeriod, periodLabel } from "@/lib/period";
-import { listTrips } from "@/lib/queries/trips";
+import { listTrips, periodGauge } from "@/lib/queries/trips";
 import { driverTypeCounts } from "@/lib/queries/drivers";
 
 export const metadata: Metadata = { title: "工作台 · G&G PayOps" };
@@ -15,12 +15,12 @@ export default async function DashboardPage() {
   await requireUser();
 
   const period = currentPeriod();
-  const [trips, counts] = await Promise.all([
-    listTrips({ dateFrom: period.start, dateTo: period.end }),
+  const [gauge, trips, counts] = await Promise.all([
+    periodGauge(period),
+    listTrips({ dateFrom: period.start, dateTo: period.end, page: 1, pageSize: 20 }),
     driverTypeCounts()
   ]);
-  const weekMiles = trips.reduce((sum, t) => sum + Number(t.miles), 0);
-  const activeDrivers = new Set(trips.map(t => t.driver_id)).size;
+  const weekMiles = Number(gauge.total_miles);
 
   return (
     <>
@@ -43,12 +43,12 @@ export default async function DashboardPage() {
           </div>
           <div className="gauge-cell">
             <span className="gauge-label">出勤司机</span>
-            <strong className="gauge-value">{activeDrivers}<em>人</em></strong>
+            <strong className="gauge-value">{gauge.active_drivers}<em>人</em></strong>
             <span className="gauge-sub">本周期有行程记录</span>
           </div>
           <div className="gauge-cell">
             <span className="gauge-label">行程</span>
-            <strong className="gauge-value">{trips.length}<em>段</em></strong>
+            <strong className="gauge-value">{gauge.legs}<em>段</em></strong>
             <span className="gauge-sub">按操作类型逐段记录</span>
           </div>
           <div className="gauge-cell gauge-hot">
