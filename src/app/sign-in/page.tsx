@@ -33,7 +33,7 @@ export default async function SignInPage({
           <form action={authenticate}>
             <div className="field">
               <label htmlFor="email">用户名 / 邮箱</label>
-              <input id="email" name="email" type="text" autoComplete="username" defaultValue="admin" required />
+              <input id="email" name="email" type="text" autoComplete="username" required />
             </div>
             <div className="field">
               <label htmlFor="password">密码</label>
@@ -41,8 +41,6 @@ export default async function SignInPage({
             </div>
             <button className="button" type="submit">登录</button>
           </form>
-
-          <p className="hint">本地初始账号：admin / admin123</p>
         </div>
 
         <footer className="auth-foot">
