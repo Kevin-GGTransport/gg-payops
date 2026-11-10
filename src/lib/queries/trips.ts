@@ -143,3 +143,21 @@ export async function driverPeriodTrips(period: Period, driverId: string) {
     ORDER BY t.trip_date, t.created_at
   `;
 }
+
+/**
+ * Wage totals keyed by period start (Sat~Fri) across all history —
+ * small dataset, powers the period picker's per-period wage column.
+ */
+export async function periodPayTotals() {
+  const rows = await prisma.$queryRaw<Array<{ period_start: string; legs: number; pay: string }>>`
+    SELECT (t.trip_date - ((extract(dow from t.trip_date) + 1) % 7) * interval '1 day')::date::text
+             AS period_start,
+           count(*)::int AS legs,
+           COALESCE(SUM(t.pay_amount), 0)::text AS pay
+    FROM pay.trips t
+    GROUP BY 1
+  `;
+  return Object.fromEntries(
+    rows.map(r => [r.period_start, { legs: r.legs, pay: Number(r.pay) }] as const)
+  );
+}
