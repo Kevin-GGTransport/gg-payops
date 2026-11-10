@@ -450,6 +450,21 @@ td.num {
   @apply border-t-[1.5px] border-t-navy bg-transparent font-bold;
   border-bottom: 3px double var(--color-navy);
 }
+/* 每日小计行：上方细单线（明细钻取） */
+.matrix-sub td {
+  @apply border-t border-line font-semibold text-muted-foreground;
+}
+/* 选中行：route 蓝左标线（钻取焦点） */
+.roster .row-pick td {
+  box-shadow: inset 3px 0 0 var(--color-route);
+}
+/* 面板右上关闭链接 */
+.panel-cap .panel-x {
+  @apply text-base font-bold leading-none text-muted-foreground no-underline;
+}
+.panel-cap .panel-x:hover {
+  @apply text-foreground;
+}
 
 /* ==========================================================================
    仪表读数带（工作台签名元素）

@@ -88,6 +88,7 @@ export type PayrollMatrixRow = {
   bobtail_count: number;
   leg_count: number;
   total_miles: string;
+  total_pay: string;
 };
 
 /** Payroll: driver x operation matrix for the period (includes active drivers without trips) */
@@ -101,7 +102,8 @@ export async function payrollMatrix(period: Period) {
            count(*) FILTER (WHERE t.operation = 'EMPTY')::int AS empty_count,
            count(*) FILTER (WHERE t.operation = 'BOBTAIL')::int AS bobtail_count,
            count(t.id)::int AS leg_count,
-           COALESCE(SUM(t.miles), 0)::text AS total_miles
+           COALESCE(SUM(t.miles), 0)::text AS total_miles,
+           COALESCE(SUM(t.pay_amount), 0)::text AS total_pay
     FROM ops.drivers d
     LEFT JOIN pay.trips t
       ON t.driver_id = d.id
@@ -110,5 +112,34 @@ export async function payrollMatrix(period: Period) {
     WHERE d.status = 'ACTIVE'
     GROUP BY d.id, d.driver_code, d.full_name, d.driver_type
     ORDER BY d.driver_code
+  `;
+}
+
+export type DriverPeriodTripRow = {
+  id: string;
+  trip_date: string;
+  operation: OperationType;
+  load_no: string;
+  from_code: string | null;
+  to_code: string | null;
+  miles: string;
+  pay_amount: string;
+};
+
+/** Payroll drill-down: every leg of one driver inside the period, oldest first */
+export async function driverPeriodTrips(period: Period, driverId: string) {
+  return prisma.$queryRaw<DriverPeriodTripRow[]>`
+    SELECT t.id::text,
+           to_char(t.trip_date, 'YYYY-MM-DD') AS trip_date,
+           t.operation::text AS operation, t.load_no,
+           f.code AS from_code, o.code AS to_code,
+           t.miles::text, t.pay_amount::text
+    FROM pay.trips t
+    LEFT JOIN ops.locations f ON f.id = t.from_location_id
+    LEFT JOIN ops.locations o ON o.id = t.to_location_id
+    WHERE t.driver_id = ${driverId}::bigint
+      AND t.trip_date >= ${period.start}::date
+      AND t.trip_date <= ${period.end}::date
+    ORDER BY t.trip_date, t.created_at
   `;
 }
