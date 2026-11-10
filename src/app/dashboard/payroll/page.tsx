@@ -3,10 +3,11 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel, LedgerEmpty } from "@/components/ledger";
 import { DriverTypeBadge, OperationBadge } from "@/components/badges";
-import { PeriodRuler } from "@/components/period-ruler";
+import { CleanForm } from "@/components/clean-form";
+import { AutoSubmitDate } from "@/components/auto-submit";
 import { requireUser } from "@/lib/auth";
 import { firstValue, type SearchParams } from "@/lib/search-params";
-import { dateIso, miles as fmtMiles, money } from "@/lib/format";
+import { miles as fmtMiles, money } from "@/lib/format";
 import { currentPeriod, periodLabel, periodOf, shiftPeriod, type Period } from "@/lib/period";
 import {
   payrollMatrix,
@@ -18,6 +19,9 @@ import {
 export const metadata: Metadata = { title: "工资管理 · G&G PayOps" };
 
 const DOW = ["日", "一", "二", "三", "四", "五", "六"];
+
+const arrowClass =
+  "grid h-9.5 w-8 shrink-0 place-items-center rounded-md border border-line bg-card font-mono text-base text-route no-underline transition-colors hover:border-route hover:bg-muted/40";
 
 function dowOf(iso: string) {
   return DOW[new Date(`${iso}T00:00:00Z`).getUTCDay()];
@@ -60,9 +64,9 @@ export default async function PayrollPage({
   const sp = await searchParams;
 
   const period = periodFromParam(firstValue(sp.period));
+  const thisWeek = currentPeriod();
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
-  const today = dateIso(new Date());
   const navHref = (p: Period) => `/dashboard/payroll?period=${p.start}`;
 
   const rows = await payrollMatrix(period);
@@ -103,7 +107,25 @@ export default async function PayrollPage({
         }
       />
 
-      <PeriodRuler period={period} prevHref={navHref(prev)} nextHref={navHref(next)} todayIso={today} />
+      <CleanForm className="trip-filter" action="/dashboard/payroll" method="get">
+        <div className="flex items-center gap-2">
+          <Link href={navHref(prev)} aria-label="上一周期" className={arrowClass}>‹</Link>
+          <AutoSubmitDate
+            type="date"
+            className="filter-select"
+            name="period"
+            defaultValue={period.start}
+            aria-label="核算周期（选周期内任一天）"
+          />
+          <Link href={navHref(next)} aria-label="下一周期" className={arrowClass}>›</Link>
+        </div>
+        <div className="filter-actions">
+          <span className="font-mono text-xs tabular-nums text-muted-foreground">
+            {periodLabel(period)} · 周六 ~ 周五
+          </span>
+          {period.start !== thisWeek.start && <Link href="/dashboard/payroll">回到本周</Link>}
+        </div>
+      </CleanForm>
 
       <section className="gauge" aria-label="本周期读数">
         <header className="gauge-head">

@@ -33,15 +33,3 @@ export function periodLabel(period: Period): string {
   const fmt = (iso: string) => iso.slice(5).replace("-", "/");
   return `${fmt(period.start)} ~ ${fmt(period.end)}`;
 }
-
-/** 周期标尺的 7 天刻度 */
-export function periodDays(period: Period, todayIso: string) {
-  const DOW = ["日", "一", "二", "三", "四", "五", "六"];
-  const start = new Date(`${period.start}T00:00:00Z`);
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(start);
-    d.setUTCDate(start.getUTCDate() + i);
-    const iso = dateIso(d);
-    return { iso, day: iso.slice(8), dow: DOW[d.getUTCDay()], isToday: iso === todayIso };
-  });
-}
