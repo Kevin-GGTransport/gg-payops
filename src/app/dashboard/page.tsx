@@ -1,99 +1,99 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
-import { LedgerPanel, LedgerEmpty } from "@/components/ledger";
-import { DriverTypeBadge, OperationBadge } from "@/components/badges";
+import { FormError } from "@/components/form-fields";
 import { requireUser } from "@/lib/auth";
-import { miles as fmtMiles } from "@/lib/format";
-import { currentPeriod, periodLabel } from "@/lib/period";
-import { listTrips, periodGauge } from "@/lib/queries/trips";
-import { driverTypeCounts } from "@/lib/queries/drivers";
+import { todayIso } from "@/lib/format";
+import { firstValue, type SearchParams } from "@/lib/search-params";
+import { activeDriverOptions } from "@/lib/queries/drivers";
+import { activeLocationOptions } from "@/lib/queries/locations";
+import { TripEntryForm, type RefillRow } from "./trip-entry-form";
 
-export const metadata: Metadata = { title: "工作台 · G&G PayOps" };
+export const metadata: Metadata = { title: "录入行程 · G&G PayOps" };
 
-export default async function DashboardPage() {
+const ERROR_MESSAGES: Record<string, string> = {
+  missing_driver: "请选择司机 / 车主。",
+  missing_date: "请填写行程日期。",
+  no_rows: "请至少录入一段行程。",
+  missing_operation: "请选择操作类型。",
+  missing_load: "带柜操作（DEL / LIVE）需填写 Load#。",
+  missing_route: "请至少选择起点或终点。",
+  bad_miles: "里程必须是不小于 0 的数字。",
+  bad_pay: "本趟工资必须是不小于 0 的数字。",
+  bad_location: "所选位置无效，请重新选择。",
+  dup_trip: "这一天相同操作、相同起终点的行程已存在，请勿重复录入。"
+};
+
+export default async function EntryPage({
+  searchParams
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
   await requireUser();
+  const sp = await searchParams;
 
-  const period = currentPeriod();
-  const [gauge, trips, counts] = await Promise.all([
-    periodGauge(period),
-    listTrips({ dateFrom: period.start, dateTo: period.end, page: 1, pageSize: 20 }),
-    driverTypeCounts()
-  ]);
-  const weekMiles = Number(gauge.total_miles);
+  const errorCode = firstValue(sp.error);
+  const legParam = Number.parseInt(firstValue(sp.leg) ?? "", 10);
+  const leg = Number.isFinite(legParam) && legParam >= 1 ? legParam : undefined;
+  const saved = Number.parseInt(firstValue(sp.saved) ?? "", 10);
+  const savedCount = Number.isFinite(saved) && saved >= 1 ? saved : undefined;
+
+  // Refill rows after a failed submit: f_row_count tells how many rows to
+  // rebuild; each row restores its own f_<i>_<field> values
+  const refillCount = Number.parseInt(firstValue(sp.f_row_count) ?? "", 10);
+  const refillRows: RefillRow[] | undefined =
+    Number.isFinite(refillCount) && refillCount >= 1
+      ? Array.from({ length: refillCount }, (_, i) => ({
+          operation: firstValue(sp[`f_${i}_operation`]) ?? "",
+          from: firstValue(sp[`f_${i}_from_location`]) ?? "",
+          to: firstValue(sp[`f_${i}_to_location`]) ?? "",
+          load_no: firstValue(sp[`f_${i}_load_no`]) ?? "",
+          miles: firstValue(sp[`f_${i}_miles`]) ?? "",
+          pay_amount: firstValue(sp[`f_${i}_pay_amount`]) ?? "",
+          notes: firstValue(sp[`f_${i}_notes`]) ?? ""
+        }))
+      : undefined;
+
+  const [drivers, locations] = await Promise.all([activeDriverOptions(), activeLocationOptions()]);
+
+  const errorMessage = errorCode
+    ? errorCode in ERROR_MESSAGES
+      ? leg
+        ? `第 ${leg} 程：${ERROR_MESSAGES[errorCode]}`
+        : ERROR_MESSAGES[errorCode]
+      : "录入出错，请检查后重试。"
+    : undefined;
+
+  const driverParam = firstValue(sp.driver) ?? firstValue(sp.f_driver_id) ?? "";
+  const preselectedDriver = drivers.some(d => d.id === driverParam) ? driverParam : "";
+  const refillDriver = firstValue(sp.f_driver_id) ?? "";
+  const refillDate = firstValue(sp.f_trip_date) ?? todayIso();
 
   return (
     <>
       <PageHeader
-        title="工作台"
-        description="核算周期内的人员与行程总览。工资核算将在下一阶段自动进行。"
+        title="录入行程"
+        description="选择司机与日期，一天可连录多段行程；起点 / 终点可从位置库选择，也可直接输入地址或邮编。"
       />
 
-      <section className="gauge" aria-label="本周期读数">
-        <header className="gauge-head">
-          <span className="gauge-title">本周期读数</span>
-          <span className="gauge-range">{periodLabel(period)} · 周六 ~ 周五</span>
-        </header>
-        <div className="gauge-ticks" aria-hidden="true" />
-        <div className="gauge-grid">
-          <div className="gauge-cell">
-            <span className="gauge-label">在册人员</span>
-            <strong className="gauge-value">{counts.total}<em>人</em></strong>
-            <span className="gauge-sub">司机 {counts.driver} · 车主 {counts.owner}</span>
-          </div>
-          <div className="gauge-cell">
-            <span className="gauge-label">出勤司机</span>
-            <strong className="gauge-value">{gauge.active_drivers}<em>人</em></strong>
-            <span className="gauge-sub">本周期有行程记录</span>
-          </div>
-          <div className="gauge-cell">
-            <span className="gauge-label">行程</span>
-            <strong className="gauge-value">{gauge.legs}<em>段</em></strong>
-            <span className="gauge-sub">按操作类型逐段记录</span>
-          </div>
-          <div className="gauge-cell gauge-hot">
-            <span className="gauge-label">里程</span>
-            <strong className="gauge-value">{fmtMiles(weekMiles)}<em>mi</em></strong>
-            <span className="gauge-sub">周期累计 · 计薪依据</span>
-          </div>
-        </div>
-      </section>
+      {savedCount !== undefined && (
+        <p role="status" className="notice">
+          已记入 {savedCount} 段行程。前往 <Link href="/dashboard/trips">行程管理</Link> 查看与核对。
+        </p>
+      )}
+      <FormError message={errorMessage} />
 
-      <section aria-label="本周期行程">
-        <LedgerPanel label={<>本周期行程<b>最近 {Math.min(trips.length, 20)} 段</b></>}>
-          <table className="roster">
-            <thead>
-              <tr>
-                <th>日期</th><th>司机 / 车主</th><th>操作</th><th>起点 → 终点</th><th className="num">Miles</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trips.length === 0 && (
-                <LedgerEmpty colSpan={5}>本周期还没有行程。到「行程管理」页开始记录。</LedgerEmpty>
-              )}
-              {trips.slice(0, 20).map(trip => (
-                <tr key={trip.id}>
-                  <td className="mono">{trip.trip_date}</td>
-                  <td>
-                    <span className="strong">{trip.driver_name}</span>
-                    <span className="muted-inline">{trip.driver_code}</span>
-                    <DriverTypeBadge type={trip.driver_type} />
-                  </td>
-                  <td><OperationBadge operation={trip.operation} /></td>
-                  <td className="mono">
-                    {trip.from_code ?? "—"} <span className="route-arrow">→</span> {trip.to_code ?? "—"}
-                  </td>
-                  <td className="num">{fmtMiles(trip.miles)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </LedgerPanel>
-      </section>
+      <TripEntryForm
+        drivers={drivers}
+        locations={locations}
+        defaultDriverId={refillDriver || preselectedDriver}
+        defaultDate={refillDate}
+        refillRows={refillRows}
+      />
 
       <p className="notice">
-        下一步：周期结束后按位置基准金额与操作类型自动核算工资。
-        前往 <Link href="/dashboard/trips">行程管理</Link>。
+        里程由 Google 地图自动测算，工资按定价规则自动计算，均可手动修改。录入完成后可到{" "}
+        <Link href="/dashboard/trips">行程管理</Link> 筛选核对，周期工资在 <Link href="/dashboard/payroll">工资管理</Link> 汇总。
       </p>
     </>
   );

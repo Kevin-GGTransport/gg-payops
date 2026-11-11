@@ -44,6 +44,12 @@ type ComboboxFieldProps = {
   onValueChange?: (value: string) => void;
   /** Auto-submit the enclosing form after picking (GET filters); empty values stay out of the URL */
   autoSubmit?: boolean;
+  /** Track the search query; creatable pickers offer the raw text as an option */
+  onQueryChange?: (query: string) => void;
+  /** Creatable pattern: an option derived from the current search text, offered after the groups */
+  customOption?: (text: string) => ComboboxOption;
+  /** Display label for a value that is not among `options` (free-text creatable picks) */
+  labelForValue?: (value: string) => string | undefined;
   className?: string;
   triggerClassName?: string;
   "aria-label"?: string;
@@ -77,16 +83,25 @@ export function ComboboxField({
   mono = false,
   autoSubmit = false,
   onValueChange,
+  onQueryChange,
+  customOption,
+  labelForValue,
   className,
   triggerClassName,
   ...rest
 }: ComboboxFieldProps) {
   const [open, setOpen] = React.useState(false);
   const [value, setValue] = React.useState(defaultValue);
+  const [query, setQuery] = React.useState("");
   const rootRef = React.useRef<HTMLDivElement>(null);
   const submitAfterPick = React.useRef(false);
-  const selected = options.find(o => o.value === value) ?? null;
+  const unlistedLabel = value && labelForValue ? labelForValue(value) : undefined;
+  const selected: ComboboxOption | null =
+    options.find(o => o.value === value) ??
+    (unlistedLabel !== undefined ? { value, label: unlistedLabel } : null);
   const groups = React.useMemo(() => toGroups(options), [options]);
+  const typed = query.trim();
+  const custom = customOption && typed ? customOption(typed) : null;
 
   function pick(next: string) {
     setValue(next);
@@ -136,7 +151,15 @@ export function ComboboxField({
         </PopoverTrigger>
         <PopoverContent className="min-w-56 w-(--radix-popover-trigger-width) p-0" align="start">
           <Command>
-            {searchable && <CommandInput placeholder={searchPlaceholder} />}
+            {searchable && (
+              <CommandInput
+                placeholder={searchPlaceholder}
+                onValueChange={q => {
+                  setQuery(q);
+                  onQueryChange?.(q);
+                }}
+              />
+            )}
             <CommandList>
               <CommandEmpty>没有匹配的选项。</CommandEmpty>
               {clearable && (
@@ -168,6 +191,30 @@ export function ComboboxField({
                   ))}
                 </CommandGroup>
               ))}
+              {custom && (
+                // forceMount: cmdk only refreshes group visibility on search
+                // change or item mount - not when a mounted item's value changes,
+                // which is exactly the creatable case (value tracks the query)
+                <CommandGroup heading="手动输入" forceMount>
+                  <CommandItem
+                    forceMount
+                    value={typed}
+                    onSelect={() => pick(custom.value)}
+                  >
+                    <CheckIcon className={cn(value === custom.value ? "opacity-100" : "opacity-0")} />
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className={cn("text-[13px] leading-tight", mono && "font-mono font-semibold")}>
+                        {custom.label}
+                      </span>
+                      {custom.description && (
+                        <span className="truncate text-[11px] font-normal leading-tight text-muted-foreground">
+                          {custom.description}
+                        </span>
+                      )}
+                    </span>
+                  </CommandItem>
+                </CommandGroup>
+              )}
             </CommandList>
           </Command>
         </PopoverContent>

@@ -7,7 +7,7 @@ export default function NotFound() {
         <p className="nf-code" aria-hidden="true">404</p>
         <h1 className="nf-title">单页缺失</h1>
         <p className="nf-desc">这一页不存在，或已被移动到其他章节。</p>
-        <Link className="button nf-back" href="/dashboard">返回工作台</Link>
+        <Link className="button nf-back" href="/dashboard">返回录入行程</Link>
       </section>
     </main>
   );

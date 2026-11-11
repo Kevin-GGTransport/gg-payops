@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     [`核算周期 ${periodLabel(period)}（${period.start} ~ ${period.end}）`],
     [],
     [
-      "工号", "姓名", "类型", "出勤天数",
+      "车号", "姓名", "类型", "出勤天数",
       "DEL", "LIVE", "EMPTY", "BOBTAIL",
       "总段数", "总里程(mi)", "本期工资($)"
     ],

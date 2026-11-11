@@ -1,12 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ModalShell } from "@/components/modal-shell";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel, LedgerEmpty } from "@/components/ledger";
 import { DriverTypeBadge, OperationBadge } from "@/components/badges";
-import { FormGrid, DateField, TextareaField, TextField, SubmitButton, FormError } from "@/components/form-fields";
 import { ComboboxField } from "@/components/combobox-field";
-import { TripLegFields } from "./trip-leg-fields";
 import { SelectAll } from "@/components/select-all";
 import { AutoSubmitDate } from "@/components/auto-submit";
 import { FilterSelect } from "@/components/filter-select";
@@ -15,25 +12,14 @@ import { ConfirmButton } from "@/components/confirm-button";
 import { CleanForm } from "@/components/clean-form";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { allValues, firstValue, formField, type SearchParams } from "@/lib/search-params";
-import { todayIso, miles as fmtMiles, money } from "@/lib/format";
+import { allValues, firstValue, type SearchParams } from "@/lib/search-params";
+import { miles as fmtMiles, money } from "@/lib/format";
 import { OPERATION_META, type OperationType } from "@/lib/labels";
 import { listTrips } from "@/lib/queries/trips";
 import { activeDriverOptions } from "@/lib/queries/drivers";
-import { activeLocationOptions } from "@/lib/queries/locations";
-import { addTrip, deleteTrip } from "./actions";
+import { deleteTrip } from "./actions";
 
 export const metadata: Metadata = { title: "行程管理 · G&G PayOps" };
-
-const ERROR_MESSAGES: Record<string, string> = {
-  missing_driver: "请选择司机 / 车主。",
-  missing_date: "请填写行程日期。",
-  missing_operation: "请选择操作类型。",
-  missing_load: "请填写 Load#。",
-  bad_miles: "里程必须是不小于 0 的数字。",
-  bad_pay: "本趟工资必须是不小于 0 的数字。",
-  dup_trip: "这一天相同操作、相同起终点的行程已存在，请勿重复录入。"
-};
 
 const PAGE_SIZE = 20;
 
@@ -67,9 +53,6 @@ export default async function TripsPage({
   await requireUser();
   const sp = await searchParams;
 
-  const errorCode = firstValue(sp.error);
-  const isAdd = firstValue(sp.add) === "1";
-  const today = todayIso();
   const q = (firstValue(sp.q) ?? "").trim();
   const dateFrom = dateParam(firstValue(sp.from));
   const dateTo = dateParam(firstValue(sp.to));
@@ -82,7 +65,7 @@ export default async function TripsPage({
   const selectedIds = allValues(sp.driver).filter(id => /^\d+$/.test(id));
   const hasFilter = selectedIds.length > 0 || Boolean(operation) || Boolean(q) || Boolean(dateFrom) || Boolean(dateTo);
 
-  const [drivers, trips, locations] = await Promise.all([
+  const [drivers, trips] = await Promise.all([
     activeDriverOptions(),
     listTrips({
       ...(selectedIds.length > 0 ? { driverIds: selectedIds } : {}),
@@ -92,8 +75,7 @@ export default async function TripsPage({
       ...(dateTo ? { dateTo } : {}),
       page,
       pageSize: PAGE_SIZE
-    }),
-    activeLocationOptions()
+    })
   ]);
   const total = trips[0]?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -117,17 +99,15 @@ export default async function TripsPage({
   }
 
   const resetHref = "/dashboard/trips";
-  const pageQuery = queryWith({ page }).toString();
-  const addHref = `/dashboard/trips?${pageQuery ? `${pageQuery}&` : ""}add=1`;
-
-  const defaultOperation = (formField(sp, "operation", "DEL") as OperationType) ?? "DEL";
+  // Trip entry lives on the home page now; keep the current driver filter preselected
+  const entryHref = `/dashboard${selectedIds[0] ? `?driver=${selectedIds[0]}` : ""}`;
 
   return (
     <>
       <PageHeader
         title="行程管理"
         description="行程按日期逐段登记：操作、起点、终点、里程。可按司机、操作类型与日期区间筛选核对。"
-        actions={<Link className="button button-dark" href={addHref}>录入行程</Link>}
+        actions={<Link className="button button-dark" href={entryHref}>录入行程</Link>}
       />
 
       <CleanForm className="trip-filter" action="/dashboard/trips" method="get">
@@ -137,7 +117,7 @@ export default async function TripsPage({
               type="search"
               name="q"
               defaultValue={q}
-              placeholder="搜索司机、工号或地点代码"
+              placeholder="搜索司机、车号或地点代码"
               aria-label="搜索行程"
             />
             <button type="submit">搜索</button>
@@ -196,8 +176,8 @@ export default async function TripsPage({
               {trips.length === 0 && (
                 <LedgerEmpty colSpan={10}>
                   {hasFilter
-                    ? "没有符合条件的行程。调整筛选条件，或点右上角「录入行程」。"
-                    : "还没有行程。点右上角「录入行程」开始记录。"}
+                    ? "没有符合条件的行程。调整筛选条件，或点右上角「录入行程」前往首页录入。"
+                    : "还没有行程。点右上角「录入行程」前往首页开始记录。"}
                 </LedgerEmpty>
               )}
               {trips.map(leg => (
@@ -267,41 +247,6 @@ export default async function TripsPage({
           )}
         </div>
       </section>
-
-      <ModalShell
-        open={isAdd || Boolean(errorCode)}
-        closeHref={`/dashboard/trips?${queryWith({ page })}`}
-        title="录入行程"
-      >
-        <form action={addTrip} aria-label="录入行程">
-          <FormError message={errorCode ? ERROR_MESSAGES[errorCode] : undefined} />
-          <FormGrid>
-            <DateField label="日期" name="trip_date" required defaultValue={formField(sp, "trip_date", today)} />
-            <TextField
-              label="Load#"
-              name="load_no"
-              required
-              placeholder="如 TGHU1234567"
-              defaultValue={formField(sp, "load_no")}
-              maxLength={64}
-            />
-          </FormGrid>
-          <FormGrid>
-            <TripLegFields
-              drivers={drivers}
-              locations={locations}
-              defaultDriverId={formField(sp, "driver_id", selectedIds[0] ?? "")}
-              defaultOperation={defaultOperation}
-              defaultFromId={formField(sp, "from_location_id")}
-              defaultToId={formField(sp, "to_location_id")}
-              defaultMiles={formField(sp, "miles", "0")}
-              defaultPay={formField(sp, "pay_amount")}
-            />
-            <TextareaField label="备注" name="notes" placeholder="选填" defaultValue={formField(sp, "notes")} />
-          </FormGrid>
-          <SubmitButton>记入行程</SubmitButton>
-        </form>
-      </ModalShell>
     </>
   );
 }

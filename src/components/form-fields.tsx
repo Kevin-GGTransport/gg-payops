@@ -70,8 +70,8 @@ export function TextareaField({ label, name, placeholder, defaultValue, rows = 2
   );
 }
 
-export function FormGrid({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-2 gap-x-2.5 gap-y-3 px-4 pt-3.5 max-md:grid-cols-1">{children}</div>;
+export function FormGrid({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn("grid grid-cols-2 gap-x-2.5 gap-y-3 px-4 pt-3.5 max-md:grid-cols-1", className)}>{children}</div>;
 }
 
 export function SubmitButton({ children }: { children: ReactNode }) {

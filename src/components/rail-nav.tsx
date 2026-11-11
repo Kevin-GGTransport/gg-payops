@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const items = [
-  { href: "/dashboard", label: "工作台", exact: true },
+  { href: "/dashboard", label: "录入行程", exact: true },
   { href: "/dashboard/drivers", label: "司机管理", exact: false },
   { href: "/dashboard/locations", label: "位置管理", exact: false },
   { href: "/dashboard/trips", label: "行程管理", exact: false },
