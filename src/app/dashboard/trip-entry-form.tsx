@@ -150,15 +150,15 @@ function EntryRow({
       : manual
         ? "手动输入"
         : phase === "failed"
-          ? "未能测算，请手动填写"
+          ? "未能测算，请手填"
           : phase === "auto"
             ? "已测算，可修改"
-            : "选好两端后自动测算";
+            : "选两端后自动测算";
 
   return (
     <tr>
-      <td className="mono text-center text-muted-foreground">{index + 1}</td>
-      <td className="w-44 min-w-40">
+      <td className="mono px-1.5 text-center text-muted-foreground">{index + 1}</td>
+      <td className="w-36 px-1.5">
         <LocationPicker
           name={`${prefix}from_location`}
           locations={locations}
@@ -170,7 +170,7 @@ function EntryRow({
           onValueChange={setFromValue}
         />
       </td>
-      <td className="w-44 min-w-40">
+      <td className="w-36 px-1.5">
         <LocationPicker
           name={`${prefix}to_location`}
           locations={locations}
@@ -182,7 +182,7 @@ function EntryRow({
           onValueChange={setToValue}
         />
       </td>
-      <td className="w-36 min-w-32">
+      <td className="w-24 px-1.5">
         <ComboboxField
           name={`${prefix}operation`}
           defaultValue={defaults?.operation || "DEL"}
@@ -191,12 +191,14 @@ function EntryRow({
           aria-label={`第 ${index + 1} 程操作`}
           triggerClassName="h-8 justify-start px-2 font-normal"
           onValueChange={setOperation}
-          options={(Object.entries(OPERATION_META) as Array<[OperationType, (typeof OPERATION_META)[OperationType]]>).map(
-            ([key, meta]) => ({ value: key, label: meta.label, description: meta.desc })
-          )}
+          // Code-only labels keep the trigger narrow in the table row
+          options={(Object.keys(OPERATION_META) as OperationType[]).map(key => ({
+            value: key,
+            label: key
+          }))}
         />
       </td>
-      <td className="w-32 min-w-28">
+      <td className="w-28 px-1.5">
         <Input
           name={`${prefix}load_no`}
           defaultValue={defaults?.load_no || ""}
@@ -206,7 +208,7 @@ function EntryRow({
           className={`${cellInput} font-mono font-semibold`}
         />
       </td>
-      <td className="w-24 min-w-24">
+      <td className="w-24 px-1.5">
         <Input
           type="number"
           name={`${prefix}miles`}
@@ -222,7 +224,7 @@ function EntryRow({
         />
         <span className={`${cellHint} text-right ${phase === "failed" ? "text-destructive" : ""}`}>{milesHint}</span>
       </td>
-      <td className="w-28 min-w-28">
+      <td className="w-26 px-1.5">
         <Input
           type="number"
           name={`${prefix}pay_amount`}
@@ -246,7 +248,7 @@ function EntryRow({
           )}
         </span>
       </td>
-      <td>
+      <td className="px-1.5">
         <Input
           name={`${prefix}notes`}
           defaultValue={defaults?.notes || ""}
@@ -255,7 +257,7 @@ function EntryRow({
           className={cellInput}
         />
       </td>
-      <td className="actions">
+      <td className="actions w-12 px-1.5">
         {removable && (
           <button type="button" className="linklike danger" onClick={onRemove}>
             删除
@@ -324,13 +326,15 @@ export function TripEntryForm({
           <table className="roster">
             <thead>
               <tr>
-                <th className="w-8">#</th>
-                <th>起点</th><th>终点</th><th>操作</th>
-                <th>Load#</th>
-                <th className="num">里程 (mi)</th>
-                <th className="num">本趟工资 ($)</th>
-                <th>备注</th>
-                <th>操作</th>
+                <th className="w-8 px-1.5 text-center">#</th>
+                <th className="w-36 px-1.5">起点</th>
+                <th className="w-36 px-1.5">终点</th>
+                <th className="w-24 px-1.5">操作</th>
+                <th className="w-28 px-1.5">Load#</th>
+                <th className="num w-24 px-1.5">里程 (mi)</th>
+                <th className="num w-26 px-1.5">本趟工资 ($)</th>
+                <th className="px-1.5">备注</th>
+                <th className="w-12 px-1.5">删除</th>
               </tr>
             </thead>
             <tbody>
