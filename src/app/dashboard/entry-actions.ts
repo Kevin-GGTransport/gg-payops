@@ -15,6 +15,7 @@ const MAX_ROWS = 50;
 const CODE_MAX = 16;
 
 type ParsedRow = {
+  tripDate: string;
   operation: string;
   loadNo: string;
   from: string;
@@ -26,6 +27,10 @@ type ParsedRow = {
 
 function str(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
+}
+
+function isIsoDate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(value).toString() !== "Invalid Date";
 }
 
 /** Redirect back to the entry page with the error code, the failing row number and every row's input refilled */
@@ -43,7 +48,7 @@ function backWithError(
   if (tripDate) params.set("f_trip_date", tripDate);
   params.set("f_row_count", String(rowCount));
   for (let i = 0; i < rowCount; i++) {
-    for (const field of ["operation", "load_no", "from_location", "to_location", "miles", "pay_amount", "notes"]) {
+    for (const field of ["trip_date", "operation", "load_no", "from_location", "to_location", "miles", "pay_amount", "notes"]) {
       const value = str(formData, `row_${i}_${field}`);
       if (value) params.set(`f_${i}_${field}`, value);
     }
@@ -103,6 +108,8 @@ export async function addTripsBatch(formData: FormData) {
   const rows: ParsedRow[] = [];
   for (let i = 0; i < rowCount; i++) {
     rows.push({
+      // Per-row date (photo imports span a week); falls back to the page date
+      tripDate: str(formData, `row_${i}_trip_date`) || tripDate,
       operation: str(formData, `row_${i}_operation`),
       loadNo: str(formData, `row_${i}_load_no`),
       from: str(formData, `row_${i}_from_location`),
@@ -116,6 +123,7 @@ export async function addTripsBatch(formData: FormData) {
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const leg = i + 1;
+    if (!isIsoDate(row.tripDate)) backWithError("bad_date", formData, rowCount, leg);
     if (!OPERATIONS.includes(row.operation as (typeof OPERATIONS)[number])) {
       backWithError("missing_operation", formData, rowCount, leg);
     }
@@ -139,26 +147,41 @@ export async function addTripsBatch(formData: FormData) {
     endpointIds.set(value, id);
   }
 
-  // Duplicate guard: one DB read for this driver+date, compared in memory
-  // against both existing rows and the rows within this batch
+  // Duplicate guard: one DB read covering every date in this batch, compared
+  // in memory (per row's own date) against both existing rows and this batch
+  const batchDates = [...new Set(rows.map(r => r.tripDate))];
   const existing = await prisma.$queryRaw<
-    Array<{ operation: string; from_location_id: string | null; to_location_id: string | null }>
+    Array<{
+      trip_date: string;
+      operation: string;
+      from_location_id: string | null;
+      to_location_id: string | null;
+      load_no: string | null;
+    }>
   >`
-    SELECT operation::text AS operation, from_location_id::text AS from_location_id, to_location_id::text AS to_location_id
+    SELECT trip_date::text AS trip_date, operation::text AS operation,
+           from_location_id::text AS from_location_id, to_location_id::text AS to_location_id,
+           nullif(load_no, '') AS load_no
     FROM pay.trips
-    WHERE driver_id = ${driverId}::bigint AND trip_date = ${tripDate}::date
+    WHERE driver_id = ${driverId}::bigint
+      AND trip_date IN (${Prisma.join(batchDates.map(d => Prisma.sql`${d}::date`))})
   `;
   const seen = new Set(
-    existing.map(r => `${r.operation}|${r.from_location_id ?? ""}|${r.to_location_id ?? ""}`)
+    existing.map(
+      r => `${r.trip_date}|${r.operation}|${r.from_location_id ?? ""}|${r.to_location_id ?? ""}|${r.load_no ?? ""}`
+    )
   );
 
   const insertRows = rows.map((row, idx) => {
     const fromId = endpointIds.get(row.from) ?? "";
     const toId = endpointIds.get(row.to) ?? "";
-    const key = `${row.operation}|${fromId}|${toId}`;
+    // Same day + operation + route counts as a duplicate only when the
+    // container matches too - sheets legitimately log two runs per route
+    const key = `${row.tripDate}|${row.operation}|${fromId}|${toId}|${row.loadNo}`;
     if (seen.has(key)) backWithError("dup_trip", formData, rowCount, idx + 1);
     seen.add(key);
     return {
+      tripDate: row.tripDate,
       fromId,
       toId,
       operation: row.operation,
@@ -170,7 +193,7 @@ export async function addTripsBatch(formData: FormData) {
   });
 
   const values = insertRows.map(r => Prisma.sql`
-    (${driverId}::bigint, ${tripDate}::date, ${r.operation}::ops.operation_type, ${r.loadNo},
+    (${driverId}::bigint, ${r.tripDate}::date, ${r.operation}::ops.operation_type, ${r.loadNo},
      ${r.fromId || null}::bigint, ${r.toId || null}::bigint, ${r.milesNum}, ${r.payNum}, ${r.notes})
   `);
   await prisma.$executeRaw`

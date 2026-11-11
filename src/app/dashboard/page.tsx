@@ -15,13 +15,14 @@ const ERROR_MESSAGES: Record<string, string> = {
   missing_driver: "请选择司机 / 车主。",
   missing_date: "请填写行程日期。",
   no_rows: "请至少录入一段行程。",
+  bad_date: "行程日期无效，请检查该行的日期。",
   missing_operation: "请选择操作类型。",
   missing_load: "带柜操作（DEL / LIVE）需填写 Load#。",
   missing_route: "请至少选择起点或终点。",
   bad_miles: "里程必须是不小于 0 的数字。",
   bad_pay: "本趟工资必须是不小于 0 的数字。",
   bad_location: "所选位置无效，请重新选择。",
-  dup_trip: "这一天相同操作、相同起终点的行程已存在，请勿重复录入。"
+  dup_trip: "这一天相同操作、相同起终点、相同柜号的行程已存在，请勿重复录入。"
 };
 
 export default async function EntryPage({
@@ -44,6 +45,7 @@ export default async function EntryPage({
   const refillRows: RefillRow[] | undefined =
     Number.isFinite(refillCount) && refillCount >= 1
       ? Array.from({ length: refillCount }, (_, i) => ({
+          trip_date: firstValue(sp[`f_${i}_trip_date`]) ?? "",
           operation: firstValue(sp[`f_${i}_operation`]) ?? "",
           from: firstValue(sp[`f_${i}_from_location`]) ?? "",
           to: firstValue(sp[`f_${i}_to_location`]) ?? "",

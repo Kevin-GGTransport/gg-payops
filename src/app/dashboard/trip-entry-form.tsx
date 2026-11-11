@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { PlusIcon } from "lucide-react";
+import { CameraIcon, PlusIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ComboboxField } from "@/components/combobox-field";
@@ -16,6 +16,7 @@ import {
   type OperationType
 } from "@/lib/labels";
 import { addTripsBatch } from "./entry-actions";
+import { PhotoImport, type PhotoApply } from "./photo-import";
 
 type DriverOption = {
   id: string;
@@ -24,8 +25,9 @@ type DriverOption = {
   driver_type: DriverType;
 };
 
-/** One row's refilled input after a failed submit (?f_<i>_* params) */
+/** One row's initial values (photo import or failed-submit refill) */
 export type RefillRow = {
+  trip_date?: string;
   operation: string;
   from: string;
   to: string;
@@ -53,14 +55,15 @@ const cellHint = "block text-[10px] leading-tight font-normal text-muted-foregro
 type CalcStatus = "loading" | "auto" | "failed";
 
 /**
- * One entry row: from/to pickers (creatable), operation, Load#, auto-measured
- * miles and rule-priced wage (both hand-editable; the wage sticks once edited,
- * miles re-measures on every endpoint re-pick - same semantics as the old
- * single-trip form). State lives per row instance; field names are positional
+ * One entry row: per-row date, from/to pickers (creatable), operation, Load#,
+ * auto-measured miles and rule-priced wage (both hand-editable; the wage
+ * sticks once edited, miles re-measures on every endpoint re-pick). State
+ * lives per row instance keyed by stable id; field names are positional
  * (row_<index>_) so deleting a middle row only shifts names, never values.
  */
 function EntryRow({
   index,
+  defaultDate,
   driverType,
   locations,
   defaults,
@@ -69,6 +72,7 @@ function EntryRow({
   onPayChange
 }: {
   index: number;
+  defaultDate: string;
   driverType: DriverType | undefined;
   locations: LocationOption[];
   defaults?: RefillRow;
@@ -157,8 +161,16 @@ function EntryRow({
 
   return (
     <tr>
-      <td className="mono px-1.5 text-center text-muted-foreground">{index + 1}</td>
-      <td className="w-36 px-1.5">
+      <td className="w-28 px-1.5">
+        <Input
+          type="date"
+          name={`${prefix}trip_date`}
+          defaultValue={defaults?.trip_date || defaultDate}
+          aria-label={`第 ${index + 1} 程日期`}
+          className={`${cellInput} font-mono`}
+        />
+      </td>
+      <td className="w-32 px-1.5">
         <LocationPicker
           name={`${prefix}from_location`}
           locations={locations}
@@ -170,7 +182,7 @@ function EntryRow({
           onValueChange={setFromValue}
         />
       </td>
-      <td className="w-36 px-1.5">
+      <td className="w-32 px-1.5">
         <LocationPicker
           name={`${prefix}to_location`}
           locations={locations}
@@ -182,7 +194,7 @@ function EntryRow({
           onValueChange={setToValue}
         />
       </td>
-      <td className="w-24 px-1.5">
+      <td className="w-22 px-1.5">
         <ComboboxField
           name={`${prefix}operation`}
           defaultValue={defaults?.operation || "DEL"}
@@ -198,7 +210,7 @@ function EntryRow({
           }))}
         />
       </td>
-      <td className="w-28 px-1.5">
+      <td className="w-26 px-1.5">
         <Input
           name={`${prefix}load_no`}
           defaultValue={defaults?.load_no || ""}
@@ -208,7 +220,7 @@ function EntryRow({
           className={`${cellInput} font-mono font-semibold`}
         />
       </td>
-      <td className="w-24 px-1.5">
+      <td className="w-22 px-1.5">
         <Input
           type="number"
           name={`${prefix}miles`}
@@ -257,7 +269,7 @@ function EntryRow({
           className={cellInput}
         />
       </td>
-      <td className="actions w-12 px-1.5">
+      <td className="actions w-11 px-1.5">
         {removable && (
           <button type="button" className="linklike danger" onClick={onRemove}>
             删除
@@ -268,10 +280,13 @@ function EntryRow({
   );
 }
 
+/** A row slot: stable id (React key, never reused) plus its one-shot defaults */
+type RowSlot = { id: number; defaults?: RefillRow };
+
 /**
  * Full trip-entry form: shared driver + date on top, then a spreadsheet-like
- * row table (one date can carry many legs). Submits everything to
- * addTripsBatch in one atomic multi-row INSERT.
+ * row table where each row carries its own date (photo imports span a week).
+ * Submits everything to addTripsBatch in one atomic multi-row INSERT.
  */
 export function TripEntryForm({
   drivers,
@@ -280,28 +295,82 @@ export function TripEntryForm({
   defaultDate,
   refillRows
 }: TripEntryFormProps) {
-  const initialCount = refillRows?.length || INITIAL_ROWS;
-  const [rows, setRows] = React.useState<number[]>(() =>
-    Array.from({ length: initialCount }, (_, i) => i + 1)
-  );
+  const [photoOpen, setPhotoOpen] = React.useState(false);
+  const initialSlots: RowSlot[] = refillRows
+    ? refillRows.map((row, i) => ({ id: i + 1, defaults: row }))
+    : Array.from({ length: INITIAL_ROWS }, (_, i) => ({ id: i + 1 }));
+  const [rows, setRows] = React.useState<RowSlot[]>(initialSlots);
   // Stable row keys: never reused within a session even after deletions
-  const [nextId, setNextId] = React.useState(initialCount + 1);
+  const [nextId, setNextId] = React.useState(initialSlots.length + 1);
   const [driverId, setDriverId] = React.useState(defaultDriverId);
   // Row id -> current pay value, for the footer total
   const [pays, setPays] = React.useState<Record<number, string>>({});
+  // Whether the user has typed anything (guards photo-import replacement)
+  const dirtyRef = React.useRef(false);
 
+  const effectiveDate = defaultDate || todayIso();
   const driverType = drivers.find(d => d.id === driverId)?.driver_type;
   const totalPay = Object.values(pays).reduce((acc, v) => acc + (Number(v) || 0), 0);
 
+  /** Drop one recognized photo sheet into the table (replaces current rows) */
+  function applyFromPhoto(apply: PhotoApply) {
+    if (
+      dirtyRef.current &&
+      !window.confirm(`当前录入表已有内容，将替换为照片识别的 ${apply.rows.length} 行行程。确定替换？`)
+    ) {
+      return;
+    }
+    const start = nextId;
+    setRows(
+      apply.rows.map((row, i) => ({
+        id: start + i,
+        defaults: {
+          trip_date: row.date,
+          operation: row.operation,
+          from: row.from,
+          to: row.to,
+          load_no: row.load_no,
+          miles: "0",
+          pay_amount: "",
+          notes: row.notes
+        }
+      }))
+    );
+    setNextId(start + apply.rows.length);
+    setDriverId(apply.driverId);
+    setPays({});
+    dirtyRef.current = false;
+  }
+
   return (
-    <form action={addTripsBatch} aria-label="录入行程">
+    <form
+      action={addTripsBatch}
+      aria-label="录入行程"
+      onChange={e => {
+        // Photo-panel events bubble too (it lives inside the form); those
+        // don't make the entry rows dirty
+        if (!(e.target as HTMLElement).closest("[data-photo-panel]")) dirtyRef.current = true;
+      }}
+    >
       <div className="panel">
-        <div className="panel-cap">选择司机与日期，一天可连录多段行程</div>
-        <FormGrid className="pb-3.5">
+        <div className="panel-cap">
+          <span>选择司机与日期，一天可连录多段行程</span>
+          <button type="button" className="linklike" onClick={() => setPhotoOpen(v => !v)}>
+            <CameraIcon className="mr-1 inline size-3.5" />
+            {photoOpen ? "收起照片识别" : "照片识别"}
+          </button>
+        </div>
+
+        {photoOpen && <PhotoImport drivers={drivers} locations={locations} onApply={applyFromPhoto} />}
+
+        <FormGrid className="pt-3.5">
           <ComboboxField
             label="司机 / 车主"
             name="driver_id"
-            defaultValue={defaultDriverId}
+            // key: remount on programmatic driver change (photo import) so the
+            // hidden input follows - ComboboxField state is initialized once
+            key={driverId}
+            defaultValue={driverId}
             placeholder="请选择司机"
             searchPlaceholder="搜索车号或姓名"
             mono
@@ -315,10 +384,10 @@ export function TripEntryForm({
             }))}
           />
           <DateField
-            label="日期"
+            label="日期（新行默认）"
             name="trip_date"
             required
-            defaultValue={defaultDate || todayIso()}
+            defaultValue={effectiveDate}
           />
         </FormGrid>
 
@@ -326,29 +395,34 @@ export function TripEntryForm({
           <table className="roster">
             <thead>
               <tr>
-                <th className="w-8 px-1.5 text-center">#</th>
-                <th className="w-36 px-1.5">起点</th>
-                <th className="w-36 px-1.5">终点</th>
-                <th className="w-24 px-1.5">操作</th>
-                <th className="w-28 px-1.5">Load#</th>
-                <th className="num w-24 px-1.5">里程 (mi)</th>
+                <th className="w-28 px-1.5">日期</th>
+                <th className="w-32 px-1.5">起点</th>
+                <th className="w-32 px-1.5">终点</th>
+                <th className="w-22 px-1.5">操作</th>
+                <th className="w-26 px-1.5">Load#</th>
+                <th className="num w-22 px-1.5">里程 (mi)</th>
                 <th className="num w-26 px-1.5">本趟工资 ($)</th>
                 <th className="px-1.5">备注</th>
-                <th className="w-12 px-1.5">删除</th>
+                <th className="w-11 px-1.5">删除</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((rowId, i) => (
+              {rows.map((slot, i) => (
                 <EntryRow
-                  key={rowId}
+                  key={slot.id}
                   index={i}
+                  defaultDate={effectiveDate}
                   driverType={driverType}
                   locations={locations}
-                  defaults={refillRows?.[i]}
+                  defaults={slot.defaults}
                   removable={rows.length > 1}
-                  onRemove={() => setRows(current => current.filter(id => id !== rowId))}
+                  onRemove={() => setRows(current => current.filter(r => r.id !== slot.id))}
                   onPayChange={value =>
-                    setPays(current => ({ ...current, [rowId]: value }))
+                    setPays(current => {
+                      // Same value -> skip re-render churn from many rows
+                      if (current[slot.id] === value) return current;
+                      return { ...current, [slot.id]: value };
+                    })
                   }
                 />
               ))}
@@ -364,7 +438,7 @@ export function TripEntryForm({
               variant="outline"
               className="h-8"
               onClick={() => {
-                setRows(current => [...current, nextId]);
+                setRows(current => [...current, { id: nextId }]);
                 setNextId(id => id + 1);
               }}
             >
