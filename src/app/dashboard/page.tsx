@@ -7,13 +7,12 @@ import { todayIso } from "@/lib/format";
 import { firstValue, type SearchParams } from "@/lib/search-params";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeLocationOptions } from "@/lib/queries/locations";
-import { TripEntryForm, type RefillRow } from "./trip-entry-form";
+import { TripEntryForm, type RefillGroup } from "./trip-entry-form";
 
 export const metadata: Metadata = { title: "录入行程 · G&G PayOps" };
 
 const ERROR_MESSAGES: Record<string, string> = {
   missing_driver: "请选择司机 / 车主。",
-  missing_date: "请填写行程日期。",
   no_rows: "请至少录入一段行程。",
   bad_date: "行程日期无效，请检查该行的日期。",
   missing_operation: "请选择操作类型。",
@@ -34,48 +33,61 @@ export default async function EntryPage({
   const sp = await searchParams;
 
   const errorCode = firstValue(sp.error);
+  const grpParam = Number.parseInt(firstValue(sp.grp) ?? "", 10);
+  const grp = Number.isFinite(grpParam) && grpParam >= 1 ? grpParam : undefined;
   const legParam = Number.parseInt(firstValue(sp.leg) ?? "", 10);
   const leg = Number.isFinite(legParam) && legParam >= 1 ? legParam : undefined;
   const saved = Number.parseInt(firstValue(sp.saved) ?? "", 10);
   const savedCount = Number.isFinite(saved) && saved >= 1 ? saved : undefined;
 
-  // Refill rows after a failed submit: f_row_count tells how many rows to
-  // rebuild; each row restores its own f_<i>_<field> values
-  const refillCount = Number.parseInt(firstValue(sp.f_row_count) ?? "", 10);
-  const refillRows: RefillRow[] | undefined =
+  // Refill groups after a failed submit: f_group_count tells how many groups to
+  // rebuild; each group restores its driver, default date and its own rows
+  const refillCount = Number.parseInt(firstValue(sp.f_group_count) ?? "", 10);
+  const refillGroups: RefillGroup[] | undefined =
     Number.isFinite(refillCount) && refillCount >= 1
-      ? Array.from({ length: refillCount }, (_, i) => ({
-          trip_date: firstValue(sp[`f_${i}_trip_date`]) ?? "",
-          operation: firstValue(sp[`f_${i}_operation`]) ?? "",
-          from: firstValue(sp[`f_${i}_from_location`]) ?? "",
-          to: firstValue(sp[`f_${i}_to_location`]) ?? "",
-          load_no: firstValue(sp[`f_${i}_load_no`]) ?? "",
-          miles: firstValue(sp[`f_${i}_miles`]) ?? "",
-          pay_amount: firstValue(sp[`f_${i}_pay_amount`]) ?? "",
-          notes: firstValue(sp[`f_${i}_notes`]) ?? ""
-        }))
+      ? Array.from({ length: refillCount }, (_, g) => {
+          const rowCount = Number.parseInt(firstValue(sp[`f_g_${g}_row_count`]) ?? "", 10);
+          const rows =
+            Number.isFinite(rowCount) && rowCount >= 1
+              ? Array.from({ length: rowCount }, (_, i) => ({
+                  trip_date: firstValue(sp[`f_g_${g}_row_${i}_trip_date`]) ?? "",
+                  operation: firstValue(sp[`f_g_${g}_row_${i}_operation`]) ?? "",
+                  from: firstValue(sp[`f_g_${g}_row_${i}_from_location`]) ?? "",
+                  to: firstValue(sp[`f_g_${g}_row_${i}_to_location`]) ?? "",
+                  load_no: firstValue(sp[`f_g_${g}_row_${i}_load_no`]) ?? "",
+                  miles: firstValue(sp[`f_g_${g}_row_${i}_miles`]) ?? "",
+                  pay_amount: firstValue(sp[`f_g_${g}_row_${i}_pay_amount`]) ?? "",
+                  notes: firstValue(sp[`f_g_${g}_row_${i}_notes`]) ?? ""
+                }))
+              : [];
+          return {
+            driverId: firstValue(sp[`f_g_${g}_driver_id`]) ?? "",
+            date: firstValue(sp[`f_g_${g}_trip_date`]) ?? "",
+            rows
+          };
+        })
       : undefined;
 
   const [drivers, locations] = await Promise.all([activeDriverOptions(), activeLocationOptions()]);
 
   const errorMessage = errorCode
     ? errorCode in ERROR_MESSAGES
-      ? leg
-        ? `第 ${leg} 程：${ERROR_MESSAGES[errorCode]}`
-        : ERROR_MESSAGES[errorCode]
+      ? grp && leg
+        ? `第 ${grp} 组第 ${leg} 程：${ERROR_MESSAGES[errorCode]}`
+        : grp
+          ? `第 ${grp} 组：${ERROR_MESSAGES[errorCode]}`
+          : ERROR_MESSAGES[errorCode]
       : "录入出错，请检查后重试。"
     : undefined;
 
-  const driverParam = firstValue(sp.driver) ?? firstValue(sp.f_driver_id) ?? "";
+  const driverParam = firstValue(sp.driver) ?? "";
   const preselectedDriver = drivers.some(d => d.id === driverParam) ? driverParam : "";
-  const refillDriver = firstValue(sp.f_driver_id) ?? "";
-  const refillDate = firstValue(sp.f_trip_date) ?? todayIso();
 
   return (
     <>
       <PageHeader
         title="录入行程"
-        description="选择司机与日期，一天可连录多段行程；起点 / 终点可从位置库选择，也可直接输入地址或邮编。"
+        description="按司机分组录入：每组一位司机，每行可单独改日期；起点 / 终点可从位置库选择，也可直接输入地址或邮编。"
       />
 
       {savedCount !== undefined && (
@@ -88,9 +100,9 @@ export default async function EntryPage({
       <TripEntryForm
         drivers={drivers}
         locations={locations}
-        defaultDriverId={refillDriver || preselectedDriver}
-        defaultDate={refillDate}
-        refillRows={refillRows}
+        defaultDriverId={preselectedDriver}
+        defaultDate={todayIso()}
+        refillGroups={refillGroups}
       />
 
       <p className="notice">

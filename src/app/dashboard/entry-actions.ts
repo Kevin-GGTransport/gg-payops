@@ -9,7 +9,9 @@ import { requireUser } from "@/lib/auth";
 const OPERATIONS = ["DEL", "EMPTY", "BOBTAIL", "LIVE"] as const;
 /** Operations hauling a container: Load# required; BOBTAIL / EMPTY may leave it blank */
 const LOAD_REQUIRED = new Set<string>(["DEL", "LIVE"]);
-const MAX_ROWS = 50;
+const MAX_GROUPS = 20;
+const MAX_ROWS_PER_GROUP = 50;
+const MAX_ROWS_TOTAL = 200;
 
 /** Location codes are short (varchar(16)); free text is uppercased and capped for the code column */
 const CODE_MAX = 16;
@@ -25,32 +27,52 @@ type ParsedRow = {
   notes: string;
 };
 
+type ParsedGroup = {
+  driverId: string;
+  /** Group-level default date; each row may still carry its own */
+  tripDate: string;
+  rows: ParsedRow[];
+};
+
 function str(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
+}
+
+function clampCount(value: string, max: number) {
+  const n = Number.parseInt(value, 10);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(n, max);
 }
 
 function isIsoDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(value).toString() !== "Invalid Date";
 }
 
-/** Redirect back to the entry page with the error code, the failing row number and every row's input refilled */
+/**
+ * Redirect back to the entry page with the error code, the failing group / row
+ * number, and every group's input refilled.
+ */
 function backWithError(
   error: string,
   formData: FormData,
-  rowCount: number,
+  groups: ParsedGroup[],
+  grp?: number,
   leg?: number
 ): never {
   const params = new URLSearchParams({ error });
+  if (grp !== undefined) params.set("grp", String(grp));
   if (leg !== undefined) params.set("leg", String(leg));
-  const driverId = str(formData, "driver_id");
-  if (driverId) params.set("f_driver_id", driverId);
-  const tripDate = str(formData, "trip_date");
-  if (tripDate) params.set("f_trip_date", tripDate);
-  params.set("f_row_count", String(rowCount));
-  for (let i = 0; i < rowCount; i++) {
-    for (const field of ["trip_date", "operation", "load_no", "from_location", "to_location", "miles", "pay_amount", "notes"]) {
-      const value = str(formData, `row_${i}_${field}`);
-      if (value) params.set(`f_${i}_${field}`, value);
+  params.set("f_group_count", String(groups.length));
+  for (let g = 0; g < groups.length; g++) {
+    const group = groups[g];
+    if (group.driverId) params.set(`f_g_${g}_driver_id`, group.driverId);
+    if (group.tripDate) params.set(`f_g_${g}_trip_date`, group.tripDate);
+    params.set(`f_g_${g}_row_count`, String(group.rows.length));
+    for (let i = 0; i < group.rows.length; i++) {
+      for (const field of ["trip_date", "operation", "load_no", "from_location", "to_location", "miles", "pay_amount", "notes"]) {
+        const value = str(formData, `g_${g}_row_${i}_${field}`);
+        if (value) params.set(`f_g_${g}_row_${i}_${field}`, value);
+      }
     }
   }
   redirect(`/dashboard?${params.toString()}`);
@@ -97,61 +119,79 @@ async function resolveEndpointId(value: string): Promise<string> {
 export async function addTripsBatch(formData: FormData) {
   await requireUser();
 
-  const driverId = str(formData, "driver_id");
-  const tripDate = str(formData, "trip_date");
-  const rowCount = Math.min(Math.max(Number.parseInt(str(formData, "row_count"), 10) || 0, 0), MAX_ROWS);
+  const groupCount = clampCount(str(formData, "group_count"), MAX_GROUPS);
+  if (groupCount === 0) backWithError("no_rows", formData, []);
 
-  if (!driverId) backWithError("missing_driver", formData, rowCount);
-  if (!tripDate) backWithError("missing_date", formData, rowCount);
-  if (rowCount === 0) backWithError("no_rows", formData, rowCount);
-
-  const rows: ParsedRow[] = [];
-  for (let i = 0; i < rowCount; i++) {
-    rows.push({
-      // Per-row date (photo imports span a week); falls back to the page date
-      tripDate: str(formData, `row_${i}_trip_date`) || tripDate,
-      operation: str(formData, `row_${i}_operation`),
-      loadNo: str(formData, `row_${i}_load_no`),
-      from: str(formData, `row_${i}_from_location`),
-      to: str(formData, `row_${i}_to_location`),
-      milesValue: str(formData, `row_${i}_miles`) || "0",
-      payValue: str(formData, `row_${i}_pay_amount`) || "0",
-      notes: str(formData, `row_${i}_notes`) || ""
-    });
+  const groups: ParsedGroup[] = [];
+  let total = 0;
+  for (let g = 0; g < groupCount; g++) {
+    const groupDate = str(formData, `g_${g}_trip_date`);
+    const rowCount = Math.min(
+      clampCount(str(formData, `g_${g}_row_count`), MAX_ROWS_PER_GROUP),
+      MAX_ROWS_TOTAL - total
+    );
+    const rows: ParsedRow[] = [];
+    for (let i = 0; i < rowCount; i++) {
+      rows.push({
+        // Per-row date first (a sheet spans many days); falls back to the group default
+        tripDate: str(formData, `g_${g}_row_${i}_trip_date`) || groupDate,
+        operation: str(formData, `g_${g}_row_${i}_operation`),
+        loadNo: str(formData, `g_${g}_row_${i}_load_no`),
+        from: str(formData, `g_${g}_row_${i}_from_location`),
+        to: str(formData, `g_${g}_row_${i}_to_location`),
+        milesValue: str(formData, `g_${g}_row_${i}_miles`) || "0",
+        payValue: str(formData, `g_${g}_row_${i}_pay_amount`) || "0",
+        notes: str(formData, `g_${g}_row_${i}_notes`) || ""
+      });
+    }
+    total += rows.length;
+    groups.push({ driverId: str(formData, `g_${g}_driver_id`), tripDate: groupDate, rows });
   }
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const leg = i + 1;
-    if (!isIsoDate(row.tripDate)) backWithError("bad_date", formData, rowCount, leg);
-    if (!OPERATIONS.includes(row.operation as (typeof OPERATIONS)[number])) {
-      backWithError("missing_operation", formData, rowCount, leg);
+  if (total === 0) backWithError("no_rows", formData, groups);
+
+  for (let g = 0; g < groups.length; g++) {
+    const group = groups[g];
+    const grp = g + 1;
+    if (!group.driverId) backWithError("missing_driver", formData, groups, grp);
+    for (let i = 0; i < group.rows.length; i++) {
+      const row = group.rows[i];
+      const leg = i + 1;
+      if (!isIsoDate(row.tripDate)) backWithError("bad_date", formData, groups, grp, leg);
+      if (!OPERATIONS.includes(row.operation as (typeof OPERATIONS)[number])) {
+        backWithError("missing_operation", formData, groups, grp, leg);
+      }
+      if (!row.loadNo && LOAD_REQUIRED.has(row.operation)) {
+        backWithError("missing_load", formData, groups, grp, leg);
+      }
+      const milesNum = Number(row.milesValue);
+      if (!Number.isFinite(milesNum) || milesNum < 0) backWithError("bad_miles", formData, groups, grp, leg);
+      // Wage snapshot: trust the submitted amount (auto-calculated client-side or
+      // hand-edited); no server-side recompute so manual overrides stick
+      const payNum = Number(row.payValue);
+      if (!Number.isFinite(payNum) || payNum < 0) backWithError("bad_pay", formData, groups, grp, leg);
+      if (!row.from && !row.to) backWithError("missing_route", formData, groups, grp, leg);
     }
-    if (!row.loadNo && LOAD_REQUIRED.has(row.operation)) {
-      backWithError("missing_load", formData, rowCount, leg);
-    }
-    const milesNum = Number(row.milesValue);
-    if (!Number.isFinite(milesNum) || milesNum < 0) backWithError("bad_miles", formData, rowCount, leg);
-    // Wage snapshot: trust the submitted amount (auto-calculated client-side or
-    // hand-edited); no server-side recompute so manual overrides stick
-    const payNum = Number(row.payValue);
-    if (!Number.isFinite(payNum) || payNum < 0) backWithError("bad_pay", formData, rowCount, leg);
-    if (!row.from && !row.to) backWithError("missing_route", formData, rowCount, leg);
   }
 
   // Resolve every distinct endpoint once (free text may create a new location)
   const endpointIds = new Map<string, string>();
-  for (const value of [...new Set(rows.flatMap(r => [r.from, r.to]).filter(Boolean))]) {
+  for (const value of [
+    ...new Set(groups.flatMap(g => g.rows.flatMap(r => [r.from, r.to])).filter(Boolean))
+  ]) {
     const id = await resolveEndpointId(value);
-    if (!id) backWithError("bad_location", formData, rowCount);
+    if (!id) backWithError("bad_location", formData, groups);
     endpointIds.set(value, id);
   }
 
-  // Duplicate guard: one DB read covering every date in this batch, compared
-  // in memory (per row's own date) against both existing rows and this batch
-  const batchDates = [...new Set(rows.map(r => r.tripDate))];
+  // Duplicate guard: one DB read covering every driver and every date in this
+  // batch, compared in memory (per row's own driver and date) against both
+  // existing rows and this batch
+  const driverIds = [...new Set(groups.map(g => g.driverId))];
+  const batchDates = [...new Set(groups.flatMap(g => g.rows.map(r => r.tripDate)))];
   const existing = await prisma.$queryRaw<
     Array<{
+      driver_id: string;
       trip_date: string;
       operation: string;
       from_location_id: string | null;
@@ -159,41 +199,45 @@ export async function addTripsBatch(formData: FormData) {
       load_no: string | null;
     }>
   >`
-    SELECT trip_date::text AS trip_date, operation::text AS operation,
+    SELECT driver_id::text AS driver_id, trip_date::text AS trip_date, operation::text AS operation,
            from_location_id::text AS from_location_id, to_location_id::text AS to_location_id,
            nullif(load_no, '') AS load_no
     FROM pay.trips
-    WHERE driver_id = ${driverId}::bigint
+    WHERE driver_id IN (${Prisma.join(driverIds.map(id => Prisma.sql`${id}::bigint`))})
       AND trip_date IN (${Prisma.join(batchDates.map(d => Prisma.sql`${d}::date`))})
   `;
   const seen = new Set(
     existing.map(
-      r => `${r.trip_date}|${r.operation}|${r.from_location_id ?? ""}|${r.to_location_id ?? ""}|${r.load_no ?? ""}`
+      r =>
+        `${r.driver_id}|${r.trip_date}|${r.operation}|${r.from_location_id ?? ""}|${r.to_location_id ?? ""}|${r.load_no ?? ""}`
     )
   );
 
-  const insertRows = rows.map((row, idx) => {
-    const fromId = endpointIds.get(row.from) ?? "";
-    const toId = endpointIds.get(row.to) ?? "";
-    // Same day + operation + route counts as a duplicate only when the
-    // container matches too - sheets legitimately log two runs per route
-    const key = `${row.tripDate}|${row.operation}|${fromId}|${toId}|${row.loadNo}`;
-    if (seen.has(key)) backWithError("dup_trip", formData, rowCount, idx + 1);
-    seen.add(key);
-    return {
-      tripDate: row.tripDate,
-      fromId,
-      toId,
-      operation: row.operation,
-      loadNo: row.loadNo,
-      milesNum: Number(row.milesValue),
-      payNum: Math.round(Number(row.payValue) * 100) / 100,
-      notes: row.notes || null
-    };
-  });
+  const insertRows = groups.flatMap((group, gi) =>
+    group.rows.map((row, ri) => {
+      const fromId = endpointIds.get(row.from) ?? "";
+      const toId = endpointIds.get(row.to) ?? "";
+      // Same driver + day + operation + route counts as a duplicate only when
+      // the container matches too - sheets legitimately log two runs per route
+      const key = `${group.driverId}|${row.tripDate}|${row.operation}|${fromId}|${toId}|${row.loadNo}`;
+      if (seen.has(key)) backWithError("dup_trip", formData, groups, gi + 1, ri + 1);
+      seen.add(key);
+      return {
+        driverId: group.driverId,
+        tripDate: row.tripDate,
+        fromId,
+        toId,
+        operation: row.operation,
+        loadNo: row.loadNo,
+        milesNum: Number(row.milesValue),
+        payNum: Math.round(Number(row.payValue) * 100) / 100,
+        notes: row.notes || null
+      };
+    })
+  );
 
   const values = insertRows.map(r => Prisma.sql`
-    (${driverId}::bigint, ${r.tripDate}::date, ${r.operation}::ops.operation_type, ${r.loadNo},
+    (${r.driverId}::bigint, ${r.tripDate}::date, ${r.operation}::ops.operation_type, ${r.loadNo},
      ${r.fromId || null}::bigint, ${r.toId || null}::bigint, ${r.milesNum}, ${r.payNum}, ${r.notes})
   `);
   await prisma.$executeRaw`
@@ -205,6 +249,6 @@ export async function addTripsBatch(formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/trips");
   revalidatePath("/dashboard/payroll");
-  // Keep the driver preselected so the clerk can continue with the next date
-  redirect(`/dashboard?saved=${insertRows.length}&driver=${driverId}`);
+  // Keep the first driver preselected so the clerk can continue with their next date
+  redirect(`/dashboard?saved=${insertRows.length}&driver=${groups[0].driverId}`);
 }

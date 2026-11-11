@@ -469,6 +469,30 @@ td.num {
 .roster .row-pick td {
   box-shadow: inset 3px 0 0 var(--color-route);
 }
+/* 录入表：colgroup 固定布局，表头右缘可拖拽调列宽 */
+th.col-th {
+  @apply relative;
+}
+.col-resizer {
+  @apply absolute inset-y-0 right-0 z-10 w-1.5 cursor-col-resize touch-none select-none;
+}
+.col-resizer::after {
+  content: "";
+  @apply absolute inset-y-1 right-0.5 w-px bg-transparent;
+}
+.col-resizer:hover::after,
+.col-resizer:focus-visible::after,
+.col-resizer:active::after {
+  @apply bg-route;
+}
+/* 司机分组带：navy 顶线 + 浅底，在一张表内开启一个分组 */
+.roster .row-band > td {
+  @apply whitespace-normal border-t-[1.5px] border-t-navy bg-muted/50 px-2 py-2.5;
+}
+/* 首组紧跟表头（表头自带 2px 舱制蓝底线），不再重复画线 */
+.roster tbody:first-of-type .row-band > td {
+  @apply border-t-0;
+}
 /* 面板右上关闭链接 */
 .panel-cap .panel-x {
   @apply text-base font-bold leading-none text-muted-foreground no-underline;
