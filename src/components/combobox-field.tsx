@@ -40,6 +40,8 @@ type ComboboxFieldProps = {
   searchable?: boolean;
   /** Render labels in mono (code-like values: location codes, employee numbers) */
   mono?: boolean;
+  /** Two-line trigger: label prominent on top, description below (band-level picks like the driver) */
+  prominent?: boolean;
   /** Notified on every pick, including clearing (empty string) */
   onValueChange?: (value: string) => void;
   /** Auto-submit the enclosing form after picking (GET filters); empty values stay out of the URL */
@@ -81,6 +83,7 @@ export function ComboboxField({
   clearable = true,
   searchable = true,
   mono = false,
+  prominent = false,
   autoSubmit = false,
   onValueChange,
   onQueryChange,
@@ -133,16 +136,31 @@ export function ComboboxField({
             className={cn("h-9 w-full justify-between px-2.5 font-normal", triggerClassName)}
           >
             {selected ? (
-              <>
-                <span className={cn("text-[13px] leading-tight", mono && "font-mono font-semibold")}>
-                  {selected.label}
-                </span>
-                {selected.description && (
-                  <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">
-                    {selected.description}
+              prominent ? (
+                // Band-level pick: the code is the identity, give it size and
+                // keep the name readable (foreground/70) instead of muted gray
+                <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5 py-0.5 text-left">
+                  <span className={cn("text-sm leading-none font-semibold", mono && "font-mono")}>
+                    {selected.label}
                   </span>
-                )}
-              </>
+                  {selected.description && (
+                    <span className="max-w-full truncate text-xs leading-none font-normal text-foreground/70">
+                      {selected.description}
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <>
+                  <span className={cn("text-[13px] leading-tight", mono && "font-mono font-semibold")}>
+                    {selected.label}
+                  </span>
+                  {selected.description && (
+                    <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">
+                      {selected.description}
+                    </span>
+                  )}
+                </>
+              )
             ) : (
               <span className="text-muted-foreground">{placeholder}</span>
             )}

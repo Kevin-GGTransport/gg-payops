@@ -403,7 +403,7 @@ function GroupSection({
       <tr className="row-band">
         <td colSpan={COLUMNS.length + 1}>
           <div className="flex flex-wrap items-end gap-x-4 gap-y-2.5 px-2.5">
-            <span className="pb-1.5 text-[11px] font-semibold tracking-[0.06em] text-muted-foreground">
+            <span className="mb-0.5 rounded-[3px] border border-line bg-card px-1.5 py-0.5 font-mono text-[11px] font-semibold text-foreground">
               组 {index + 1}
             </span>
             <ComboboxField
@@ -413,9 +413,10 @@ function GroupSection({
               placeholder="请选择司机"
               searchPlaceholder="搜索车号或姓名"
               mono
+              prominent
               clearable={false}
               className="w-56"
-              triggerClassName="h-8"
+              triggerClassName="h-10"
               onValueChange={setDriverId}
               options={drivers.map(d => ({
                 value: d.id,
@@ -437,7 +438,8 @@ function GroupSection({
             </label>
             <div className="ml-auto flex items-center gap-3 pb-1.5 text-xs text-muted-foreground">
               <span>
-                本组 {rows.length} 段 · <b className="font-mono">{money(paySum)}</b>
+                本组 {rows.length} 段 ·{" "}
+                <b className="font-mono text-foreground">{money(paySum)}</b>
               </span>
               <button type="button" className="linklike" onClick={addRow}>
                 <PlusIcon className="mr-0.5 inline size-3.5" />
