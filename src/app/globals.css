@@ -414,8 +414,14 @@ td.num {
 .roster .row-off:hover {
   @apply bg-muted/30;
 }
-.roster .actions {
-  @apply flex items-center gap-2.5;
+/* The td itself must stay a table cell: display:flex on a td makes the
+   browser wrap it in an anonymous cell that drops out of the row's
+   height/vertical alignment. Lay the action items out inline instead. */
+.roster .actions > * {
+  @apply inline-block align-middle;
+}
+.roster .actions > * + * {
+  @apply ml-2.5;
 }
 .roster .actions a {
   @apply font-semibold text-route no-underline;

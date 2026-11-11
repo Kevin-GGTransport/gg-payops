@@ -3,6 +3,7 @@
 import * as React from "react";
 import { ImageIcon, LoaderIcon, UploadIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ComboboxField } from "@/components/combobox-field";
 import type { LocationOption } from "@/components/location-picker";
 import { DRIVER_TYPE_LABELS, type DriverType } from "@/lib/labels";
@@ -35,6 +36,9 @@ type PhotoState = {
 type PhotoImportProps = {
   drivers: DriverOption[];
   locations: LocationOption[];
+  /** Dialog open state lives in the entry form */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   /** Drop the converted rows into the entry table below */
   onApply: (apply: PhotoApply) => void;
 };
@@ -99,12 +103,14 @@ async function recognize(files: File[]) {
 }
 
 /**
- * Photo batch-import panel: pick/drop PU/DEL record photos, recognize them
+ * Photo batch-import dialog: pick PU/DEL record photos, recognize them
  * server-side, review per-sheet results, then drop the rows into the entry
- * table. Photos never persist - only their preview object URLs, revoked on
- * unmount.
+ * table. All state lives here and survives closing the dialog; the hidden
+ * file input is rendered outside the dialog so its FileList (the retry
+ * source) is not destroyed with the dialog content. Photos never persist -
+ * only their preview object URLs, revoked on unmount.
  */
-export function PhotoImport({ drivers, locations, onApply }: PhotoImportProps) {
+export function PhotoImport({ drivers, locations, open, onOpenChange, onApply }: PhotoImportProps) {
   const [photos, setPhotos] = React.useState<PhotoState[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [fatalError, setFatalError] = React.useState<string | null>(null);
@@ -224,53 +230,74 @@ export function PhotoImport({ drivers, locations, onApply }: PhotoImportProps) {
   const failedCount = photos.filter(p => p.status === "failed").length;
 
   return (
-    <div data-photo-panel className="grid gap-3 px-4 pt-3.5">
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          className="hidden"
-          onChange={e => {
-            if (e.target.files?.length) addFiles(Array.from(e.target.files));
-          }}
-        />
-        <Button type="button" variant="outline" className="h-8" disabled={busy} onClick={() => inputRef.current?.click()}>
-          <UploadIcon className="size-4" />
-          {busy ? "识别中…" : "选择照片（可多选）"}
-        </Button>
-        <span className="text-xs text-muted-foreground">
-          拍照的「海柜提卸货记录」单据，一次最多 21 张
-          {photos.length > 0 && ` · 已识别 ${doneCount}${failedCount ? ` · 失败 ${failedCount}` : ""}`}
-        </span>
-      </div>
+    <>
+      {/* Outside the dialog: keeps the picked FileList alive across dialog
+          close/reopen (single retry source) */}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={e => {
+          if (e.target.files?.length) addFiles(Array.from(e.target.files));
+        }}
+      />
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-3xl" data-photo-panel>
+          <DialogHeader>
+            <DialogTitle>照片识别导入</DialogTitle>
+            <p className="text-xs font-normal text-muted-foreground">
+              拍照的「海柜提卸货记录」单据，一次最多 21 张 · 识别后逐张填入录入表
+            </p>
+          </DialogHeader>
+          <div className="grid gap-3 px-5 py-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" variant="outline" className="h-8" disabled={busy} onClick={() => inputRef.current?.click()}>
+                <UploadIcon className="size-4" />
+                {busy ? "识别中…" : "选择照片（可多选）"}
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                {photos.length > 0
+                  ? `共 ${photos.length} 张 · 已识别 ${doneCount}${failedCount ? ` · 失败 ${failedCount}` : ""}`
+                  : "照片不会保存，仅用于识别"}
+              </span>
+            </div>
 
-      {fatalError && (
-        <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
-          {ERROR_MESSAGES[fatalError] ?? "识别失败，请重试。"}
-        </p>
-      )}
+            {fatalError && (
+              <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
+                {ERROR_MESSAGES[fatalError] ?? "识别失败，请重试。"}
+              </p>
+            )}
 
-      {photos.length > 0 && (
-        <ul className="grid gap-2">
-          {photos.map(photo => (
-            <PhotoCard
-              key={photo.id}
-              photo={photo}
-              drivers={drivers}
-              busy={busy}
-              onRetry={() => retry(photo)}
-              onRemove={() => removePhoto(photo)}
-              onPickDriver={driverId =>
-                setPhotos(current => current.map(p => (p.id === photo.id ? { ...p, pickedDriverId: driverId } : p)))
-              }
-              onApply={() => applySheet(photo)}
-            />
-          ))}
-        </ul>
-      )}
-    </div>
+            {photos.length > 0 ? (
+              <ul className="grid max-h-[62vh] gap-2 overflow-y-auto pr-1">
+                {photos.map(photo => (
+                  <PhotoCard
+                    key={photo.id}
+                    photo={photo}
+                    drivers={drivers}
+                    busy={busy}
+                    onRetry={() => retry(photo)}
+                    onRemove={() => removePhoto(photo)}
+                    onPickDriver={driverId =>
+                      setPhotos(current => current.map(p => (p.id === photo.id ? { ...p, pickedDriverId: driverId } : p)))
+                    }
+                    onApply={() => applySheet(photo)}
+                  />
+                ))}
+              </ul>
+            ) : (
+              !fatalError && (
+                <p className="rounded-md border border-dashed border-line px-3 py-8 text-center text-[13px] text-muted-foreground">
+                  尚未上传照片，点击上方按钮选择单据照片
+                </p>
+              )
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

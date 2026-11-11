@@ -340,6 +340,7 @@ export function TripEntryForm({
     setDriverId(apply.driverId);
     setPays({});
     dirtyRef.current = false;
+    setPhotoOpen(false);
   }
 
   return (
@@ -355,13 +356,19 @@ export function TripEntryForm({
       <div className="panel">
         <div className="panel-cap">
           <span>选择司机与日期，一天可连录多段行程</span>
-          <button type="button" className="linklike" onClick={() => setPhotoOpen(v => !v)}>
+          <button type="button" className="linklike" onClick={() => setPhotoOpen(true)}>
             <CameraIcon className="mr-1 inline size-3.5" />
-            {photoOpen ? "收起照片识别" : "照片识别"}
+            照片识别
           </button>
         </div>
 
-        {photoOpen && <PhotoImport drivers={drivers} locations={locations} onApply={applyFromPhoto} />}
+        <PhotoImport
+          drivers={drivers}
+          locations={locations}
+          open={photoOpen}
+          onOpenChange={setPhotoOpen}
+          onApply={applyFromPhoto}
+        />
 
         <FormGrid className="pt-3.5">
           <ComboboxField
