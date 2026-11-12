@@ -163,6 +163,10 @@ const EntryRow = React.memo(function EntryRow({
   const prefix = `g_${groupIndex}_row_${rowIndex}_`;
   const legLabel = `第 ${groupIndex + 1} 组第 ${rowIndex + 1} 程`;
   const [operation, setOperation] = React.useState(defaults?.operation || "DEL");
+  // EMPTY legs haul no load: the Load# cell clears and locks with the operation
+  const [loadNoValue, setLoadNoValue] = React.useState(
+    defaults?.operation === "EMPTY" ? "" : defaults?.load_no || ""
+  );
   const [fromValue, setFromValue] = React.useState(defaults?.from || "");
   const [toValue, setToValue] = React.useState(defaults?.to || "");
   // Whether the current from value came from carry-over, not the user's own
@@ -335,7 +339,10 @@ const EntryRow = React.memo(function EntryRow({
           searchable={false}
           aria-label={`${legLabel}操作`}
           triggerClassName="h-8 justify-start px-2 font-normal"
-          onValueChange={setOperation}
+          onValueChange={value => {
+            setOperation(value);
+            if (value === "EMPTY") setLoadNoValue("");
+          }}
           // Code-only labels keep the trigger narrow in the table row
           options={(Object.keys(OPERATION_META) as OperationType[]).map(key => ({
             value: key,
@@ -346,9 +353,11 @@ const EntryRow = React.memo(function EntryRow({
       <td className="px-1.5">
         <Input
           name={`${prefix}load_no`}
-          defaultValue={defaults?.load_no || ""}
+          value={loadNoValue}
+          onChange={e => setLoadNoValue(e.target.value)}
+          disabled={operation === "EMPTY"}
           maxLength={64}
-          placeholder="如 LD101"
+          placeholder={operation === "EMPTY" ? "空柜免填" : "如 LD101"}
           aria-label={`${legLabel}Load#`}
           className={`${cellInput} font-mono font-semibold`}
         />
