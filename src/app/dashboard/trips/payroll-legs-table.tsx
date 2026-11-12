@@ -3,9 +3,11 @@
 import { type ColumnDef } from "@tanstack/react-table";
 
 import { OperationBadge } from "@/components/badges";
+import { ConfirmButton } from "@/components/confirm-button";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { miles as fmtMiles, money } from "@/lib/format";
 import type { DriverPeriodTripRow } from "@/lib/queries/trips";
+import { deleteTrip } from "./actions";
 
 const DOW = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -24,11 +26,16 @@ type DayGroup = { date: string; legs: DriverPeriodTripRow[]; miles: number; pay:
 export function PayrollLegsTable({
   days,
   totalMiles,
-  totalPay
+  totalPay,
+  periodStart,
+  driverId
 }: {
   days: DayGroup[];
   totalMiles: string;
   totalPay: string;
+  /** Where the per-row delete redirects back to */
+  periodStart: string;
+  driverId: string;
 }) {
   const columns: ColumnDef<DayGroup, unknown>[] = [
     { id: "date", header: "日期", size: 110, enableResizing: false },
@@ -36,7 +43,8 @@ export function PayrollLegsTable({
     { id: "load", header: "Load#", size: 110 },
     { id: "route", header: "起点 → 终点", size: 220 },
     { id: "miles", header: "Miles", size: 80, meta: { headerClass: "num" } },
-    { id: "pay", header: "本趟工资", size: 104, meta: { headerClass: "num" } }
+    { id: "pay", header: "本趟工资", size: 104, meta: { headerClass: "num" } },
+    { id: "delete", header: "删除", size: 48, enableResizing: false, meta: { headerClass: "px-1.5" } }
   ];
 
   const table = useRosterTable({ data: [], columns, storageKey: "payops.payroll.legs.cols" });
@@ -65,10 +73,23 @@ export function PayrollLegsTable({
               </td>
               <td className="num">{fmtMiles(leg.miles)}</td>
               <td className="num">{money(leg.pay_amount)}</td>
+              <td className="actions px-1.5">
+                <form action={deleteTrip}>
+                  <input type="hidden" name="id" value={leg.id} />
+                  <input
+                    type="hidden"
+                    name="return_to"
+                    value={`view=period&period=${periodStart}&driver=${driverId}`}
+                  />
+                  <ConfirmButton type="submit" className="linklike danger" message="删除这条行程？">
+                    删除
+                  </ConfirmButton>
+                </form>
+              </td>
             </tr>
           )),
           <tr key={`sub-${day.date}`} className="matrix-sub">
-            <td colSpan={4}>
+            <td colSpan={5}>
               小计 · {day.date.slice(5).replace("-", "/")} 周{dowOf(day.date)}
             </td>
             <td className="num">{fmtMiles(day.miles)}</td>
@@ -77,7 +98,7 @@ export function PayrollLegsTable({
         ])}
         {days.length > 1 && (
           <tr className="matrix-total">
-            <td colSpan={4}>周合计 · {days.length} 天</td>
+            <td colSpan={5}>周合计 · {days.length} 天</td>
             <td className="num">{fmtMiles(totalMiles)}</td>
             <td className="num">{money(totalPay)}</td>
           </tr>

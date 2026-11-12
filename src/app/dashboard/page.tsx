@@ -3,7 +3,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { FormError } from "@/components/form-fields";
 import { requireUser } from "@/lib/auth";
-import { todayIso } from "@/lib/format";
+import { currentPeriod, periodOf } from "@/lib/period";
 import { firstValue, type SearchParams } from "@/lib/search-params";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeLocationOptions } from "@/lib/queries/locations";
@@ -47,6 +47,13 @@ export default async function EntryPage({
   const tabParam = Number.parseInt(firstValue(sp.tab) ?? "", 10);
   const initialActiveIndex =
     Number.isFinite(tabParam) && tabParam >= 0 ? tabParam : undefined;
+  // Sheet-cover period (a Saturday); defaults to this week
+  const periodRaw = firstValue(sp.period) ?? "";
+  const initialPeriodStart =
+    /^\d{4}-\d{2}-\d{2}$/.test(periodRaw) && new Date(periodRaw).toString() !== "Invalid Date"
+      ? periodOf(periodRaw).start
+      : currentPeriod().start;
+  const periodTripsHref = `/dashboard/trips?view=period&period=${initialPeriodStart}`;
 
   // Refill groups after a failed submit: f_group_count tells how many groups to
   // rebuild; each group restores its driver, default date and its own rows
@@ -105,7 +112,7 @@ export default async function EntryPage({
 
       {savedCount !== undefined && (
         <p role="status" className="notice">
-          已记入 {savedCount} 段行程。前往 <Link href="/dashboard/trips">行程管理</Link> 查看与核对。
+          已记入 {savedCount} 段行程。前往 <Link href={periodTripsHref}>行程与工资</Link> 查看与核对。
         </p>
       )}
       <FormError message={errorMessage} />
@@ -115,9 +122,9 @@ export default async function EntryPage({
         trucks={trucks}
         locations={locations}
         defaultDriverId={preselectedDriver}
-        defaultDate={todayIso()}
         refillGroups={refillGroups}
         initialActiveIndex={initialActiveIndex}
+        initialPeriodStart={initialPeriodStart}
       />
     </>
   );

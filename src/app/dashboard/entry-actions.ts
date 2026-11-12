@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
+import { periodOf } from "@/lib/period";
 
 const OPERATIONS = ["DEL", "EMPTY", "BOBTAIL", "LIVE"] as const;
 /** Operations hauling a container: Load# required; BOBTAIL / EMPTY may leave it blank */
@@ -363,9 +364,11 @@ export async function addTripsBatch(formData: FormData) {
   revalidatePath("/dashboard/trips");
   revalidatePath("/dashboard/payroll");
 
+  // Restore the submitted week's period so the sheet cover follows along
+  const periodParam = `&period=${periodOf(insertRows[0].tripDate).start}`;
   if (scope === null) {
     // Keep the first driver preselected so the clerk can continue with their next date
-    redirect(`/dashboard?saved=${insertRows.length}&driver=${groups[0].driverId}`);
+    redirect(`/dashboard?saved=${insertRows.length}&driver=${groups[0].driverId}${periodParam}`);
   }
 
   // Single-tab success: that tab's work is done. Refill the other tabs (they
@@ -378,5 +381,6 @@ export async function addTripsBatch(formData: FormData) {
   } else {
     params.set("driver", groups[scope].driverId);
   }
+  params.set("period", periodOf(insertRows[0].tripDate).start);
   redirect(`/dashboard?${params.toString()}`);
 }

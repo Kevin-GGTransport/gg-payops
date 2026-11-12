@@ -14,6 +14,13 @@ type PeriodPickerProps = {
   todayIso: string;
   /** Per-period wage totals keyed by period start ISO date */
   totals: Record<string, { legs: number; pay: number }>;
+  /**
+   * Pick mode, exactly one of:
+   *  - hrefBase: URL navigated to with &period=<start> appended (server pages)
+   *  - onPick:   in-place callback, no navigation (client pages, e.g. entry)
+   */
+  hrefBase?: string;
+  onPick?: (periodStart: string) => void;
 };
 
 // Saturday-first: every grid row is exactly one payroll period (Sat ~ Fri)
@@ -37,7 +44,7 @@ function payShort(pay: number) {
  * period; clicking any day jumps to that period. A trailing column shows the
  * period's wage total straight from the trips ledger.
  */
-export function PeriodPicker({ selectedStart, selectedLabel, todayIso, totals }: PeriodPickerProps) {
+export function PeriodPicker({ selectedStart, selectedLabel, todayIso, totals, hrefBase, onPick }: PeriodPickerProps) {
   const initial = selectedStart.split("-");
   const [cursor, setCursor] = React.useState({
     y: Number(initial[0]),
@@ -120,21 +127,34 @@ export function PeriodPicker({ selectedStart, selectedLabel, todayIso, totals }:
                 {isSelected && (
                   <i aria-hidden className="absolute inset-y-1 left-0 w-[3px] rounded-full bg-navy" />
                 )}
-                {week.days.map(day => (
-                  <Link
-                    key={day.iso}
-                    href={`/dashboard/payroll?period=${week.start}`}
-                    aria-label={`周期 ${week.start}`}
-                    className={cn(
-                      "grid h-8 place-items-center rounded-md font-mono text-sm tabular-nums no-underline hover:bg-muted",
-                      day.inMonth ? "text-foreground" : "text-muted-foreground/40",
-                      day.iso === todayIso && "bg-amber/15 font-bold text-amber",
-                      isSelected && "font-semibold"
-                    )}
-                  >
-                    {day.day}
-                  </Link>
-                ))}
+                {week.days.map(day => {
+                  const cell = cn(
+                    "grid h-8 place-items-center rounded-md font-mono text-sm tabular-nums no-underline hover:bg-muted",
+                    day.inMonth ? "text-foreground" : "text-muted-foreground/40",
+                    day.iso === todayIso && "bg-amber/15 font-bold text-amber",
+                    isSelected && "font-semibold"
+                  );
+                  return onPick ? (
+                    <button
+                      key={day.iso}
+                      type="button"
+                      onClick={() => onPick(week.start)}
+                      aria-label={`周期 ${week.start}`}
+                      className={cell}
+                    >
+                      {day.day}
+                    </button>
+                  ) : (
+                    <Link
+                      key={day.iso}
+                      href={`${hrefBase ?? "/dashboard/trips?view=period"}${(hrefBase ?? "").includes("?") ? "&" : "?"}period=${week.start}`}
+                      aria-label={`周期 ${week.start}`}
+                      className={cell}
+                    >
+                      {day.day}
+                    </Link>
+                  );
+                })}
                 <span
                   className={cn(
                     "pr-1.5 text-right font-mono text-[11px] tabular-nums",

@@ -8,8 +8,7 @@ const items = [
   { href: "/dashboard/drivers", label: "司机管理", exact: false },
   { href: "/dashboard/trucks", label: "车辆管理", exact: false },
   { href: "/dashboard/locations", label: "位置管理", exact: false },
-  { href: "/dashboard/trips", label: "行程管理", exact: false },
-  { href: "/dashboard/payroll", label: "工资管理", exact: false }
+  { href: "/dashboard/trips", label: "行程与工资", exact: false }
 ] as const;
 
 export function RailNav() {

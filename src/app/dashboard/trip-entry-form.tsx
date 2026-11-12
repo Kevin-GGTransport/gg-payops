@@ -6,11 +6,13 @@ import type { ColumnDef, Table as TanstackTable } from "@tanstack/react-table";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PeriodPicker } from "@/components/period-picker";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { ComboboxField } from "@/components/combobox-field";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
 import { calcTripWage } from "@/lib/wage";
 import { money, todayIso } from "@/lib/format";
+import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
 import {
   DRIVER_TYPE_LABELS,
   OPERATION_META,
@@ -59,11 +61,12 @@ type TripEntryFormProps = {
   trucks: TruckOption[];
   locations: LocationOption[];
   defaultDriverId?: string;
-  defaultDate?: string;
   /** Present when redirected back after a validation error */
   refillGroups?: RefillGroup[];
   /** Tab to open first (0-based group index, restored from redirect params) */
   initialActiveIndex?: number;
+  /** Pay-period start covering the sheet (a Saturday); defaults to this week */
+  initialPeriodStart?: string;
 };
 
 const INITIAL_ROWS = 10;
@@ -680,11 +683,24 @@ export function TripEntryForm({
   trucks,
   locations,
   defaultDriverId = "",
-  defaultDate,
   refillGroups,
-  initialActiveIndex
+  initialActiveIndex,
+  initialPeriodStart
 }: TripEntryFormProps) {
   const [photoOpen, setPhotoOpen] = React.useState(false);
+  // Sheet cover: the pay period this batch belongs to. It only steers the
+  // default date of new rows/groups - dates stay free per row.
+  const [periodStart, setPeriodStart] = React.useState(
+    initialPeriodStart && /^\d{4}-\d{2}-\d{2}$/.test(initialPeriodStart)
+      ? periodOf(initialPeriodStart).start
+      : currentPeriod().start
+  );
+  /** Today when it falls inside the picked period, else the period's first day */
+  const sheetDefaultDate = () => {
+    const today = todayIso();
+    const period = periodOf(periodStart);
+    return today >= period.start && today <= period.end ? today : period.start;
+  };
   // One columns-only instance shared by every tab's sheet (synced column widths)
   const sheetTable = useRosterTable({
     data: NO_ROWS,
@@ -704,7 +720,7 @@ export function TripEntryForm({
           id: 1,
           driverId: defaultDriverId,
           truckId: "",
-          date: defaultDate || todayIso(),
+          date: sheetDefaultDate(),
           rows: Array.from({ length: INITIAL_ROWS }, (_, i) => ({ id: i + 1 }))
         }
       ];
@@ -769,7 +785,7 @@ export function TripEntryForm({
     const id = nextGroupId.current++;
     setGroups(current => [
       ...current,
-      { id, driverId: "", truckId: "", date: todayIso(), rows: Array.from({ length: INITIAL_ROWS }, (_, i) => ({ id: i + 1 })) }
+      { id, driverId: "", truckId: "", date: sheetDefaultDate(), rows: Array.from({ length: INITIAL_ROWS }, (_, i) => ({ id: i + 1 })) }
     ]);
     // Open the fresh tab so the clerk picks its driver right away
     setActiveId(String(id));
@@ -819,7 +835,7 @@ export function TripEntryForm({
    * replaced wholesale - appending never destroys input, so no confirm.
    */
   function applyFromPhoto(apply: PhotoApply) {
-    const date = apply.rows.find(r => r.date)?.date || todayIso();
+    const date = apply.rows.find(r => r.date)?.date || sheetDefaultDate();
     const id = nextGroupId.current++;
     const rows: RowSlot[] = apply.rows.map((row, i) => ({
       id: i + 1,
@@ -876,6 +892,38 @@ export function TripEntryForm({
           onOpenChange={setPhotoOpen}
           onApply={applyFromPhoto}
         />
+
+        {/* Sheet cover: the pay period this batch is entered against. Only
+            steers default dates (today when in-period, else the period's
+            Saturday); switching never resets what's already typed. */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
+          <span className="text-[11px] font-semibold tracking-[0.06em] text-muted-foreground">
+            工资周期
+          </span>
+          <button
+            type="button"
+            aria-label="上一周期"
+            onClick={() => setPeriodStart(shiftPeriod(periodOf(periodStart), -1).start)}
+            className="grid h-7 w-7 place-items-center rounded-md border border-line bg-card font-mono text-sm text-route transition-colors hover:border-route"
+          >
+            ‹
+          </button>
+          <PeriodPicker
+            selectedStart={periodStart}
+            selectedLabel={periodLabel(periodOf(periodStart))}
+            todayIso={todayIso()}
+            totals={{}}
+            onPick={setPeriodStart}
+          />
+          <button
+            type="button"
+            aria-label="下一周期"
+            onClick={() => setPeriodStart(shiftPeriod(periodOf(periodStart), 1).start)}
+            className="grid h-7 w-7 place-items-center rounded-md border border-line bg-card font-mono text-sm text-route transition-colors hover:border-route"
+          >
+            ›
+          </button>
+        </div>
 
         <Tabs value={activeId} onValueChange={setActiveId}>
           {/* Single strip opening the panel: driver tabs, add-group, photo
