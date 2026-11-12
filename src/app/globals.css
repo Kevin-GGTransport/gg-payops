@@ -326,23 +326,26 @@
 .toolbar {
   @apply mb-2.5 flex flex-wrap items-center justify-between gap-3;
 }
+/* Filter/view tabs: same segmented pill as the entry sheet's TabsList
+   (shadcn muted trough + card pill) so link-driven tabs and Radix tabs
+   read as one control family */
 .tabs {
-  @apply inline-flex gap-0.5 rounded-md border border-line bg-card p-0.5;
+  @apply inline-flex h-9 items-center gap-0.5 self-start rounded-lg bg-muted p-1;
 }
 .tabs a {
-  @apply flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-sm font-semibold text-muted-foreground no-underline;
+  @apply inline-flex h-7 items-center gap-1.5 rounded-md px-3 font-mono text-xs font-medium text-muted-foreground no-underline whitespace-nowrap transition-colors;
 }
 .tabs a b {
-  @apply rounded-full bg-muted px-1.5 font-mono text-xs tabular-nums text-secondary-foreground;
+  @apply rounded-full bg-card/70 px-1.5 font-mono text-[10px] leading-4 tabular-nums text-muted-foreground;
 }
 .tabs a:hover {
   @apply text-foreground;
 }
 .tabs a[aria-current="page"] {
-  @apply bg-navy text-white;
+  @apply bg-card text-foreground shadow-sm;
 }
 .tabs a[aria-current="page"] b {
-  @apply bg-white/20 text-white;
+  @apply bg-route/15 text-route;
 }
 .search {
   @apply flex gap-1.5;
@@ -751,7 +754,7 @@ th.col-th {
     @apply overflow-visible p-4 pb-10;
   }
   .tabs a {
-    @apply px-2.5 py-1.5 text-[13px];
+    @apply px-2.5;
   }
   .tabs a b {
     @apply px-1;

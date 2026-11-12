@@ -105,8 +105,13 @@ type CalcStatus = "loading" | "auto" | "failed";
  * sticks once edited, miles re-measures on every endpoint re-pick). Field
  * names are positional (g_<group>_row_<index>_) so deleting a middle row only
  * shifts names, never values.
+ *
+ * Memoized: every tab's rows stay mounted (forceMount), so one keystroke in
+ * one group must not reconcile every row of every group. All callbacks are
+ * group-level and take the row id; GroupSection memoizes them.
  */
-function EntryRow({
+const EntryRow = React.memo(function EntryRow({
+  rowId,
   groupIndex,
   rowIndex,
   defaultDate,
@@ -127,6 +132,8 @@ function EntryRow({
   draggable,
   dropMark
 }: {
+  /** Stable slot id (never the positional index) */
+  rowId: number;
   groupIndex: number;
   rowIndex: number;
   defaultDate: string;
@@ -136,17 +143,17 @@ function EntryRow({
   removable: boolean;
   /** Current to-value of the previous leg in this group ("" when none yet) */
   carryFrom: string;
-  onRemove: () => void;
-  onPayChange: (value: string) => void;
+  onRemove: (rowId: number) => void;
+  onPayChange: (rowId: number, value: string) => void;
   /** Reports every endpoint pick upward (feeds the next leg's carry) */
-  onToChange: (value: string) => void;
+  onToChange: (rowId: number, value: string) => void;
   /** Reports whether this row has any endpoint picked (filled-row counting) */
-  onFillChange: (filled: boolean) => void;
+  onFillChange: (rowId: number, filled: boolean) => void;
   /** Grip press arms / releases whole-row native drag */
-  onArmDrag: (armed: boolean) => void;
-  onRowDragStart: (event: React.DragEvent<HTMLTableRowElement>) => void;
+  onArmDrag: (rowId: number, armed: boolean) => void;
+  onRowDragStart: (event: React.DragEvent<HTMLTableRowElement>, rowId: number) => void;
   onRowDragEnd: () => void;
-  onRowDragOver: (event: React.DragEvent<HTMLTableRowElement>) => void;
+  onRowDragOver: (event: React.DragEvent<HTMLTableRowElement>, rowId: number) => void;
   onRowDrop: (event: React.DragEvent<HTMLTableRowElement>) => void;
   /** This row is the armed drag source */
   draggable: boolean;
@@ -185,14 +192,14 @@ function EntryRow({
 
   // Report the initial (refill/photo) endpoint once so the next leg can carry it
   React.useEffect(() => {
-    if (toValue) onToChange(toValue);
+    if (toValue) onToChange(rowId, toValue);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Filled = has a destination. A start alone can be the sticky carry-over
   // from the previous leg, which must not turn a reserve row "filled"
   React.useEffect(() => {
-    onFillChange(Boolean(toValue));
+    onFillChange(rowId, Boolean(toValue));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toValue]);
 
@@ -245,7 +252,7 @@ function EntryRow({
   const payValue = manualPay ?? autoPay.toFixed(2);
 
   React.useEffect(() => {
-    onPayChange(payValue);
+    onPayChange(rowId, payValue);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payValue]);
 
@@ -264,9 +271,9 @@ function EntryRow({
   return (
     <tr
       draggable={draggable}
-      onDragStart={onRowDragStart}
+      onDragStart={event => onRowDragStart(event, rowId)}
       onDragEnd={onRowDragEnd}
-      onDragOver={onRowDragOver}
+      onDragOver={event => onRowDragOver(event, rowId)}
       onDrop={onRowDrop}
       className={`${draggable ? "row-dragging" : ""}${dropMark ? ` drop-${dropMark}` : ""}`}
     >
@@ -274,9 +281,9 @@ function EntryRow({
         <span
           className="drag-handle"
           aria-label={`拖拽调整${legLabel}顺序`}
-          onPointerDown={() => onArmDrag(true)}
-          onPointerUp={() => onArmDrag(false)}
-          onPointerCancel={() => onArmDrag(false)}
+          onPointerDown={() => onArmDrag(rowId, true)}
+          onPointerUp={() => onArmDrag(rowId, false)}
+          onPointerCancel={() => onArmDrag(rowId, false)}
         >
           <GripVerticalIcon className="size-3.5" />
         </span>
@@ -316,7 +323,7 @@ function EntryRow({
           triggerClassName="h-8 justify-start px-2 font-normal"
           onValueChange={value => {
             setToValue(value);
-            onToChange(value);
+            onToChange(rowId, value);
           }}
         />
       </td>
@@ -397,14 +404,14 @@ function EntryRow({
       </td>
       <td className="actions px-1.5">
         {removable && (
-          <button type="button" className="linklike danger" onClick={onRemove}>
+          <button type="button" className="linklike danger" onClick={() => onRemove(rowId)}>
             删除
           </button>
         )}
       </td>
     </tr>
   );
-}
+});
 
 /** A row slot: stable id (React key, never reused) plus its one-shot defaults */
 type RowSlot = { id: number; defaults?: RefillRow };
@@ -418,8 +425,12 @@ type GroupSlot = { id: number; driverId: string; truckId: string; date: string; 
  * footer with this group's submit button (its name/value tells the server
  * action to persist only this group). Row/driver/date state lives here once
  * mounted; the parent only tracks group existence, row counts and pay totals.
+ *
+ * Memoized: with every tab force-mounted, a keystroke elsewhere (parent pays /
+ * activeId update) must not reconcile this group's rows. All prop callbacks
+ * are group-level and stable; per-row handlers below are memoized on top.
  */
-function GroupSection({
+const GroupSection = React.memo(function GroupSection({
   index,
   group,
   drivers,
@@ -445,12 +456,12 @@ function GroupSection({
   /** Shared columns-only TanStack instance (thead + colgroup for this sheet) */
   sheetTable: TanstackTable<unknown>;
   removable: boolean;
-  onRemove: () => void;
+  onRemove: (groupId: number) => void;
   /** Reports the picked driver upward (feeds the tab label) */
-  onDriverChange: (driverId: string) => void;
-  onPayChange: (rowId: number, value: string) => void;
-  onForgetRow: (rowId: number) => void;
-  onFilledChange: (count: number) => void;
+  onDriverChange: (groupId: number, driverId: string) => void;
+  onPayChange: (groupId: number, rowId: number, value: string) => void;
+  onForgetRow: (groupId: number, rowId: number) => void;
+  onFilledChange: (groupId: number, count: number) => void;
   onDirty: () => void;
   /** Live drag source shared across groups (a group only accepts its own) */
   dragging: { groupId: number; rowId: number } | null;
@@ -474,11 +485,21 @@ function GroupSection({
   const dragActive = dragging?.groupId === group.id;
   const driverType = drivers.find(d => d.id === driverId)?.driver_type;
 
-  React.useEffect(() => {
-    onFilledChange(filledIds.size);
-  }, [filledIds.size, onFilledChange]);
+  // Stable per-group reporters (kept out of render so EntryRow memo holds)
+  const reportFilled = React.useCallback(
+    (count: number) => onFilledChange(group.id, count),
+    [group.id, onFilledChange]
+  );
+  const reportDriver = React.useCallback(
+    (driverId: string) => onDriverChange(group.id, driverId),
+    [group.id, onDriverChange]
+  );
 
-  function handleFill(rowId: number, filled: boolean) {
+  React.useEffect(() => {
+    reportFilled(filledIds.size);
+  }, [filledIds.size, reportFilled]);
+
+  const handleFill = React.useCallback((rowId: number, filled: boolean) => {
     setFilledIds(current => {
       if (current.has(rowId) === filled) return current;
       const next = new Set(current);
@@ -486,13 +507,12 @@ function GroupSection({
       else next.delete(rowId);
       return next;
     });
-  }
+  }, []);
 
   // Lift the picked driver so the parent can label this group's tab
   React.useEffect(() => {
-    onDriverChange(driverId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driverId]);
+    reportDriver(driverId);
+  }, [driverId, reportDriver]);
 
   function addRow() {
     onDirty();
@@ -500,43 +520,101 @@ function GroupSection({
     setNextRowId(id => id + 1);
   }
 
-  function removeRow(slot: RowSlot) {
-    onDirty();
-    onForgetRow(slot.id);
-    handleFill(slot.id, false);
-    setRows(current => current.filter(r => r.id !== slot.id));
-    setToByRow(current => {
-      if (!(slot.id in current)) return current;
-      const next = { ...current };
-      delete next[slot.id];
-      return next;
-    });
-  }
+  const removeRowById = React.useCallback(
+    (rowId: number) => {
+      onDirty();
+      onForgetRow(group.id, rowId);
+      setFilledIds(current => {
+        if (!current.has(rowId)) return current;
+        const next = new Set(current);
+        next.delete(rowId);
+        return next;
+      });
+      setRows(current => current.filter(r => r.id !== rowId));
+      setToByRow(current => {
+        if (!(rowId in current)) return current;
+        const next = { ...current };
+        delete next[rowId];
+        return next;
+      });
+    },
+    [group.id, onDirty, onForgetRow]
+  );
 
   /** Reorder rows inside this group; stable slot ids travel with their values */
-  function moveRow(fromId: number, toId: number, before: boolean) {
-    const from = rows.findIndex(r => r.id === fromId);
-    const to = rows.findIndex(r => r.id === toId);
-    if (from < 0 || to < 0 || from === to) return;
-    const next = [...rows];
-    const [moved] = next.splice(from, 1);
-    const insertAt = next.findIndex(r => r.id === toId) + (before ? 0 : 1);
-    next.splice(insertAt, 0, moved);
-    onDirty();
-    setRows(next);
-  }
+  const moveRow = React.useCallback(
+    (fromId: number, toId: number, before: boolean) => {
+      setRows(current => {
+        const from = current.findIndex(r => r.id === fromId);
+        const to = current.findIndex(r => r.id === toId);
+        if (from < 0 || to < 0 || from === to) return current;
+        const next = [...current];
+        const [moved] = next.splice(from, 1);
+        const insertAt = next.findIndex(r => r.id === toId) + (before ? 0 : 1);
+        next.splice(insertAt, 0, moved);
+        return next;
+      });
+      onDirty();
+    },
+    [onDirty]
+  );
 
-  function endDrag() {
+  const endDrag = React.useCallback(() => {
     setArmedRow(null);
     setDropAt(null);
     onDraggingChange(null);
-  }
+  }, [onDraggingChange]);
 
-  function handleToChange(rowId: number, value: string) {
+  const handleToChange = React.useCallback((rowId: number, value: string) => {
     setToByRow(current =>
       current[rowId] === value ? current : { ...current, [rowId]: value }
     );
-  }
+  }, []);
+
+  const handleRowPayChange = React.useCallback(
+    (rowId: number, value: string) => onPayChange(group.id, rowId, value),
+    [group.id, onPayChange]
+  );
+
+  const armDrag = React.useCallback((rowId: number, armed: boolean) => {
+    setArmedRow(armed ? rowId : null);
+  }, []);
+
+  const dragStart = React.useCallback(
+    (event: React.DragEvent<HTMLTableRowElement>, rowId: number) => {
+      event.dataTransfer.effectAllowed = "move";
+      // Firefox only fires dragover when the drag carries some payload
+      event.dataTransfer.setData("text/plain", String(rowId));
+      onDraggingChange({ groupId: group.id, rowId });
+    },
+    [group.id, onDraggingChange]
+  );
+
+  const dragOver = React.useCallback(
+    (event: React.DragEvent<HTMLTableRowElement>, rowId: number) => {
+      // Same-group reorder only: a foreign group's drag keeps the no-drop cursor
+      if (!dragActive) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      const rect = event.currentTarget.getBoundingClientRect();
+      const before = event.clientY < rect.top + rect.height / 2;
+      setDropAt(current =>
+        current?.id === rowId && current.before === before
+          ? current
+          : { id: rowId, before }
+      );
+    },
+    [dragActive]
+  );
+
+  const drop = React.useCallback(
+    (event: React.DragEvent<HTMLTableRowElement>) => {
+      event.preventDefault();
+      if (dragging && dropAt) moveRow(dragging.rowId, dropAt.id, dropAt.before);
+      endDrag();
+    },
+    [dragging, dropAt, moveRow, endDrag]
+  );
 
   const prefix = `g_${index}`;
 
@@ -601,7 +679,7 @@ function GroupSection({
               添加行程
             </button>
             {removable && (
-              <button type="button" className="linklike danger" onClick={onRemove}>
+              <button type="button" className="linklike danger" onClick={() => onRemove(group.id)}>
                 删除组
               </button>
             )}
@@ -623,6 +701,7 @@ function GroupSection({
             {rows.map((slot, i) => (
               <EntryRow
                 key={slot.id}
+                rowId={slot.id}
                 groupIndex={index}
                 rowIndex={i}
                 defaultDate={date}
@@ -631,45 +710,24 @@ function GroupSection({
                 defaults={slot.defaults}
                 removable={rows.length > 1}
                 carryFrom={i === 0 ? "" : (toByRow[rows[i - 1].id] ?? "")}
-                onRemove={() => removeRow(slot)}
-                onPayChange={value => onPayChange(slot.id, value)}
-                onToChange={value => handleToChange(slot.id, value)}
-          onFillChange={filled => handleFill(slot.id, filled)}
+                onRemove={removeRowById}
+                onPayChange={handleRowPayChange}
+                onToChange={handleToChange}
+                onFillChange={handleFill}
                 draggable={armedRow === slot.id}
                 dropMark={dropAt?.id === slot.id ? (dropAt.before ? "before" : "after") : null}
-                onArmDrag={armed => setArmedRow(armed ? slot.id : null)}
-                onRowDragStart={event => {
-                  event.dataTransfer.effectAllowed = "move";
-                  // Firefox only fires dragover when the drag carries some payload
-                  event.dataTransfer.setData("text/plain", String(slot.id));
-                  onDraggingChange({ groupId: group.id, rowId: slot.id });
-                }}
+                onArmDrag={armDrag}
+                onRowDragStart={dragStart}
                 onRowDragEnd={endDrag}
-                onRowDragOver={event => {
-                  // Same-group reorder only: a foreign group's drag keeps the no-drop cursor
-                  if (!dragActive) return;
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  const before = event.clientY < rect.top + rect.height / 2;
-                  setDropAt(current =>
-                    current?.id === slot.id && current.before === before
-                      ? current
-                      : { id: slot.id, before }
-                  );
-                }}
-                onRowDrop={event => {
-                  event.preventDefault();
-                  if (dragging && dropAt) moveRow(dragging.rowId, dropAt.id, dropAt.before);
-                  endDrag();
-                }}
+                onRowDragOver={dragOver}
+                onRowDrop={drop}
               />
             ))}
         </tbody>
       </RosterTable>
     </div>
   );
-}
+});
 
 /**
  * Full trip-entry form: one tab per driver group, each tab a complete entry
@@ -780,24 +838,24 @@ export function TripEntryForm({
     dirtyRef.current = true;
   }, []);
 
-  function addGroup() {
-    dirtyRef.current = true;
-    const id = nextGroupId.current++;
-    setGroups(current => [
-      ...current,
-      { id, driverId: "", truckId: "", date: sheetDefaultDate(), rows: Array.from({ length: INITIAL_ROWS }, (_, i) => ({ id: i + 1 })) }
-    ]);
-    // Open the fresh tab so the clerk picks its driver right away
-    setActiveId(String(id));
-  }
+  // Latest groups / activeId behind refs so the callbacks below stay stable
+  // (a new identity would defeat GroupSection's memo on every tab switch)
+  const groupsRef = React.useRef(groups);
+  const activeIdRef = React.useRef(activeId);
+  React.useEffect(() => {
+    groupsRef.current = groups;
+  }, [groups]);
+  React.useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
 
-  function removeGroup(id: number) {
+  const removeGroup = React.useCallback((id: number) => {
     dirtyRef.current = true;
-    const index = groups.findIndex(g => g.id === id);
-    const remaining = groups.filter(g => g.id !== id);
+    const index = groupsRef.current.findIndex(g => g.id === id);
+    const remaining = groupsRef.current.filter(g => g.id !== id);
     setGroups(remaining);
     // Closing the open tab focuses its former neighbor
-    if (activeId === String(id)) {
+    if (activeIdRef.current === String(id)) {
       const neighbor = remaining[Math.min(index, remaining.length - 1)];
       if (neighbor) setActiveId(String(neighbor.id));
     }
@@ -819,6 +877,23 @@ export function TripEntryForm({
       if (!keys.some(k => k.startsWith(prefix))) return current;
       return Object.fromEntries(keys.filter(k => !k.startsWith(prefix)).map(k => [k, current[k]]));
     });
+  }, []);
+
+  const handleGroupDriverChange = React.useCallback((groupId: number, driverId: string) => {
+    setDriverByGroup(current =>
+      current[groupId] === driverId ? current : { ...current, [groupId]: driverId }
+    );
+  }, []);
+
+  function addGroup() {
+    dirtyRef.current = true;
+    const id = nextGroupId.current++;
+    setGroups(current => [
+      ...current,
+      { id, driverId: "", truckId: "", date: sheetDefaultDate(), rows: Array.from({ length: INITIAL_ROWS }, (_, i) => ({ id: i + 1 })) }
+    ]);
+    // Open the fresh tab so the clerk picks its driver right away
+    setActiveId(String(id));
   }
 
   function groupPaySum(id: number) {
@@ -930,11 +1005,19 @@ export function TripEntryForm({
               import, and the page-wide primary submit (all tabs) */}
           <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
             <TabsList className="h-auto max-w-full flex-wrap">
-              {groups.map(group => (
-                <TabsTrigger key={group.id} value={String(group.id)}>
-                  {tabLabel(group)}
-                </TabsTrigger>
-              ))}
+              {groups.map(group => {
+                const filled = filledCounts[group.id] ?? 0;
+                return (
+                  <TabsTrigger key={group.id} value={String(group.id)}>
+                    {tabLabel(group)}
+                    {filled > 0 && (
+                      <span className="rounded-full bg-route/15 px-1.5 font-mono text-[10px] leading-4 tabular-nums text-route">
+                        {filled}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                );
+              })}
             </TabsList>
             <Button type="button" variant="outline" className="h-8" onClick={addGroup}>
               <PlusIcon className="size-4" />
@@ -966,15 +1049,11 @@ export function TripEntryForm({
                 locations={locations}
                 sheetTable={sheetTable}
                 removable={groups.length > 1}
-                onRemove={() => removeGroup(group.id)}
-                onDriverChange={driverId =>
-                  setDriverByGroup(current =>
-                    current[group.id] === driverId ? current : { ...current, [group.id]: driverId }
-                  )
-                }
-                onPayChange={(rowId, value) => handlePayChange(group.id, rowId, value)}
-                onForgetRow={rowId => handleForgetRow(group.id, rowId)}
-                onFilledChange={count => handleFilledChange(group.id, count)}
+                onRemove={removeGroup}
+                onDriverChange={handleGroupDriverChange}
+                onPayChange={handlePayChange}
+                onForgetRow={handleForgetRow}
+                onFilledChange={handleFilledChange}
                 onDirty={handleDirty}
                 dragging={dragging}
                 onDraggingChange={setDragging}

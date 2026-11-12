@@ -295,7 +295,7 @@ function ViewTabs({ view }: { view: "period" | "all" }) {
     { key: "all", label: "全部行程", href: "/dashboard/trips?view=all" }
   ] as const;
   return (
-    <nav className="tabs" aria-label="视图切换">
+    <nav className="tabs mb-3" aria-label="视图切换">
       {tabs.map(tab => (
         <Link
           key={tab.key}
