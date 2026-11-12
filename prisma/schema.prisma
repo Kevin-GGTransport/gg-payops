@@ -114,6 +114,55 @@ model Location {
   @@schema("ops")
 }
 
+/// Vehicle profile; ids are bigint identity in the actual DDL (raw-SQL access)
+model Truck {
+  id           BigInt       @id @default(autoincrement()) @db.BigInt
+  truckCode    String       @map("truck_code") @db.VarChar(32)
+  plateNo      String?      @map("plate_no") @db.VarChar(32)
+  truckType    String?      @map("truck_type") @db.VarChar(64)
+  capacityNote String?      @map("capacity_note") @db.VarChar(120)
+  status       RecordStatus @default(ACTIVE)
+  notes        String?
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([truckCode], map: "uq_trucks_code")
+  @@index([status, truckCode], map: "idx_trucks_status")
+  @@map("trucks")
+  @@schema("ops")
+}
+
+/// Ownership history; owner_driver_id NULL = company-owned. One open row
+/// (valid_to NULL) per truck enforced by a partial unique index in the DDL.
+model TruckOwnership {
+  id           BigInt    @id @default(autoincrement()) @db.BigInt
+  truckId      BigInt    @map("truck_id") @db.BigInt
+  ownerDriverId BigInt?  @map("owner_driver_id") @db.BigInt
+  validFrom    DateTime  @map("valid_from") @db.Date
+  validTo      DateTime? @map("valid_to") @db.Date
+  note         String?   @db.VarChar(255)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([truckId, validFrom(sort: Desc)], map: "idx_truck_ownerships_truck")
+  @@map("truck_ownerships")
+  @@schema("ops")
+}
+
+/// Manual odometer readings; the latest one is the truck's current 表显里程
+model TruckOdometerReading {
+  id          BigInt   @id @default(autoincrement()) @db.BigInt
+  truckId     BigInt   @map("truck_id") @db.BigInt
+  readingDate DateTime @map("reading_date") @db.Date
+  odometer    Decimal  @db.Decimal(10, 1)
+  note        String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([truckId, readingDate(sort: Desc)], map: "idx_truck_odometer_truck_date")
+  @@map("truck_odometer_readings")
+  @@schema("ops")
+}
+
 model Trip {
   id             Int           @id @default(autoincrement())
   driverId       Int           @map("driver_id")

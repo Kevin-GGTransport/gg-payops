@@ -32,6 +32,13 @@ export function todayIso() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
 }
 
+/** Calendar arithmetic on YYYY-MM-DD strings (no timezone drift) */
+export function isoPlusDays(iso: string, days: number) {
+  return new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+}
+
 /** Days from today (negative = past) */
 export function daysUntil(date: string) {
   return Math.floor((Date.parse(`${date}T00:00:00Z`) - Date.now()) / 86_400_000);
