@@ -32,6 +32,8 @@ type ComboboxFieldProps = {
   name: string;
   options: ComboboxOption[];
   defaultValue?: string;
+  /** Controlled value; when provided the picker stops keeping its own state */
+  value?: string;
   placeholder?: string;
   searchPlaceholder?: string;
   /** Allow clearing (default true); set false for required fields */
@@ -78,6 +80,7 @@ export function ComboboxField({
   name,
   options,
   defaultValue = "",
+  value: valueProp,
   placeholder = "请选择",
   searchPlaceholder = "搜索…",
   clearable = true,
@@ -94,7 +97,10 @@ export function ComboboxField({
   ...rest
 }: ComboboxFieldProps) {
   const [open, setOpen] = React.useState(false);
-  const [value, setValue] = React.useState(defaultValue);
+  // Controlled when a `value` prop arrives (programmatic writes, e.g. the entry
+  // sheet's carry-over start); otherwise uncontrolled on first render's default
+  const [internalValue, setInternalValue] = React.useState(defaultValue);
+  const value = valueProp !== undefined ? valueProp : internalValue;
   const [query, setQuery] = React.useState("");
   const rootRef = React.useRef<HTMLDivElement>(null);
   const submitAfterPick = React.useRef(false);
@@ -107,7 +113,7 @@ export function ComboboxField({
   const custom = customOption && typed ? customOption(typed) : null;
 
   function pick(next: string) {
-    setValue(next);
+    if (valueProp === undefined) setInternalValue(next);
     setOpen(false);
     onValueChange?.(next);
     if (autoSubmit) submitAfterPick.current = true;

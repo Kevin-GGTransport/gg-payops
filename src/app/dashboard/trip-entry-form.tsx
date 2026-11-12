@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CameraIcon, PlusIcon } from "lucide-react";
+import { CameraIcon, GripVerticalIcon, PlusIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ComboboxField } from "@/components/combobox-field";
@@ -77,6 +77,8 @@ const COLUMNS: ColumnDef[] = [
   { key: "notes", label: "备注", width: 182, min: 100 }
 ];
 
+/** Width of the leading drag-handle column (fixed, not resizable) */
+const HANDLE_COL_W = 28;
 /** Width of the trailing delete-actions column (fixed, not resizable) */
 const ACTIONS_COL_W = 40;
 const COL_WIDTHS_KEY = "payops.entry.colwidths";
@@ -120,8 +122,17 @@ function EntryRow({
   locations,
   defaults,
   removable,
+  carryFrom,
   onRemove,
-  onPayChange
+  onPayChange,
+  onToChange,
+  onArmDrag,
+  onRowDragStart,
+  onRowDragEnd,
+  onRowDragOver,
+  onRowDrop,
+  draggable,
+  dropMark
 }: {
   groupIndex: number;
   rowIndex: number;
@@ -130,14 +141,31 @@ function EntryRow({
   locations: LocationOption[];
   defaults?: RefillRow;
   removable: boolean;
+  /** Current to-value of the previous leg in this group ("" when none yet) */
+  carryFrom: string;
   onRemove: () => void;
   onPayChange: (value: string) => void;
+  /** Reports every endpoint pick upward (feeds the next leg's carry) */
+  onToChange: (value: string) => void;
+  /** Grip press arms / releases whole-row native drag */
+  onArmDrag: (armed: boolean) => void;
+  onRowDragStart: (event: React.DragEvent<HTMLTableRowElement>) => void;
+  onRowDragEnd: () => void;
+  onRowDragOver: (event: React.DragEvent<HTMLTableRowElement>) => void;
+  onRowDrop: (event: React.DragEvent<HTMLTableRowElement>) => void;
+  /** This row is the armed drag source */
+  draggable: boolean;
+  /** Insertion indicator while a sibling row hovers this one */
+  dropMark: "before" | "after" | null;
 }) {
   const prefix = `g_${groupIndex}_row_${rowIndex}_`;
   const legLabel = `第 ${groupIndex + 1} 组第 ${rowIndex + 1} 程`;
   const [operation, setOperation] = React.useState(defaults?.operation || "DEL");
   const [fromValue, setFromValue] = React.useState(defaults?.from || "");
   const [toValue, setToValue] = React.useState(defaults?.to || "");
+  // Whether the current from value came from carry-over, not the user's own
+  // pick (refill/photo defaults count as manual - carry never overwrites them)
+  const fromInherited = React.useRef(false);
   const [milesValue, setMilesValue] = React.useState(defaults?.miles || "0");
   const [status, setStatus] = React.useState<CalcStatus>("loading");
   const [manual, setManual] = React.useState(false);
@@ -147,6 +175,24 @@ function EntryRow({
   // Sticky manual wage: null = auto-follow the rule; once set (hand edit or
   // error restore) basis changes never overwrite it - only "按规则重算" drops back
   const [manualPay, setManualPay] = React.useState<string | null>(defaults?.pay_amount || null);
+
+  // Carry-over start (sticky follow): the previous leg's endpoint fills this
+  // leg's start while it is empty or still carry-inherited - a hand-picked
+  // start sticks forever, an empty carry never clears what's already there
+  React.useEffect(() => {
+    if (!carryFrom) return;
+    if (fromInherited.current || fromValue === "") {
+      fromInherited.current = true;
+      setFromValue(carryFrom);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [carryFrom]);
+
+  // Report the initial (refill/photo) endpoint once so the next leg can carry it
+  React.useEffect(() => {
+    if (toValue) onToChange(toValue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   React.useEffect(() => {
     if (!fromValue || !toValue) return;
@@ -214,7 +260,25 @@ function EntryRow({
             : "选两端后自动测算";
 
   return (
-    <tr>
+    <tr
+      draggable={draggable}
+      onDragStart={onRowDragStart}
+      onDragEnd={onRowDragEnd}
+      onDragOver={onRowDragOver}
+      onDrop={onRowDrop}
+      className={`${draggable ? "row-dragging" : ""}${dropMark ? ` drop-${dropMark}` : ""}`}
+    >
+      <td className="px-1 text-center">
+        <span
+          className="drag-handle"
+          aria-label={`拖拽调整${legLabel}顺序`}
+          onPointerDown={() => onArmDrag(true)}
+          onPointerUp={() => onArmDrag(false)}
+          onPointerCancel={() => onArmDrag(false)}
+        >
+          <GripVerticalIcon className="size-3.5" />
+        </span>
+      </td>
       <td className="px-1.5">
         <Input
           type="date"
@@ -229,11 +293,14 @@ function EntryRow({
           name={`${prefix}from_location`}
           locations={locations}
           creatable
-          defaultValue={defaults?.from || ""}
+          value={fromValue}
           placeholder="起点"
           aria-label={`${legLabel}起点`}
           triggerClassName="h-8 justify-start px-2 font-normal"
-          onValueChange={setFromValue}
+          onValueChange={value => {
+            fromInherited.current = false;
+            setFromValue(value);
+          }}
         />
       </td>
       <td className="px-1.5">
@@ -245,7 +312,10 @@ function EntryRow({
           placeholder="终点"
           aria-label={`${legLabel}终点`}
           triggerClassName="h-8 justify-start px-2 font-normal"
-          onValueChange={setToValue}
+          onValueChange={value => {
+            setToValue(value);
+            onToChange(value);
+          }}
         />
       </td>
       <td className="px-1.5">
@@ -357,6 +427,8 @@ function GroupSection({
   onForgetRow,
   onRowsChange,
   onDirty,
+  dragging,
+  onDraggingChange,
   paySum
 }: {
   index: number;
@@ -369,6 +441,9 @@ function GroupSection({
   onForgetRow: (rowId: number) => void;
   onRowsChange: (count: number) => void;
   onDirty: () => void;
+  /** Live drag source shared across groups (a group only accepts its own) */
+  dragging: { groupId: number; rowId: number } | null;
+  onDraggingChange: (source: { groupId: number; rowId: number } | null) => void;
   paySum: number;
 }) {
   const [driverId, setDriverId] = React.useState(group.driverId);
@@ -377,6 +452,13 @@ function GroupSection({
   const [nextRowId, setNextRowId] = React.useState(
     group.rows.reduce((max, r) => Math.max(max, r.id), 0) + 1
   );
+  // rowId -> current to-value, feeding the next leg's carry-over start
+  const [toByRow, setToByRow] = React.useState<Record<number, string>>({});
+  // Grip pressed but drag not confirmed yet; only that row turns draggable
+  const [armedRow, setArmedRow] = React.useState<number | null>(null);
+  // Insertion point while a same-group drag hovers this sheet
+  const [dropAt, setDropAt] = React.useState<{ id: number; before: boolean } | null>(null);
+  const dragActive = dragging?.groupId === group.id;
   const driverType = drivers.find(d => d.id === driverId)?.driver_type;
 
   React.useEffect(() => {
@@ -393,15 +475,54 @@ function GroupSection({
     onDirty();
     onForgetRow(slot.id);
     setRows(current => current.filter(r => r.id !== slot.id));
+    setToByRow(current => {
+      if (!(slot.id in current)) return current;
+      const next = { ...current };
+      delete next[slot.id];
+      return next;
+    });
+  }
+
+  /** Reorder rows inside this group; stable slot ids travel with their values */
+  function moveRow(fromId: number, toId: number, before: boolean) {
+    const from = rows.findIndex(r => r.id === fromId);
+    const to = rows.findIndex(r => r.id === toId);
+    if (from < 0 || to < 0 || from === to) return;
+    const next = [...rows];
+    const [moved] = next.splice(from, 1);
+    const insertAt = next.findIndex(r => r.id === toId) + (before ? 0 : 1);
+    next.splice(insertAt, 0, moved);
+    onDirty();
+    setRows(next);
+  }
+
+  function endDrag() {
+    setArmedRow(null);
+    setDropAt(null);
+    onDraggingChange(null);
+  }
+
+  function handleToChange(rowId: number, value: string) {
+    setToByRow(current =>
+      current[rowId] === value ? current : { ...current, [rowId]: value }
+    );
   }
 
   const prefix = `g_${index}`;
 
   return (
-    <tbody className="tb-group">
+    <tbody
+      className="tb-group"
+      onDragLeave={event => {
+        // Drag left this sheet entirely (moving between our own rows doesn't)
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setDropAt(null);
+        }
+      }}
+    >
       {/* Driver separator band: opens one group inside the single sheet */}
       <tr className="row-band">
-        <td colSpan={COLUMNS.length + 1}>
+        <td colSpan={COLUMNS.length + 2}>
           <div className="flex flex-wrap items-end gap-x-4 gap-y-2.5 px-2.5">
             <span className="mb-0.5 rounded-[3px] border border-line bg-card px-1.5 py-0.5 font-mono text-[11px] font-semibold text-foreground">
               组 {index + 1}
@@ -465,8 +586,38 @@ function GroupSection({
           locations={locations}
           defaults={slot.defaults}
           removable={rows.length > 1}
+          carryFrom={i === 0 ? "" : (toByRow[rows[i - 1].id] ?? "")}
           onRemove={() => removeRow(slot)}
           onPayChange={value => onPayChange(slot.id, value)}
+          onToChange={value => handleToChange(slot.id, value)}
+          draggable={armedRow === slot.id}
+          dropMark={dropAt?.id === slot.id ? (dropAt.before ? "before" : "after") : null}
+          onArmDrag={armed => setArmedRow(armed ? slot.id : null)}
+          onRowDragStart={event => {
+            event.dataTransfer.effectAllowed = "move";
+            // Firefox only fires dragover when the drag carries some payload
+            event.dataTransfer.setData("text/plain", String(slot.id));
+            onDraggingChange({ groupId: group.id, rowId: slot.id });
+          }}
+          onRowDragEnd={endDrag}
+          onRowDragOver={event => {
+            // Same-group reorder only: a foreign group's drag keeps the no-drop cursor
+            if (!dragActive) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            const rect = event.currentTarget.getBoundingClientRect();
+            const before = event.clientY < rect.top + rect.height / 2;
+            setDropAt(current =>
+              current?.id === slot.id && current.before === before
+                ? current
+                : { id: slot.id, before }
+            );
+          }}
+          onRowDrop={event => {
+            event.preventDefault();
+            if (dragging && dropAt) moveRow(dragging.rowId, dropAt.id, dropAt.before);
+            endDrag();
+          }}
         />
       ))}
     </tbody>
@@ -511,6 +662,8 @@ export function TripEntryForm({
   const [rowCounts, setRowCounts] = React.useState<Record<number, number>>(() =>
     Object.fromEntries(initialGroups.map(g => [g.id, g.rows.length]))
   );
+  // Live drag source across groups (groupId gates which sheet accepts the drop)
+  const [dragging, setDragging] = React.useState<{ groupId: number; rowId: number } | null>(null);
   // Whether the user has changed anything (guards photo-import replacement)
   const dirtyRef = React.useRef(false);
 
@@ -678,6 +831,7 @@ export function TripEntryForm({
         <div className="table-wrap">
           <table className="roster table-fixed w-full">
             <colgroup>
+              <col style={{ width: HANDLE_COL_W }} />
               {COLUMNS.map((column, i) => (
                 <col key={column.key} style={{ width: colWidths[i] }} />
               ))}
@@ -685,6 +839,7 @@ export function TripEntryForm({
             </colgroup>
             <thead>
               <tr>
+                <th className="px-1" aria-label="排序" />
                 {COLUMNS.map((column, i) => (
                   <th key={column.key} className={`col-th px-1.5${column.num ? " num" : ""}`}>
                     {column.label}
@@ -713,6 +868,8 @@ export function TripEntryForm({
                 onForgetRow={rowId => handleForgetRow(group.id, rowId)}
                 onRowsChange={count => handleRowsChange(group.id, count)}
                 onDirty={handleDirty}
+                dragging={dragging}
+                onDraggingChange={setDragging}
                 paySum={groupPaySum(group.id)}
               />
             ))}

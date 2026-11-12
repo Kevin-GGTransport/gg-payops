@@ -23,6 +23,8 @@ type LocationPickerProps = {
   name: string;
   locations: LocationOption[];
   defaultValue?: string;
+  /** Controlled value (see ComboboxField); carry-over starts use this */
+  value?: string;
   placeholder?: string;
   className?: string;
   triggerClassName?: string;
@@ -43,6 +45,7 @@ export function LocationPicker({
   name,
   locations,
   defaultValue = "",
+  value,
   placeholder = "不指定",
   className,
   triggerClassName,
@@ -57,6 +60,7 @@ export function LocationPicker({
       className={className}
       triggerClassName={triggerClassName}
       defaultValue={defaultValue}
+      value={value}
       placeholder={placeholder}
       searchPlaceholder="搜索代码、地址，或直接输入"
       mono
