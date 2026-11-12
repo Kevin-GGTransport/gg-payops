@@ -100,6 +100,9 @@ CREATE INDEX idx_wage_special_routes_version ON pay.wage_rule_special_routes(ver
   之后乘车主/BOBTAIL 乘数，`roundCents` 收尾。
 - 新增 `pickVersion(versions, tripDate)`：`effective_from <= tripDate` 的最大日期版
   （ACTIVE）；无可用版本返回 null（调用方兜底 $0 并提示）。
+- **金额精度**：金额一律 `numeric(12,2)`、乘数 `numeric(5,2)`；每步计算
+  `roundCents` 到两位小数；界面展示统一两位小数（档位价 $50.00、乘数 ×2.00、
+  递增额 $30.00、录入表 autoPay 与特例价同样两位小数）。
 
 ## 查询与动作
 
