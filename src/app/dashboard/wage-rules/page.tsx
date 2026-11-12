@@ -1,13 +1,37 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { ModalShell } from "@/components/modal-shell";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel } from "@/components/ledger";
+import { Input } from "@/components/ui/input";
+import { FormError, FormGrid, SubmitButton, TextField } from "@/components/form-fields";
 import { requireUser } from "@/lib/auth";
-import { firstValue, type SearchParams } from "@/lib/search-params";
-import { money, todayIso } from "@/lib/format";
+import { firstValue, formField, type SearchParams } from "@/lib/search-params";
+import { isoPlusDays, money, todayIso } from "@/lib/format";
 import { wageRuleVersionsList, wageRuleVersionDetail } from "@/lib/queries/wage-rules";
+import { createVersion, deleteVersion } from "./actions";
 import { WageRulesTable } from "./wage-rules-table";
+import { VersionForm } from "./version-form";
 
 export const metadata: Metadata = { title: "工资规则 · G&G PayOps" };
+
+const ERROR_MESSAGES: Record<string, string> = {
+  missing_name: "请填写版本名。",
+  bad_date: "生效日期无效。",
+  past_date: "生效日期必须晚于今天（已生效版本只读，改价请发新版本）。",
+  dup_date: "这个生效日期已有版本。",
+  bad_multiplier: "乘数必须大于 0。",
+  bad_overage: "超档递增额必须 ≥ 0。",
+  no_tiers: "至少需要一个里程档位。",
+  tiers_not_from_1: "首个档位必须从 1 英里开始。",
+  tiers_not_50_step: "首档之后档位必须是 50 的倍数且递增（50、100、150…）。",
+  bad_tier_miles: "档位起算里程必须是 ≥ 1 的整数。",
+  bad_tier_amount: "档位金额必须 ≥ 0。",
+  bad_postal: "特例邮编必须是 5 位数字，且两端不能相同。",
+  bad_special_amount: "特例单程价必须 ≥ 0。",
+  locked: "该版本已生效，不可修改或删除。",
+  bad_source: "复制源版本不存在。"
+};
 
 /** Band label: 1 – 49, 50 – 99 … 250+（下一档下界 −1；最高档开放） */
 function bandLabel(milesFrom: number, nextFrom: number | null) {
@@ -22,12 +46,26 @@ export default async function WageRulesPage({
   await requireUser();
   const sp = await searchParams;
   const viewId = (firstValue(sp.v) ?? "").trim();
+  const errorCode = firstValue(sp.error);
+  const isNew = firstValue(sp.new) === "1";
+  const editId = (firstValue(sp.edit) ?? "").trim();
+  const fromId = (firstValue(sp.from) ?? "").trim();
   const today = todayIso();
+  const tomorrow = isoPlusDays(today, 1);
 
-  const [versions, detail] = await Promise.all([
+  const [versions, detail, editing] = await Promise.all([
     wageRuleVersionsList(),
-    viewId ? wageRuleVersionDetail(viewId) : Promise.resolve(null)
+    viewId ? wageRuleVersionDetail(viewId) : Promise.resolve(null),
+    editId ? wageRuleVersionDetail(editId) : Promise.resolve(null)
   ]);
+
+  // Default copy source: the version governing today (latest effective), else newest
+  const createSourceId =
+    fromId || versions.find(v => v.effective_from <= today)?.id || versions[0]?.id || "";
+  const errorMessage = errorCode
+    ? ERROR_MESSAGES[errorCode] ?? "操作出错，请检查后重试。"
+    : undefined;
+  const editLocked = editing ? editing.effective_from <= today : false;
 
   const ownerMultiplier = detail ? Number(detail.owner_multiplier) : 1;
 
@@ -36,7 +74,19 @@ export default async function WageRulesPage({
       <PageHeader
         title="工资规则"
         description="版本化的工资计算规则：里程档位、车主与 BOBTAIL 乘数、特例邮编对；已生效版本只读，改价发新版本。"
+        actions={
+          createSourceId ? (
+            <Link
+              className="button button-quiet"
+              href={`/dashboard/wage-rules?new=1&from=${createSourceId}`}
+            >
+              基于当前版创建新版本
+            </Link>
+          ) : undefined
+        }
       />
+
+      {errorMessage && !isNew && !editing && <FormError message={errorMessage} />}
 
       <section aria-label="版本时间线">
         <LedgerPanel>
@@ -60,6 +110,9 @@ export default async function WageRulesPage({
                 >
                   {detail.effective_from <= today ? "已生效（只读）" : "待生效"}
                 </span>
+                {detail.effective_from > today && (
+                  <Link href={`/dashboard/wage-rules?edit=${detail.id}`}>编辑</Link>
+                )}
               </span>
             }
           >
@@ -133,9 +186,64 @@ export default async function WageRulesPage({
                 </p>
               </div>
             </div>
+            {detail.effective_from > today && (
+              <form action={deleteVersion} className="flex justify-end px-4 pb-4">
+                <input type="hidden" name="id" value={detail.id} />
+                <button type="submit" className="linklike danger">删除此待生效版本</button>
+              </form>
+            )}
           </LedgerPanel>
         </section>
       )}
+
+      <ModalShell
+        open={isNew && Boolean(createSourceId)}
+        closeHref="/dashboard/wage-rules"
+        title="创建新版本"
+      >
+        <form action={createVersion} aria-label="创建新版本">
+          <input type="hidden" name="source_id" value={createSourceId} />
+          <div className="grid gap-4 px-5 py-4">
+            <FormError message={errorMessage} />
+            <p className="text-xs text-muted-foreground">
+              复制当前版本的档位、乘数、递增额与特例路线，生效后旧版本自动成为历史。
+            </p>
+            <FormGrid>
+              <TextField
+                label="版本名"
+                name="name"
+                required
+                defaultValue={formField(sp, "name", `CA Local ${tomorrow.slice(0, 7).replace("-", "年")} 版`)}
+                maxLength={120}
+              />
+              <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+                生效日期（须晚于今天）
+                <Input
+                  type="date"
+                  name="effective_from"
+                  defaultValue={formField(sp, "effective_from", tomorrow)}
+                  required
+                  aria-label="生效日期"
+                  className="h-9 font-mono text-[13px]"
+                />
+              </label>
+            </FormGrid>
+          </div>
+          <div className="flex justify-end border-t border-line px-5 py-3">
+            <SubmitButton>创建版本</SubmitButton>
+          </div>
+        </form>
+      </ModalShell>
+
+      <ModalShell
+        open={Boolean(editing) && !editLocked}
+        closeHref={`/dashboard/wage-rules?v=${editId}`}
+        title={`编辑 ${editing?.name ?? ""}`}
+      >
+        {editing && !editLocked && (
+          <VersionForm version={editing} errorMessage={errorMessage} />
+        )}
+      </ModalShell>
     </>
   );
 }
