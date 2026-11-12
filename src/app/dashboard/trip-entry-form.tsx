@@ -858,7 +858,7 @@ export function TripEntryForm({
 
         <Tabs value={activeId} onValueChange={setActiveId}>
           {/* Single strip opening the panel: driver tabs, add-group, photo
-              import - one row instead of caption + tab bar stacked */}
+              import, and the page-wide primary submit (all tabs) */}
           <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
             <TabsList className="h-auto max-w-full flex-wrap">
               {groups.map((group, i) => (
@@ -871,14 +871,19 @@ export function TripEntryForm({
               <PlusIcon className="size-4" />
               添加一组（换司机）
             </Button>
-            <button
-              type="button"
-              className="linklike ml-auto"
-              onClick={() => setPhotoOpen(true)}
-            >
-              <CameraIcon className="mr-1 inline size-3.5" />
-              照片识别
-            </button>
+            <div className="ml-auto flex items-center gap-3">
+              <button
+                type="button"
+                className="linklike"
+                onClick={() => setPhotoOpen(true)}
+              >
+                <CameraIcon className="mr-1 inline size-3.5" />
+                照片识别
+              </button>
+              <Button type="submit" className="h-9 px-5">
+                记入全部 {totalRows} 段行程
+              </Button>
+            </div>
           </div>
 
           {/* forceMount keeps every tab's fields in the DOM (and the submit) */}
@@ -911,24 +916,22 @@ export function TripEntryForm({
         </Tabs>
 
         <input type="hidden" name="group_count" value={groups.length} />
-        {/* Action bar: per-group (secondary, current tab) + all tabs (primary) */}
+        {/* Bottom bar: running totals + the current tab's secondary submit.
+            The page-wide primary submit lives in the top tab strip. */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3">
           <span className="text-xs text-muted-foreground">
             共 {groups.length} 组 · {totalRows} 段 · 工资合计{" "}
             <b className="font-mono text-sm text-foreground">{money(totalPay)}</b>
           </span>
-          <div className="flex items-center gap-2.5">
-            <Button
-              type="submit"
-              name="submit_group"
-              value={String(activeGroupIndex)}
-              variant="outline"
-              className="h-9 px-4"
-            >
-              只记本组 {activeGroupRows} 段
-            </Button>
-            <Button type="submit" className="h-9 px-5">记入全部 {totalRows} 段行程</Button>
-          </div>
+          <Button
+            type="submit"
+            name="submit_group"
+            value={String(activeGroupIndex)}
+            variant="outline"
+            className="h-9 px-4"
+          >
+            只记本组 {activeGroupRows} 段
+          </Button>
         </div>
       </div>
     </form>
