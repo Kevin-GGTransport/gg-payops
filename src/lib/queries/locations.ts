@@ -85,6 +85,7 @@ export async function activeLocationOptions() {
   `;
   return rows.map(({ location_type, address_line, city, state_code, postal_code, standard_pay_amount, ...rest }) => ({
     ...rest,
+    postal_code,
     location_type: location_type as LocationType,
     standard_pay_amount: Number(standard_pay_amount),
     address: fullAddress({ address_line, city, state_code, postal_code }) || null

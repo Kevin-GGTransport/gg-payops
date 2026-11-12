@@ -8,6 +8,7 @@ import { firstValue, type SearchParams } from "@/lib/search-params";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeLocationOptions } from "@/lib/queries/locations";
 import { activeTruckOptions } from "@/lib/queries/trucks";
+import { activeWageRuleVersions } from "@/lib/queries/wage-rules";
 import { TripEntryForm, type RefillGroup } from "./trip-entry-form";
 
 export const metadata: Metadata = { title: "录入行程 · G&G PayOps" };
@@ -84,10 +85,11 @@ export default async function EntryPage({
         })
       : undefined;
 
-  const [drivers, trucks, locations] = await Promise.all([
+  const [drivers, trucks, locations, wageRules] = await Promise.all([
     activeDriverOptions(),
     activeTruckOptions(),
-    activeLocationOptions()
+    activeLocationOptions(),
+    activeWageRuleVersions()
   ]);
 
   const errorMessage = errorCode
@@ -121,6 +123,7 @@ export default async function EntryPage({
         drivers={drivers}
         trucks={trucks}
         locations={locations}
+        wageRules={wageRules}
         defaultDriverId={preselectedDriver}
         refillGroups={refillGroups}
         initialActiveIndex={initialActiveIndex}

@@ -9,6 +9,8 @@ export type LocationOption = {
   name: string;
   location_type: LocationType;
   address: string | null;
+  /** USPS zip; feeds special-route pricing (free-text zip legs) */
+  postal_code: string | null;
   /** Driver standard pay for this location; prices the trip leg (0 = unset) */
   standard_pay_amount: number;
 };

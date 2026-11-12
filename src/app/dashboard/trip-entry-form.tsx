@@ -10,7 +10,7 @@ import { PeriodPicker } from "@/components/period-picker";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { ComboboxField } from "@/components/combobox-field";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
-import { calcTripWage } from "@/lib/wage";
+import { calcTripWage, pickVersion, type WageRuleData } from "@/lib/wage";
 import { money, todayIso } from "@/lib/format";
 import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
 import {
@@ -60,6 +60,8 @@ type TripEntryFormProps = {
   drivers: DriverOption[];
   trucks: TruckOption[];
   locations: LocationOption[];
+  /** Wage-rule versions (current + scheduled); each row prices by its own date */
+  wageRules: WageRuleData[];
   defaultDriverId?: string;
   /** Present when redirected back after a validation error */
   refillGroups?: RefillGroup[];
@@ -117,6 +119,7 @@ const EntryRow = React.memo(function EntryRow({
   defaultDate,
   driverType,
   locations,
+  wageRules,
   defaults,
   removable,
   carryFrom,
@@ -139,6 +142,8 @@ const EntryRow = React.memo(function EntryRow({
   defaultDate: string;
   driverType: DriverType | undefined;
   locations: LocationOption[];
+  /** Wage-rule versions; the row's own date picks the governing one */
+  wageRules: WageRuleData[];
   defaults?: RefillRow;
   removable: boolean;
   /** Current to-value of the previous leg in this group ("" when none yet) */
@@ -162,6 +167,8 @@ const EntryRow = React.memo(function EntryRow({
 }) {
   const prefix = `g_${groupIndex}_row_${rowIndex}_`;
   const legLabel = `第 ${groupIndex + 1} 组第 ${rowIndex + 1} 程`;
+  // Controlled date: the wage rule is picked by the row's own date
+  const [dateValue, setDateValue] = React.useState(defaults?.trip_date || defaultDate);
   const [operation, setOperation] = React.useState(defaults?.operation || "DEL");
   // EMPTY legs haul no load: the Load# cell clears and locks with the operation
   const [loadNoValue, setLoadNoValue] = React.useState(
@@ -240,17 +247,33 @@ const EntryRow = React.memo(function EntryRow({
   const wageEndpoint = (value: string) =>
     locations.find(l => `loc:${l.id}` === value) ?? null;
 
+  // Special-route lookup key: the picked location's zip, or the raw free-text
+  // value when it is itself a 5-digit zip (txt:94545)
+  const postalOf = (value: string): string | null => {
+    const loc = locations.find(l => `loc:${l.id}` === value);
+    if (loc) return loc.postal_code ?? null;
+    const text = value.startsWith("txt:") ? value.slice(4) : value;
+    return /^\d{5}$/.test(text) ? text : null;
+  };
+
+  // Rule price follows the row's own date (future versions price future rows)
+  const rule = pickVersion(wageRules, dateValue);
   const autoPay = React.useMemo(
     () =>
-      calcTripWage({
-        driverType,
-        operation: operation as OperationType | undefined,
-        miles: Number(milesValue) || 0,
-        from: wageEndpoint(fromValue),
-        to: wageEndpoint(toValue)
-      }),
+      rule
+        ? calcTripWage({
+            driverType,
+            operation: operation as OperationType | undefined,
+            miles: Number(milesValue) || 0,
+            from: wageEndpoint(fromValue),
+            to: wageEndpoint(toValue),
+            fromPostal: postalOf(fromValue),
+            toPostal: postalOf(toValue),
+            rule
+          })
+        : 0,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [driverType, operation, milesValue, fromValue, toValue, locations]
+    [driverType, operation, milesValue, fromValue, toValue, locations, rule]
   );
 
   const payValue = manualPay ?? autoPay.toFixed(2);
@@ -296,7 +319,8 @@ const EntryRow = React.memo(function EntryRow({
         <Input
           type="date"
           name={`${prefix}trip_date`}
-          defaultValue={defaults?.trip_date || defaultDate}
+          value={dateValue}
+          onChange={e => setDateValue(e.target.value)}
           aria-label={`${legLabel}日期`}
           className={`${cellInput} font-mono`}
         />
@@ -401,6 +425,9 @@ const EntryRow = React.memo(function EntryRow({
             </button>
           </span>
         )}
+        {!rule && manualPay === null && (
+          <span className={`${cellHint} text-right`}>该日期无生效规则</span>
+        )}
       </td>
       <td className="px-1.5">
         <Input
@@ -445,6 +472,7 @@ const GroupSection = React.memo(function GroupSection({
   drivers,
   trucks,
   locations,
+  wageRules,
   sheetTable,
   removable,
   onRemove,
@@ -462,6 +490,7 @@ const GroupSection = React.memo(function GroupSection({
   drivers: DriverOption[];
   trucks: TruckOption[];
   locations: LocationOption[];
+  wageRules: WageRuleData[];
   /** Shared columns-only TanStack instance (thead + colgroup for this sheet) */
   sheetTable: TanstackTable<unknown>;
   removable: boolean;
@@ -716,6 +745,7 @@ const GroupSection = React.memo(function GroupSection({
                 defaultDate={date}
                 driverType={driverType}
                 locations={locations}
+                wageRules={wageRules}
                 defaults={slot.defaults}
                 removable={rows.length > 1}
                 carryFrom={i === 0 ? "" : (toByRow[rows[i - 1].id] ?? "")}
@@ -749,6 +779,7 @@ export function TripEntryForm({
   drivers,
   trucks,
   locations,
+  wageRules,
   defaultDriverId = "",
   refillGroups,
   initialActiveIndex,
@@ -1056,6 +1087,7 @@ export function TripEntryForm({
                 drivers={drivers}
                 trucks={trucks}
                 locations={locations}
+                wageRules={wageRules}
                 sheetTable={sheetTable}
                 removable={groups.length > 1}
                 onRemove={removeGroup}
