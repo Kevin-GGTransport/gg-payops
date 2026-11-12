@@ -186,3 +186,49 @@ model Trip {
   @@map("trips")
   @@schema("pay")
 }
+
+/// Wage-rule version keyed by effective_from (unique); pricing inputs come
+/// from the paper spec and are edited on the /dashboard/wage-rules page.
+/// raw-SQL access only (bigint identity ids, no Prisma-client writes)
+model WageRuleVersion {
+  id                BigInt   @id @default(autoincrement()) @db.BigInt
+  name              String   @db.VarChar(120)
+  effectiveFrom     DateTime @map("effective_from") @db.Date
+  ownerMultiplier   Decimal  @default(2.00) @map("owner_multiplier") @db.Decimal(5, 2)
+  bobtailMultiplier Decimal  @default(0.50) @map("bobtail_multiplier") @db.Decimal(5, 2)
+  overageIncrement  Decimal  @default(30.00) @map("overage_increment") @db.Decimal(12, 2)
+  status            String   @default("ACTIVE") @db.VarChar(16)
+  notes             String?  @db.VarChar(255)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([effectiveFrom], map: "uq_wage_rule_effective")
+  @@map("wage_rule_versions")
+  @@schema("pay")
+}
+
+/// Driver-price mileage band; legs at/above miles_from bill amount
+model WageRuleTier {
+  id        BigInt  @id @default(autoincrement()) @db.BigInt
+  versionId BigInt  @map("version_id") @db.BigInt
+  milesFrom Int     @map("miles_from")
+  amount    Decimal @db.Decimal(12, 2)
+
+  @@unique([versionId, milesFrom], map: "uq_wage_tier_version_miles")
+  @@map("wage_rule_tiers")
+  @@schema("pay")
+}
+
+/// Fixed-price postal pair (either direction bills one_way_amount)
+model WageRuleSpecialRoute {
+  id           BigInt  @id @default(autoincrement()) @db.BigInt
+  versionId    BigInt  @map("version_id") @db.BigInt
+  fromPostal   String  @map("from_postal") @db.VarChar(10)
+  toPostal     String  @map("to_postal") @db.VarChar(10)
+  oneWayAmount Decimal @map("one_way_amount") @db.Decimal(12, 2)
+  note         String? @db.VarChar(255)
+
+  @@index([versionId], map: "idx_wage_special_routes_version")
+  @@map("wage_rule_special_routes")
+  @@schema("pay")
+}
