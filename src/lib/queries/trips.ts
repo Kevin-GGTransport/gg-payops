@@ -6,8 +6,10 @@ import type { Period } from "@/lib/period";
 export type TripRow = {
   id: string;
   driver_id: string;
-  driver_code: string;
-  driver_name: string;
+  /** Submit-time driver name snapshot (never follows later driver edits) */
+  driver_name: string | null;
+  /** Truck code from the submit-time truck_snapshot */
+  truck_code: string | null;
   driver_type: DriverType;
   trip_date: string;
   operation: OperationType;
@@ -20,7 +22,8 @@ export type TripRow = {
 };
 
 const TRIP_SELECT = Prisma.sql`
-  SELECT t.id::text, t.driver_id::text, d.driver_code, d.full_name AS driver_name,
+  SELECT t.id::text, t.driver_id::text, t.driver_name,
+         t.truck_snapshot->>'truck_code' AS truck_code,
          d.driver_type::text AS driver_type,
          to_char(t.trip_date, 'YYYY-MM-DD') AS trip_date,
          t.operation::text AS operation, t.load_no,
@@ -56,7 +59,7 @@ export async function listTrips(filter: {
   if (filter.q) {
     const like = `%${filter.q}%`;
     clauses.push(
-      Prisma.sql`(d.full_name ILIKE ${like} OR d.driver_code ILIKE ${like} OR t.load_no ILIKE ${like} OR f.code ILIKE ${like} OR o.code ILIKE ${like})`
+      Prisma.sql`(t.driver_name ILIKE ${like} OR t.truck_snapshot->>'truck_code' ILIKE ${like} OR t.load_no ILIKE ${like} OR f.code ILIKE ${like} OR o.code ILIKE ${like})`
     );
   }
   const where = clauses.length > 0
@@ -71,7 +74,7 @@ export async function listTrips(filter: {
         ${TRIP_SELECT}${where}
       ) list
     ) page
-    ORDER BY page.trip_date DESC, page.driver_code, page.created_at
+    ORDER BY page.trip_date DESC, page.driver_name, page.created_at
     ${limit}
   `;
 }

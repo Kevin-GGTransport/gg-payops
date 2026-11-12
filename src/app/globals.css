@@ -510,6 +510,10 @@ th.col-th {
 .group-band {
   @apply flex flex-wrap items-end gap-x-4 gap-y-2.5 border-t-[1.5px] border-t-navy bg-muted/50 px-2.5 py-2.5;
 }
+/* TanStack+shadcn 表壳：表头回归台账规范（覆盖 TableHead 原语底色/字号） */
+.roster thead th {
+  @apply bg-transparent px-3 py-2.5 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground;
+}
 /* 面板右上关闭链接 */
 .panel-cap .panel-x {
   @apply text-base font-bold leading-none text-muted-foreground no-underline;

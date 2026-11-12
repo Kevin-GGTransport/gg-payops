@@ -4,7 +4,6 @@ import Link from "next/link";
 import { ModalShell } from "@/components/modal-shell";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel, LedgerEmpty } from "@/components/ledger";
-import { StatusPill } from "@/components/badges";
 import {
   FormGrid,
   TextField,
@@ -16,7 +15,7 @@ import {
 } from "@/components/form-fields";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
-import { todayIso } from "@/lib/format";
+import { todayIso, odometerMi } from "@/lib/format";
 import {
   listTrucks,
   getTruckById,
@@ -25,8 +24,9 @@ import {
   truckOdometerHistory,
   activeOwnerOptions
 } from "@/lib/queries/trucks";
-import { saveTruck, setTruckStatus, addOdometerReading, deleteOdometerReading } from "./actions";
+import { saveTruck, addOdometerReading, deleteOdometerReading } from "./actions";
 import { OwnershipPicker } from "./ownership-picker";
+import { TrucksTable } from "./trucks-table";
 
 export const metadata: Metadata = { title: "车辆管理 · G&G PayOps" };
 
@@ -37,13 +37,6 @@ const ERROR_MESSAGES: Record<string, string> = {
   bad_date: "读取日期无效。",
   bad_odometer: "表显里程必须是不小于 0 的数字。"
 };
-
-/** Odometer with one decimal: 12,345.6 mi */
-function odometerText(value: string | null) {
-  return value === null
-    ? null
-    : `${Number(value).toLocaleString("en-US", { maximumFractionDigits: 1 })} mi`;
-}
 
 export default async function TrucksPage({
   searchParams
@@ -142,64 +135,15 @@ export default async function TrucksPage({
         </div>
 
         <LedgerPanel>
-          <table className="roster">
-            <thead>
-              <tr>
-                <th>车号</th><th>车牌号</th><th>车型</th><th>归属</th>
-                <th>表显里程</th><th>状态</th><th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trucks.length === 0 && (
-                <LedgerEmpty colSpan={7}>
-                  {q || ownFilter !== "all"
-                    ? "没有符合条件的记录。换个筛选条件，或直接新增一辆车。"
-                    : "还没有车辆档案。点右上角「新增登记」登记第一辆车。"}
-                </LedgerEmpty>
-              )}
-              {trucks.map(truck => (
-                <tr key={truck.id} className={truck.status !== "ACTIVE" ? "row-off" : ""}>
-                  <td className="mono strong">{truck.truck_code}</td>
-                  <td className="mono">{truck.plate_no ?? "—"}</td>
-                  <td>{truck.truck_type ?? "—"}</td>
-                  <td>
-                    {truck.ownership_id === null ? (
-                      <span className="text-muted-foreground">未登记</span>
-                    ) : truck.owner_id ? (
-                      <span className="strong">{truck.owner_name}</span>
-                    ) : (
-                      <span className="rounded-[3px] border border-line bg-card px-1.5 py-0.5 text-[11px] font-semibold text-foreground">
-                        公司自有
-                      </span>
-                    )}
-                  </td>
-                  <td className="mono">
-                    {truck.odometer === null ? (
-                      "—"
-                    ) : (
-                      <>
-                        {odometerText(truck.odometer)}
-                        <span className="muted-inline">{truck.odometer_date}</span>
-                      </>
-                    )}
-                  </td>
-                  <td><StatusPill status={truck.status} /></td>
-                  <td className="actions">
-                    <Link href={`/dashboard/trucks?edit=${truck.id}${returnTo ? `&${returnTo}` : ""}`}>编辑</Link>
-                    <Link href={`/dashboard/trucks?odo=${truck.id}${returnTo ? `&${returnTo}` : ""}`}>里程</Link>
-                    <form action={setTruckStatus}>
-                      <input type="hidden" name="id" value={truck.id} />
-                      <input type="hidden" name="status" value={truck.status === "ACTIVE" ? "INACTIVE" : "ACTIVE"} />
-                      <input type="hidden" name="return_to" value={returnTo} />
-                      <button type="submit" className="linklike">
-                        {truck.status === "ACTIVE" ? "停用" : "启用"}
-                      </button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <TrucksTable
+            trucks={trucks}
+            returnTo={returnTo}
+            empty={
+              q || ownFilter !== "all"
+                ? "没有符合条件的记录。换个筛选条件，或直接新增一辆车。"
+                : "还没有车辆档案。点右上角「新增登记」登记第一辆车。"
+            }
+          />
         </LedgerPanel>
       </section>
 
@@ -274,7 +218,7 @@ export default async function TrucksPage({
               {odometerHistory.map(row => (
                 <tr key={row.id}>
                   <td className="mono">{row.reading_date}</td>
-                  <td className="mono num strong">{odometerText(row.odometer)}</td>
+                  <td className="mono num strong">{odometerMi(row.odometer)}</td>
                   <td>{row.note ?? "—"}</td>
                   <td className="actions">
                     <form action={deleteOdometerReading}>

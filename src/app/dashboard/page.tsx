@@ -7,12 +7,15 @@ import { todayIso } from "@/lib/format";
 import { firstValue, type SearchParams } from "@/lib/search-params";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeLocationOptions } from "@/lib/queries/locations";
+import { activeTruckOptions } from "@/lib/queries/trucks";
 import { TripEntryForm, type RefillGroup } from "./trip-entry-form";
 
 export const metadata: Metadata = { title: "录入行程 · G&G PayOps" };
 
 const ERROR_MESSAGES: Record<string, string> = {
   missing_driver: "请选择司机 / 车主。",
+  missing_truck: "请选择车号（车辆需先在车辆管理登记）。",
+  bad_truck: "所选车辆无效或已停用，请重新选择车号。",
   no_rows: "请至少录入一段行程。",
   bad_date: "行程日期无效，请检查该行的日期。",
   missing_operation: "请选择操作类型。",
@@ -67,13 +70,18 @@ export default async function EntryPage({
               : [];
           return {
             driverId: firstValue(sp[`f_g_${g}_driver_id`]) ?? "",
+            truckId: firstValue(sp[`f_g_${g}_truck_id`]) ?? "",
             date: firstValue(sp[`f_g_${g}_trip_date`]) ?? "",
             rows
           };
         })
       : undefined;
 
-  const [drivers, locations] = await Promise.all([activeDriverOptions(), activeLocationOptions()]);
+  const [drivers, trucks, locations] = await Promise.all([
+    activeDriverOptions(),
+    activeTruckOptions(),
+    activeLocationOptions()
+  ]);
 
   const errorMessage = errorCode
     ? errorCode in ERROR_MESSAGES
@@ -104,6 +112,7 @@ export default async function EntryPage({
 
       <TripEntryForm
         drivers={drivers}
+        trucks={trucks}
         locations={locations}
         defaultDriverId={preselectedDriver}
         defaultDate={todayIso()}

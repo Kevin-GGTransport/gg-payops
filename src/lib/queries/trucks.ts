@@ -135,3 +135,15 @@ export async function activeOwnerOptions() {
     ORDER BY driver_code
   `;
 }
+
+/** Trip-entry truck picker options: active trucks */
+export async function activeTruckOptions() {
+  return prisma.$queryRaw<
+    { id: string; truck_code: string; plate_no: string | null; truck_type: string | null }[]
+  >`
+    SELECT id::text, truck_code, plate_no, truck_type
+    FROM ops.trucks
+    WHERE status = 'ACTIVE'
+    ORDER BY truck_code
+  `;
+}

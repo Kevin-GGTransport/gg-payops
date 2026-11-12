@@ -2,9 +2,11 @@
 
 import * as React from "react";
 import { CameraIcon, GripVerticalIcon, PlusIcon } from "lucide-react";
+import type { ColumnDef, Table as TanstackTable } from "@tanstack/react-table";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { ComboboxField } from "@/components/combobox-field";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
 import { calcTripWage } from "@/lib/wage";
@@ -25,6 +27,13 @@ type DriverOption = {
   driver_type: DriverType;
 };
 
+type TruckOption = {
+  id: string;
+  truck_code: string;
+  plate_no: string | null;
+  truck_type: string | null;
+};
+
 /** One row's initial values (photo import or failed-submit refill) */
 export type RefillRow = {
   trip_date?: string;
@@ -37,15 +46,17 @@ export type RefillRow = {
   notes: string;
 };
 
-/** One group's initial shape: one driver + a default date + its own rows */
+/** One group's initial shape: one driver + one truck + a default date + its own rows */
 export type RefillGroup = {
   driverId: string;
+  truckId: string;
   date: string;
   rows: RefillRow[];
 };
 
 type TripEntryFormProps = {
   drivers: DriverOption[];
+  trucks: TruckOption[];
   locations: LocationOption[];
   defaultDriverId?: string;
   defaultDate?: string;
@@ -61,52 +72,27 @@ const INITIAL_ROWS = 3;
 const cellInput = "h-8 border-0 bg-transparent px-2 shadow-none rounded-none text-[13px] focus-visible:ring-1";
 const cellHint = "block text-[10px] leading-tight font-normal text-muted-foreground";
 
-type ColumnDef = { key: string; label: string; width: number; min: number; num?: boolean };
-
 /**
- * Resizable column layout shared by every group table (the trailing actions
- * column is fixed and not listed). Defaults stay under ~1000px so common
- * laptop widths fit without horizontal scrolling; drag handles adjust per
- * user and persist to localStorage.
+ * Column layout of every group sheet, fed to the shared TanStack shell
+ * (columns-only instance - the body rows are the form grid below). Defaults
+ * stay under ~1000px so common laptop widths fit without horizontal
+ * scrolling; widths persist per storageKey and reset on double-click.
  */
-const COLUMNS: ColumnDef[] = [
-  { key: "trip_date", label: "日期", width: 100, min: 84 },
-  { key: "from_location", label: "起点", width: 130, min: 100 },
-  { key: "to_location", label: "终点", width: 130, min: 100 },
-  { key: "operation", label: "操作", width: 72, min: 64 },
-  { key: "load_no", label: "Load#", width: 90, min: 76 },
-  { key: "miles", label: "里程 (mi)", width: 82, min: 72, num: true },
-  { key: "pay_amount", label: "本趟工资 ($)", width: 100, min: 92, num: true },
-  { key: "notes", label: "备注", width: 182, min: 100 }
+const SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
+  { id: "handle", header: "", size: 28, enableResizing: false, meta: { headerClass: "px-1" } },
+  { id: "trip_date", header: "日期", size: 100, minSize: 84 },
+  { id: "from_location", header: "起点", size: 130, minSize: 100 },
+  { id: "to_location", header: "终点", size: 130, minSize: 100 },
+  { id: "operation", header: "操作", size: 72, minSize: 64 },
+  { id: "load_no", header: "Load#", size: 90, minSize: 76 },
+  { id: "miles", header: "里程 (mi)", size: 82, minSize: 72, meta: { headerClass: "num" } },
+  { id: "pay_amount", header: "本趟工资 ($)", size: 100, minSize: 92, meta: { headerClass: "num" } },
+  { id: "notes", header: "备注", size: 182, minSize: 100 },
+  { id: "delete", header: "删除", size: 40, enableResizing: false, meta: { headerClass: "px-1.5" } }
 ];
 
-/** Width of the leading drag-handle column (fixed, not resizable) */
-const HANDLE_COL_W = 28;
-/** Width of the trailing delete-actions column (fixed, not resizable) */
-const ACTIONS_COL_W = 40;
-const COL_WIDTHS_KEY = "payops.entry.colwidths";
-
-function defaultColWidths() {
-  return COLUMNS.map(c => c.width);
-}
-
-function loadColWidths(): number[] {
-  if (typeof window === "undefined") return defaultColWidths();
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(COL_WIDTHS_KEY) ?? "");
-    if (
-      Array.isArray(parsed) &&
-      parsed.length === COLUMNS.length &&
-      parsed.every(n => typeof n === "number" && n > 0)
-    ) {
-      // Re-clamp in case the stored value predates a min-width bump
-      return parsed.map((n: number, i) => Math.max(n, COLUMNS[i].min));
-    }
-  } catch {
-    // Missing / corrupted value -> defaults
-  }
-  return defaultColWidths();
-}
+/** Columns-only instance has no rows; keep the reference stable across renders */
+const NO_ROWS: unknown[] = [];
 
 type CalcStatus = "loading" | "auto" | "failed";
 
@@ -410,8 +396,8 @@ function EntryRow({
 /** A row slot: stable id (React key, never reused) plus its one-shot defaults */
 type RowSlot = { id: number; defaults?: RefillRow };
 
-/** A group slot: stable id + one-shot initial driver/date/rows */
-type GroupSlot = { id: number; driverId: string; date: string; rows: RowSlot[] };
+/** A group slot: stable id + one-shot initial driver/truck/date/rows */
+type GroupSlot = { id: number; driverId: string; truckId: string; date: string; rows: RowSlot[] };
 
 /**
  * One driver group as a tab panel: a navy-ruled driver band (driver picker,
@@ -424,9 +410,9 @@ function GroupSection({
   index,
   group,
   drivers,
+  trucks,
   locations,
-  colWidths,
-  onResizeStart,
+  sheetTable,
   removable,
   onRemove,
   onDriverChange,
@@ -441,9 +427,10 @@ function GroupSection({
   index: number;
   group: GroupSlot;
   drivers: DriverOption[];
+  trucks: TruckOption[];
   locations: LocationOption[];
-  colWidths: number[];
-  onResizeStart: (e: React.PointerEvent<HTMLSpanElement>, colIndex: number) => void;
+  /** Shared columns-only TanStack instance (thead + colgroup for this sheet) */
+  sheetTable: TanstackTable<unknown>;
   removable: boolean;
   onRemove: () => void;
   /** Reports the picked driver upward (feeds the tab label) */
@@ -553,6 +540,22 @@ function GroupSection({
             group: DRIVER_TYPE_LABELS[d.driver_type]
           }))}
         />
+        <ComboboxField
+          label="车号"
+          name={`${prefix}_truck_id`}
+          defaultValue={group.truckId}
+          placeholder="请选择车号"
+          searchPlaceholder="搜索车号"
+          mono
+          clearable={false}
+          className="w-44"
+          triggerClassName="h-10"
+          options={trucks.map(t => ({
+            value: t.id,
+            label: t.truck_code,
+            description: [t.plate_no, t.truck_type].filter(Boolean).join(" · ") || undefined
+          }))}
+        />
         <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
           日期（新行默认）
           <Input
@@ -582,42 +585,16 @@ function GroupSection({
         <input type="hidden" name={`${prefix}_row_count`} value={rows.length} />
       </div>
 
-      <div className="table-wrap">
-        <table className="roster table-fixed w-full">
-          <colgroup>
-            <col style={{ width: HANDLE_COL_W }} />
-            {COLUMNS.map((column, i) => (
-              <col key={column.key} style={{ width: colWidths[i] }} />
-            ))}
-            <col style={{ width: ACTIONS_COL_W }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th className="px-1" aria-label="排序" />
-              {COLUMNS.map((column, i) => (
-                <th key={column.key} className={`col-th px-1.5${column.num ? " num" : ""}`}>
-                  {column.label}
-                  <span
-                    className="col-resizer"
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-label={`调整「${column.label}」列宽`}
-                    onPointerDown={e => onResizeStart(e, i)}
-                  />
-                </th>
-              ))}
-              <th className="px-1.5">删除</th>
-            </tr>
-          </thead>
-          <tbody
-            className="tb-group"
-            onDragLeave={event => {
-              // Drag left this sheet entirely (moving between our own rows doesn't)
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                setDropAt(null);
-              }
-            }}
-          >
+      <RosterTable table={sheetTable}>
+        <tbody
+          className="tb-group"
+          onDragLeave={event => {
+            // Drag left this sheet entirely (moving between our own rows doesn't)
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setDropAt(null);
+            }
+          }}
+        >
             {rows.map((slot, i) => (
               <EntryRow
                 key={slot.id}
@@ -662,9 +639,8 @@ function GroupSection({
                 }}
               />
             ))}
-          </tbody>
-        </table>
-      </div>
+        </tbody>
+      </RosterTable>
 
       <div className="flex items-center justify-end border-t border-line px-3 py-2.5">
         <Button type="submit" name="submit_group" value={String(index)} className="h-8 px-4">
@@ -684,6 +660,7 @@ function GroupSection({
  */
 export function TripEntryForm({
   drivers,
+  trucks,
   locations,
   defaultDriverId = "",
   defaultDate,
@@ -691,11 +668,17 @@ export function TripEntryForm({
   initialActiveIndex
 }: TripEntryFormProps) {
   const [photoOpen, setPhotoOpen] = React.useState(false);
-  const [colWidths, setColWidths] = React.useState<number[]>(loadColWidths);
+  // One columns-only instance shared by every tab's sheet (synced column widths)
+  const sheetTable = useRosterTable({
+    data: NO_ROWS,
+    columns: SHEET_COLUMNS,
+    storageKey: "payops.entry.sheet.cols"
+  });
   const initialGroups: GroupSlot[] = refillGroups
     ? refillGroups.map((g, i) => ({
         id: i + 1,
         driverId: g.driverId,
+        truckId: g.truckId,
         date: g.date || todayIso(),
         rows: g.rows.map((row, j) => ({ id: j + 1, defaults: row }))
       }))
@@ -703,6 +686,7 @@ export function TripEntryForm({
         {
           id: 1,
           driverId: defaultDriverId,
+          truckId: "",
           date: defaultDate || todayIso(),
           rows: Array.from({ length: INITIAL_ROWS }, (_, i) => ({ id: i + 1 }))
         }
@@ -732,44 +716,8 @@ export function TripEntryForm({
   // Whether the user has changed anything (guards photo-import replacement)
   const dirtyRef = React.useRef(false);
 
-  // Persist dragged column widths for the next session
-  React.useEffect(() => {
-    try {
-      window.localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(colWidths));
-    } catch {
-      // Storage unavailable (private mode) -> widths stay session-only
-    }
-  }, [colWidths]);
-
   const totalRows = Object.values(rowCounts).reduce((acc, n) => acc + n, 0);
   const totalPay = Object.values(pays).reduce((acc, v) => acc + (Number(v) || 0), 0);
-
-  /** Drag a column edge: pointer capture on the handle, width clamped per column */
-  const startResize = React.useCallback(
-    (e: React.PointerEvent<HTMLSpanElement>, colIndex: number) => {
-      e.preventDefault();
-      const el = e.currentTarget;
-      el.setPointerCapture(e.pointerId);
-      const startX = e.clientX;
-      const startWidth = colWidths[colIndex];
-      const min = COLUMNS[colIndex].min;
-      const onMove = (ev: PointerEvent) => {
-        const next = Math.max(min, Math.round(startWidth + ev.clientX - startX));
-        setColWidths(current =>
-          current[colIndex] === next ? current : current.map((v, i) => (i === colIndex ? next : v))
-        );
-      };
-      const onUp = () => {
-        el.removeEventListener("pointermove", onMove);
-        el.removeEventListener("pointerup", onUp);
-        el.removeEventListener("pointercancel", onUp);
-      };
-      el.addEventListener("pointermove", onMove);
-      el.addEventListener("pointerup", onUp);
-      el.addEventListener("pointercancel", onUp);
-    },
-    [colWidths]
-  );
 
   const handlePayChange = React.useCallback((groupId: number, rowId: number, value: string) => {
     setPays(current => {
@@ -805,7 +753,7 @@ export function TripEntryForm({
     const id = nextGroupId.current++;
     setGroups(current => [
       ...current,
-      { id, driverId: "", date: todayIso(), rows: [{ id: 1 }] }
+      { id, driverId: "", truckId: "", date: todayIso(), rows: [{ id: 1 }] }
     ]);
     // Open the fresh tab so the clerk picks its driver right away
     setActiveId(String(id));
@@ -870,7 +818,7 @@ export function TripEntryForm({
         notes: row.notes
       }
     }));
-    const group: GroupSlot = { id, driverId: apply.driverId, date, rows };
+    const group: GroupSlot = { id, driverId: apply.driverId, truckId: "", date, rows };
     if (dirtyRef.current) {
       setGroups(current => [...current, group]);
     } else {
@@ -938,9 +886,9 @@ export function TripEntryForm({
                 index={gi}
                 group={group}
                 drivers={drivers}
+                trucks={trucks}
                 locations={locations}
-                colWidths={colWidths}
-                onResizeStart={startResize}
+                sheetTable={sheetTable}
                 removable={groups.length > 1}
                 onRemove={() => removeGroup(group.id)}
                 onDriverChange={driverId =>

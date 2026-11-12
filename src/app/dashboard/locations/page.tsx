@@ -2,16 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ModalShell } from "@/components/modal-shell";
 import { PageHeader } from "@/components/page-header";
-import { LedgerPanel, LedgerEmpty } from "@/components/ledger";
-import { LocationTypeBadge, StatusPill } from "@/components/badges";
+import { LedgerPanel } from "@/components/ledger";
 import { FormGrid, TextField, NumberField, SubmitButton, FormError } from "@/components/form-fields";
 import { ComboboxField } from "@/components/combobox-field";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
-import { fullAddress } from "@/lib/format";
 import { LOCATION_TYPE_LABELS, type LocationType } from "@/lib/labels";
 import { listLocations, getLocationById, locationTypeCounts } from "@/lib/queries/locations";
-import { saveLocation, setLocationStatus } from "./actions";
+import { saveLocation } from "./actions";
+import { LocationsTable } from "./locations-table";
 
 export const metadata: Metadata = { title: "位置管理 · G&G PayOps" };
 
@@ -100,34 +99,10 @@ export default async function LocationsPage({
         </div>
 
         <LedgerPanel>
-          <table className="roster">
-            <thead>
-              <tr><th>代码</th><th>名称</th><th>详细地址</th><th>类型</th><th className="num">基准金额</th><th>状态</th><th>操作</th></tr>
-            </thead>
-            <tbody>
-              {locations.length === 0 && <LedgerEmpty colSpan={7}>没有符合条件的位置。换筛选条件，或点右上角新增。</LedgerEmpty>}
-              {locations.map(location => (
-                <tr key={location.id} className={location.status !== "ACTIVE" ? "row-off" : ""}>
-                  <td className="mono strong">{location.code}</td>
-                  <td>{location.name}</td>
-                  <td className="text-muted-foreground">{fullAddress(location) || "—"}</td>
-                  <td><LocationTypeBadge type={location.location_type} /></td>
-                  <td className="num">${Number(location.standard_pay_amount).toFixed(2)}</td>
-                  <td><StatusPill status={location.status} /></td>
-                  <td className="actions">
-                    <Link href={`/dashboard/locations?edit=${location.id}`}>编辑</Link>
-                    <form action={setLocationStatus}>
-                      <input type="hidden" name="id" value={location.id} />
-                      <input type="hidden" name="status" value={location.status === "ACTIVE" ? "INACTIVE" : "ACTIVE"} />
-                      <button type="submit" className="linklike">
-                        {location.status === "ACTIVE" ? "停用" : "启用"}
-                      </button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <LocationsTable
+            locations={locations}
+            empty="没有符合条件的位置。换筛选条件，或点右上角新增。"
+          />
         </LedgerPanel>
       </section>
 

@@ -29,6 +29,8 @@ type ParsedRow = {
 
 type ParsedGroup = {
   driverId: string;
+  /** Group-level truck (车号): snapshotted at submit, not a stored FK */
+  truckId: string;
   /** Group-level default date; each row may still carry its own */
   tripDate: string;
   rows: ParsedRow[];
@@ -75,6 +77,7 @@ function packRefill(
     if (g === skipIndex) continue;
     const group = groups[g];
     if (group.driverId) params.set(`f_g_${kept}_driver_id`, group.driverId);
+    if (group.truckId) params.set(`f_g_${kept}_truck_id`, group.truckId);
     if (group.tripDate) params.set(`f_g_${kept}_trip_date`, group.tripDate);
     params.set(`f_g_${kept}_row_count`, String(group.rows.length));
     for (let i = 0; i < group.rows.length; i++) {
@@ -185,7 +188,12 @@ export async function addTripsBatch(formData: FormData) {
       });
     }
     total += rows.length;
-    groups.push({ driverId: str(formData, `g_${g}_driver_id`), tripDate: groupDate, rows });
+    groups.push({
+      driverId: str(formData, `g_${g}_driver_id`),
+      truckId: str(formData, `g_${g}_truck_id`),
+      tripDate: groupDate,
+      rows
+    });
   }
 
   if (total === 0) backWithError("no_rows", formData, groups);
@@ -198,6 +206,7 @@ export async function addTripsBatch(formData: FormData) {
     const group = groups[g];
     const grp = g + 1;
     if (!group.driverId) backWithError("missing_driver", formData, groups, grp);
+    if (!group.truckId) backWithError("missing_truck", formData, groups, grp);
     for (let i = 0; i < group.rows.length; i++) {
       const row = group.rows[i];
       const leg = i + 1;
@@ -218,6 +227,51 @@ export async function addTripsBatch(formData: FormData) {
     }
   }
 
+  // Submit-time snapshots: the driver's current name and the truck's full
+  // record, frozen into every trip row (later archive edits never rewrite
+  // history; driver_id stays for payroll joins)
+  const snapDriverIds = [...new Set(active.map(g => groups[g].driverId))];
+  const driverNameRows = await prisma.$queryRaw<{ id: string; full_name: string }[]>`
+    SELECT id::text, full_name FROM ops.drivers
+    WHERE id IN (${Prisma.join(snapDriverIds.map(id => Prisma.sql`${id}::bigint`))})
+  `;
+  const driverNames = new Map(driverNameRows.map(r => [r.id, r.full_name]));
+  const snapTruckIds = [...new Set(active.map(g => groups[g].truckId))];
+  const truckRows = await prisma.$queryRaw<
+    Array<{
+      id: string;
+      truck_code: string;
+      plate_no: string | null;
+      truck_type: string | null;
+      capacity_note: string | null;
+    }>
+  >`
+    SELECT id::text, truck_code, plate_no, truck_type, capacity_note
+    FROM ops.trucks
+    WHERE id IN (${Prisma.join(snapTruckIds.map(id => Prisma.sql`${id}::bigint`))})
+      AND status = 'ACTIVE'
+  `;
+  const truckSnapshots = new Map(
+    truckRows.map(t => [
+      t.id,
+      JSON.stringify({
+        truck_id: t.id,
+        truck_code: t.truck_code,
+        plate_no: t.plate_no,
+        truck_type: t.truck_type,
+        capacity_note: t.capacity_note
+      })
+    ])
+  );
+  for (const g of active) {
+    if (!driverNames.has(groups[g].driverId)) {
+      backWithError("missing_driver", formData, groups, g + 1);
+    }
+    if (!truckSnapshots.has(groups[g].truckId)) {
+      backWithError("bad_truck", formData, groups, g + 1);
+    }
+  }
+
   // Resolve every distinct endpoint once (free text may create a new location)
   const endpointIds = new Map<string, string>();
   for (const value of [
@@ -231,7 +285,7 @@ export async function addTripsBatch(formData: FormData) {
   // Duplicate guard: one DB read covering every driver and every date in this
   // batch, compared in memory (per row's own driver and date) against both
   // existing rows and this batch
-  const driverIds = [...new Set(active.map(g => groups[g].driverId))];
+  const driverIds = snapDriverIds;
   const batchDates = [...new Set(active.flatMap(g => groups[g].rows.map(r => r.tripDate)))];
   const existing = await prisma.$queryRaw<
     Array<{
@@ -268,6 +322,8 @@ export async function addTripsBatch(formData: FormData) {
       seen.add(key);
       return {
         driverId: groups[gi].driverId,
+        driverName: driverNames.get(groups[gi].driverId) ?? "",
+        truckSnapshot: truckSnapshots.get(groups[gi].truckId) ?? "",
         tripDate: row.tripDate,
         fromId,
         toId,
@@ -283,11 +339,13 @@ export async function addTripsBatch(formData: FormData) {
 
   const values = insertRows.map(r => Prisma.sql`
     (${r.driverId}::bigint, ${r.tripDate}::date, ${r.operation}::ops.operation_type, ${r.loadNo},
-     ${r.fromId || null}::bigint, ${r.toId || null}::bigint, ${r.milesNum}, ${r.payNum}, ${r.notes})
+     ${r.fromId || null}::bigint, ${r.toId || null}::bigint, ${r.milesNum}, ${r.payNum}, ${r.notes},
+     ${r.driverName}, ${r.truckSnapshot}::jsonb)
   `);
   await prisma.$executeRaw`
     INSERT INTO pay.trips(driver_id, trip_date, operation, load_no,
-      from_location_id, to_location_id, miles, pay_amount, notes)
+      from_location_id, to_location_id, miles, pay_amount, notes,
+      driver_name, truck_snapshot)
     VALUES ${Prisma.join(values)}
   `;
 

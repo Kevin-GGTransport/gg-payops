@@ -174,6 +174,10 @@ model Trip {
   miles          Decimal       @default(0) @db.Decimal(10, 2)
   payAmount      Decimal       @default(0) @map("pay_amount") @db.Decimal(12, 2)
   notes          String?
+  /// Submit-time driver name snapshot (driver_id stays for payroll joins)
+  driverName     String?       @map("driver_name") @db.VarChar(120)
+  /// Submit-time full truck snapshot {truck_id, truck_code, plate_no, truck_type, capacity_note}
+  truckSnapshot  Json?         @map("truck_snapshot")
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 

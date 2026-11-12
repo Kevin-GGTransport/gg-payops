@@ -11,6 +11,13 @@ export function miles(value: string | number | null | undefined) {
   return Number(value ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
+/** Odometer reading with one decimal: 12,345.6 mi */
+export function odometerMi(value: string | number | null | undefined) {
+  return value === null || value === undefined
+    ? null
+    : `${Number(value).toLocaleString("en-US", { maximumFractionDigits: 1 })} mi`;
+}
+
 /** Full address: street, city, state zip (empty segments skipped) */
 export function fullAddress(fields: {
   address_line: string | null;

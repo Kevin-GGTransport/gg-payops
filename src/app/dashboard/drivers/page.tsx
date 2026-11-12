@@ -2,16 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ModalShell } from "@/components/modal-shell";
 import { PageHeader } from "@/components/page-header";
-import { LedgerPanel, LedgerEmpty } from "@/components/ledger";
-import { DriverTypeBadge, StatusPill } from "@/components/badges";
+import { LedgerPanel } from "@/components/ledger";
 import { DriverTypeCards } from "@/components/choice-cards";
 import { FormGrid, TextField, DateField, TextareaField, SubmitButton, FormError } from "@/components/form-fields";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
-import { daysUntil } from "@/lib/format";
 import type { DriverType } from "@/lib/labels";
 import { listDrivers, getDriverById, driverTypeCounts } from "@/lib/queries/drivers";
-import { saveDriver, setDriverStatus } from "./actions";
+import { saveDriver } from "./actions";
+import { DriversTable } from "./drivers-table";
 
 export const metadata: Metadata = { title: "司机管理 · G&G PayOps" };
 
@@ -108,62 +107,15 @@ export default async function DriversPage({
         </div>
 
         <LedgerPanel>
-          <table className="roster">
-            <thead>
-              <tr>
-                <th>车号</th><th>姓名</th><th>类型</th>
-                <th className="hidden lg:table-cell">电话</th>
-                <th className="hidden lg:table-cell">驾照号</th>
-                <th className="hidden lg:table-cell">驾照到期</th>
-                <th className="hidden lg:table-cell">入职日期</th>
-                <th>状态</th><th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {drivers.length === 0 && (
-                <LedgerEmpty colSpan={9}>
-                  {q || typeFilter !== "all"
-                    ? "没有符合条件的记录。换个筛选条件，或直接新增一位司机 / 车主。"
-                    : "还没有司机档案。点右上角「新增登记」登记第一位司机或车主。"}
-                </LedgerEmpty>
-              )}
-              {drivers.map(driver => {
-                const expiry = driver.license_expires_on;
-                const expiryDays = expiry ? daysUntil(expiry) : null;
-                const expiryClass = expiryDays === null ? "" : expiryDays < 0 ? "expired" : expiryDays <= 90 ? "expiring" : "";
-                return (
-                  <tr key={driver.id} className={driver.status !== "ACTIVE" ? "row-off" : ""}>
-                    <td className="mono strong">{driver.driver_code}</td>
-                    <td className="strong">{driver.full_name}</td>
-                    <td><DriverTypeBadge type={driver.driver_type} /></td>
-                    <td className="mono hidden lg:table-cell">{driver.phone ?? "—"}</td>
-                    <td className="mono hidden lg:table-cell">
-                      {driver.license_no ?? "—"}
-                      {driver.license_class && <span className="lic-class">{driver.license_class}</span>}
-                    </td>
-                        <td className={`mono hidden lg:table-cell ${expiryClass}`}>
-                      {expiry ?? "—"}
-                      {expiryClass === "expired" && <span className="lic-flag">已过期</span>}
-                      {expiryClass === "expiring" && <span className="lic-flag">90 天内</span>}
-                    </td>
-                    <td className="mono hidden lg:table-cell">{driver.hire_date ?? "—"}</td>
-                    <td><StatusPill status={driver.status} /></td>
-                    <td className="actions">
-                      <Link href={`/dashboard/drivers?edit=${driver.id}`}>编辑</Link>
-                      <form action={setDriverStatus}>
-                        <input type="hidden" name="id" value={driver.id} />
-                        <input type="hidden" name="status" value={driver.status === "ACTIVE" ? "INACTIVE" : "ACTIVE"} />
-                        <input type="hidden" name="return_to" value={returnTo} />
-                        <button type="submit" className="linklike">
-                          {driver.status === "ACTIVE" ? "停用" : "启用"}
-                        </button>
-                      </form>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <DriversTable
+            drivers={drivers}
+            returnTo={returnTo}
+            empty={
+              q || typeFilter !== "all"
+                ? "没有符合条件的记录。换个筛选条件，或直接新增一位司机 / 车主。"
+                : "还没有司机档案。点右上角「新增登记」登记第一位司机或车主。"
+            }
+          />
         </LedgerPanel>
       </section>
 

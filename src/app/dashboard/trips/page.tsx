@@ -1,23 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
-import { LedgerPanel, LedgerEmpty } from "@/components/ledger";
-import { DriverTypeBadge, OperationBadge } from "@/components/badges";
+import { LedgerPanel } from "@/components/ledger";
 import { ComboboxField } from "@/components/combobox-field";
-import { SelectAll } from "@/components/select-all";
 import { AutoSubmitDate } from "@/components/auto-submit";
 import { FilterSelect } from "@/components/filter-select";
 import { BatchDeleteTrips } from "@/components/batch-delete";
-import { ConfirmButton } from "@/components/confirm-button";
 import { CleanForm } from "@/components/clean-form";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { allValues, firstValue, type SearchParams } from "@/lib/search-params";
-import { miles as fmtMiles, money } from "@/lib/format";
 import { OPERATION_META, type OperationType } from "@/lib/labels";
 import { listTrips } from "@/lib/queries/trips";
 import { activeDriverOptions } from "@/lib/queries/drivers";
-import { deleteTrip } from "./actions";
+import { TripsTable } from "./trips-table";
 
 export const metadata: Metadata = { title: "行程管理 · G&G PayOps" };
 
@@ -165,59 +161,15 @@ export default async function TripsPage({
 
       <section aria-label="行程台账">
         <LedgerPanel label={<>行程台账<b>{total} 段</b></>}>
-          <table className="roster">
-            <thead>
-              <tr>
-                <th className="check-cell">{trips.length > 0 && <SelectAll />}</th>
-                <th>日期</th><th>司机 / 车主</th><th>操作</th><th>Load#</th><th>起点 → 终点</th><th className="num">Miles</th><th className="num">本趟工资</th><th className="hidden lg:table-cell">备注</th><th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trips.length === 0 && (
-                <LedgerEmpty colSpan={10}>
-                  {hasFilter
-                    ? "没有符合条件的行程。调整筛选条件，或点右上角「录入行程」前往首页录入。"
-                    : "还没有行程。点右上角「录入行程」前往首页开始记录。"}
-                </LedgerEmpty>
-              )}
-              {trips.map(leg => (
-                <tr key={leg.id}>
-                  <td className="check-cell">
-                    <input
-                      type="checkbox"
-                      className="row-check"
-                      name="selected"
-                      value={leg.id}
-                      aria-label={`选择 ${leg.driver_name} ${leg.trip_date} 的行程`}
-                    />
-                  </td>
-                  <td className="mono">{leg.trip_date}</td>
-                  <td>
-                    <span className="strong">{leg.driver_name}</span>
-                    <span className="muted-inline">{leg.driver_code}</span>
-                    <DriverTypeBadge type={leg.driver_type} />
-                  </td>
-                  <td><OperationBadge operation={leg.operation} /></td>
-                  <td className="mono">{leg.load_no || "—"}</td>
-                  <td className="mono">
-                    {leg.from_code ?? "—"} <span className="route-arrow">→</span> {leg.to_code ?? "—"}
-                  </td>
-                  <td className="num">{fmtMiles(leg.miles)}</td>
-                  <td className="num">{money(leg.pay_amount)}</td>
-                  <td className="notes-cell hidden lg:table-cell">{leg.notes ?? "—"}</td>
-                  <td className="actions">
-                    <form action={deleteTrip}>
-                      <input type="hidden" name="id" value={leg.id} />
-                      <input type="hidden" name="return_to" value={queryWith({ page }).toString()} />
-                      <ConfirmButton type="submit" className="linklike danger" message="删除这条行程？">
-                        删除
-                      </ConfirmButton>
-                    </form>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <TripsTable
+            trips={trips}
+            returnTo={queryWith({ page }).toString()}
+            empty={
+              hasFilter
+                ? "没有符合条件的行程。调整筛选条件，或点右上角「录入行程」前往首页录入。"
+                : "还没有行程。点右上角「录入行程」前往首页开始记录。"
+            }
+          />
         </LedgerPanel>
         <div className="table-foot">
           <div className="foot-left">

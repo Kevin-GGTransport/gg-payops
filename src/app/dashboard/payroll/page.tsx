@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel, LedgerEmpty } from "@/components/ledger";
-import { DriverTypeBadge, OperationBadge } from "@/components/badges";
+import { DriverTypeBadge } from "@/components/badges";
 import { requireUser } from "@/lib/auth";
 import { firstValue, type SearchParams } from "@/lib/search-params";
 import { todayIso, miles as fmtMiles, money } from "@/lib/format";
@@ -15,17 +15,12 @@ import {
   type PayrollMatrixRow
 } from "@/lib/queries/trips";
 import { PeriodPicker } from "./period-picker";
+import { PayrollLegsTable } from "./payroll-legs-table";
 
 export const metadata: Metadata = { title: "工资管理 · G&G PayOps" };
 
-const DOW = ["日", "一", "二", "三", "四", "五", "六"];
-
 const arrowClass =
   "grid h-9.5 w-8 shrink-0 place-items-center rounded-md border border-line bg-card font-mono text-base text-route no-underline transition-colors hover:border-route hover:bg-muted/40";
-
-function dowOf(iso: string) {
-  return DOW[new Date(`${iso}T00:00:00Z`).getUTCDay()];
-}
 
 function periodFromParam(param: string | undefined): Period {
   if (param && /^\d{4}-\d{2}-\d{2}$/.test(param) && new Date(param).toString() !== "Invalid Date") {
@@ -228,45 +223,11 @@ export default async function PayrollPage({
               </>
             }
           >
-            <table className="roster">
-              <thead>
-                <tr>
-                  <th>日期</th><th>操作</th><th>Load#</th><th>起点 → 终点</th>
-                  <th className="num">Miles</th><th className="num">本趟工资</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pickedLegs.length === 0 && (
-                  <LedgerEmpty colSpan={6}>本周期没有行程记录。</LedgerEmpty>
-                )}
-                {pickedDays.flatMap(day => [
-                  ...day.legs.map(leg => (
-                    <tr key={leg.id}>
-                      <td className="mono">{day.date.slice(5).replace("-", "/")}<span className="muted-inline">周{dowOf(day.date)}</span></td>
-                      <td><OperationBadge operation={leg.operation} /></td>
-                      <td className="mono">{leg.load_no || "—"}</td>
-                      <td className="mono">
-                        {leg.from_code ?? "—"} <span className="route-arrow">→</span> {leg.to_code ?? "—"}
-                      </td>
-                      <td className="num">{fmtMiles(leg.miles)}</td>
-                      <td className="num">{money(leg.pay_amount)}</td>
-                    </tr>
-                  )),
-                  <tr key={`sub-${day.date}`} className="matrix-sub">
-                    <td colSpan={4}>小计 · {day.date.slice(5).replace("-", "/")} 周{dowOf(day.date)}</td>
-                    <td className="num">{fmtMiles(day.miles)}</td>
-                    <td className="num">{money(day.pay)}</td>
-                  </tr>
-                ])}
-                {pickedDays.length > 1 && (
-                  <tr className="matrix-total">
-                    <td colSpan={4}>周合计 · {pickedDays.length} 天</td>
-                    <td className="num">{fmtMiles(picked.total_miles)}</td>
-                    <td className="num">{money(picked.total_pay)}</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+            <PayrollLegsTable
+              days={pickedDays}
+              totalMiles={picked.total_miles}
+              totalPay={picked.total_pay}
+            />
           </LedgerPanel>
         </section>
       )}
