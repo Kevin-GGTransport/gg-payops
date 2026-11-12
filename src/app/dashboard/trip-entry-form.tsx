@@ -237,6 +237,8 @@ function EntryRow({
   }, [payValue]);
 
   const phase = !fromValue || !toValue ? "idle" : status;
+  // Quiet by default: the hint only appears when it carries real state -
+  // measuring, hand-edited, or failed. Idle rows stay visually silent.
   const milesHint =
     phase === "loading"
       ? "测算中…"
@@ -244,9 +246,7 @@ function EntryRow({
         ? "手动输入"
         : phase === "failed"
           ? "未能测算，请手填"
-          : phase === "auto"
-            ? "已测算，可修改"
-            : "选两端后自动测算";
+          : "";
 
   return (
     <tr
@@ -347,7 +347,11 @@ function EntryRow({
           aria-label={`${legLabel}里程`}
           className={`${cellInput} text-right font-mono`}
         />
-        <span className={`${cellHint} text-right ${phase === "failed" ? "text-destructive" : ""}`}>{milesHint}</span>
+        {milesHint && (
+          <span className={`${cellHint} text-right ${phase === "failed" ? "text-destructive" : ""}`}>
+            {milesHint}
+          </span>
+        )}
       </td>
       <td className="px-1.5">
         <Input
@@ -360,18 +364,14 @@ function EntryRow({
           aria-label={`${legLabel}工资`}
           className={`${cellInput} text-right font-mono`}
         />
-        <span className={`${cellHint} text-right`}>
-          {manualPay !== null ? (
-            <>
-              手动 ·{" "}
-              <button type="button" className="linklike" onClick={() => setManualPay(null)}>
-                重算
-              </button>
-            </>
-          ) : (
-            "按规则计算"
-          )}
-        </span>
+        {manualPay !== null && (
+          <span className={`${cellHint} text-right`}>
+            手动 ·{" "}
+            <button type="button" className="linklike" onClick={() => setManualPay(null)}>
+              重算
+            </button>
+          </span>
+        )}
       </td>
       <td className="px-1.5">
         <Input
@@ -516,11 +516,10 @@ function GroupSection({
 
   return (
     <div>
-      {/* Driver band: navy top rule opens one group */}
-      <div className="group-band">
-        <span className="mb-0.5 rounded-[3px] border border-line bg-card px-1.5 py-0.5 font-mono text-[11px] font-semibold text-foreground">
-          组 {index + 1}
-        </span>
+      {/* Driver band: navy top rule opens one group. The tab above already
+          names the group (车号) - no duplicated ordinal badge here. The right
+          block mirrors the label-over-value structure so baselines align. */}
+      <div className="group-band items-start">
         <ComboboxField
           label="司机 / 车主"
           name={`${prefix}_driver_id`}
@@ -557,30 +556,30 @@ function GroupSection({
           }))}
         />
         <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-          日期（新行默认）
+          新行默认日期
           <Input
             type="date"
             name={`${prefix}_trip_date`}
             defaultValue={group.date}
             onChange={e => setDate(e.target.value)}
             aria-label={`第 ${index + 1} 组新行默认日期`}
-            className="h-8 w-36 font-mono text-[13px]"
+            className="h-10 w-36 font-mono text-[13px]"
           />
         </label>
-        <div className="ml-auto flex items-center gap-3 pb-1.5 text-xs text-muted-foreground">
-          <span>
-            本组 {rows.length} 段 ·{" "}
-            <b className="font-mono text-foreground">{money(paySum)}</b>
-          </span>
-          <button type="button" className="linklike" onClick={addRow}>
-            <PlusIcon className="mr-0.5 inline size-3.5" />
-            添加行程
-          </button>
-          {removable && (
-            <button type="button" className="linklike danger" onClick={onRemove}>
-              删除组
+        <div className="ml-auto grid content-start justify-end gap-1.5 text-right text-xs">
+          <span className="font-medium text-muted-foreground">本组 {rows.length} 段</span>
+          <span className="flex items-center justify-end gap-2.5">
+            <span className="font-mono text-[13px] text-foreground">{money(paySum)}</span>
+            <button type="button" className="linklike" onClick={addRow}>
+              <PlusIcon className="mr-0.5 inline size-3.5" />
+              添加行程
             </button>
-          )}
+            {removable && (
+              <button type="button" className="linklike danger" onClick={onRemove}>
+                删除组
+              </button>
+            )}
+          </span>
         </div>
         <input type="hidden" name={`${prefix}_row_count`} value={rows.length} />
       </div>
@@ -641,12 +640,6 @@ function GroupSection({
             ))}
         </tbody>
       </RosterTable>
-
-      <div className="flex items-center justify-end border-t border-line px-3 py-2.5">
-        <Button type="submit" name="submit_group" value={String(index)} className="h-8 px-4">
-          记入本组 {rows.length} 段行程
-        </Button>
-      </div>
     </div>
   );
 }
@@ -836,6 +829,14 @@ export function TripEntryForm({
   const tabLabel = (group: GroupSlot, index: number) =>
     drivers.find(d => d.id === driverByGroup[group.id])?.driver_code || `组 ${index + 1}`;
 
+  // The bottom "只记本组" button targets whichever tab is open
+  const activeGroupIndex = Math.max(
+    0,
+    groups.findIndex(g => String(g.id) === activeId)
+  );
+  const activeGroupRows =
+    rowCounts[Number(activeId)] ?? groups[activeGroupIndex]?.rows.length ?? 0;
+
   return (
     <form
       action={addTripsBatch}
@@ -847,14 +848,6 @@ export function TripEntryForm({
       }}
     >
       <div className="panel">
-        <div className="panel-cap">
-          <span>一个司机一个标签页：可单独记入，也可底部一次记入全部</span>
-          <button type="button" className="linklike" onClick={() => setPhotoOpen(true)}>
-            <CameraIcon className="mr-1 inline size-3.5" />
-            照片识别
-          </button>
-        </div>
-
         <PhotoImport
           drivers={drivers}
           locations={locations}
@@ -864,9 +857,9 @@ export function TripEntryForm({
         />
 
         <Tabs value={activeId} onValueChange={setActiveId}>
-          {/* Tab bar + "add a group" at the top; labels follow the picked 车号.
-              No band background here - panel-cap above already reads as one strip */}
-          <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
+          {/* Single strip opening the panel: driver tabs, add-group, photo
+              import - one row instead of caption + tab bar stacked */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
             <TabsList className="h-auto max-w-full flex-wrap">
               {groups.map((group, i) => (
                 <TabsTrigger key={group.id} value={String(group.id)}>
@@ -878,6 +871,14 @@ export function TripEntryForm({
               <PlusIcon className="size-4" />
               添加一组（换司机）
             </Button>
+            <button
+              type="button"
+              className="linklike ml-auto"
+              onClick={() => setPhotoOpen(true)}
+            >
+              <CameraIcon className="mr-1 inline size-3.5" />
+              照片识别
+            </button>
           </div>
 
           {/* forceMount keeps every tab's fields in the DOM (and the submit) */}
@@ -910,11 +911,24 @@ export function TripEntryForm({
         </Tabs>
 
         <input type="hidden" name="group_count" value={groups.length} />
+        {/* Action bar: per-group (secondary, current tab) + all tabs (primary) */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3">
           <span className="text-xs text-muted-foreground">
-            共 {groups.length} 组 · {totalRows} 段 · 工资合计 <b className="font-mono">{money(totalPay)}</b>
+            共 {groups.length} 组 · {totalRows} 段 · 工资合计{" "}
+            <b className="font-mono text-sm text-foreground">{money(totalPay)}</b>
           </span>
-          <Button type="submit" className="h-9 px-5">记入全部 {totalRows} 段行程</Button>
+          <div className="flex items-center gap-2.5">
+            <Button
+              type="submit"
+              name="submit_group"
+              value={String(activeGroupIndex)}
+              variant="outline"
+              className="h-9 px-4"
+            >
+              只记本组 {activeGroupRows} 段
+            </Button>
+            <Button type="submit" className="h-9 px-5">记入全部 {totalRows} 段行程</Button>
+          </div>
         </div>
       </div>
     </form>

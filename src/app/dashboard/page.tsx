@@ -100,7 +100,7 @@ export default async function EntryPage({
     <>
       <PageHeader
         title="录入行程"
-        description="一个司机一个标签页：每个标签页单独记入，也可一次记入全部；每行可单独改日期，起点 / 终点可从位置库选择或直接输入地址或邮编。"
+        description="一个司机一个标签页，里程与工资自动测算；起点 / 终点可选位置库或直接输入地址。"
       />
 
       {savedCount !== undefined && (
@@ -119,11 +119,6 @@ export default async function EntryPage({
         refillGroups={refillGroups}
         initialActiveIndex={initialActiveIndex}
       />
-
-      <p className="notice">
-        里程由 Google 地图自动测算，工资按定价规则自动计算，均可手动修改。录入完成后可到{" "}
-        <Link href="/dashboard/trips">行程管理</Link> 筛选核对，周期工资在 <Link href="/dashboard/payroll">工资管理</Link> 汇总。
-      </p>
     </>
   );
 }

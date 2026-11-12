@@ -312,6 +312,13 @@
 .linklike.danger {
   @apply text-destructive;
 }
+/* 行内删除降噪：表格操作列里的删除默认灰，悬停才红（红色只留给确认时刻） */
+.roster .actions .linklike.danger {
+  @apply font-medium text-muted-foreground;
+}
+.roster .actions .linklike.danger:hover {
+  @apply text-destructive;
+}
 
 /* ==========================================================================
    工具条：页签 + 搜索
@@ -567,9 +574,9 @@ th.col-th {
 .roster tr.drop-after > td {
   box-shadow: inset 0 -2px 0 var(--color-route);
 }
-/* 司机分组带：navy 顶线 + 浅底，开启一个司机标签页 */
+/* 司机分组带：navy 顶线 + 浅底 + 底部细线，与下方表格明确分段 */
 .group-band {
-  @apply flex flex-wrap items-end gap-x-4 gap-y-2.5 border-t-[1.5px] border-t-navy bg-muted/50 px-2.5 py-2.5;
+  @apply flex flex-wrap gap-x-4 gap-y-2.5 border-b border-line border-t-[1.5px] border-t-navy bg-muted/50 px-2.5 py-3;
 }
 /* TanStack+shadcn 表壳：表头回归台账规范（覆盖 TableHead 原语的底色/细线，
    恢复 2px 舱单蓝底线这一签名元素） */
