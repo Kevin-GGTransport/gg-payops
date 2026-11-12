@@ -66,7 +66,7 @@ type TripEntryFormProps = {
   initialActiveIndex?: number;
 };
 
-const INITIAL_ROWS = 3;
+const INITIAL_ROWS = 10;
 
 /** Bare input for table cells: no label, no border, inherits the roster rhythm */
 const cellInput = "h-8 border-0 bg-transparent px-2 shadow-none rounded-none text-[13px] focus-visible:ring-1";
@@ -115,6 +115,7 @@ function EntryRow({
   onRemove,
   onPayChange,
   onToChange,
+  onFillChange,
   onArmDrag,
   onRowDragStart,
   onRowDragEnd,
@@ -136,6 +137,8 @@ function EntryRow({
   onPayChange: (value: string) => void;
   /** Reports every endpoint pick upward (feeds the next leg's carry) */
   onToChange: (value: string) => void;
+  /** Reports whether this row has any endpoint picked (filled-row counting) */
+  onFillChange: (filled: boolean) => void;
   /** Grip press arms / releases whole-row native drag */
   onArmDrag: (armed: boolean) => void;
   onRowDragStart: (event: React.DragEvent<HTMLTableRowElement>) => void;
@@ -182,6 +185,13 @@ function EntryRow({
     if (toValue) onToChange(toValue);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Filled = has a destination. A start alone can be the sticky carry-over
+  // from the previous leg, which must not turn a reserve row "filled"
+  React.useEffect(() => {
+    onFillChange(Boolean(toValue));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toValue]);
 
   React.useEffect(() => {
     if (!fromValue || !toValue) return;
@@ -418,7 +428,7 @@ function GroupSection({
   onDriverChange,
   onPayChange,
   onForgetRow,
-  onRowsChange,
+  onFilledChange,
   onDirty,
   dragging,
   onDraggingChange,
@@ -437,7 +447,7 @@ function GroupSection({
   onDriverChange: (driverId: string) => void;
   onPayChange: (rowId: number, value: string) => void;
   onForgetRow: (rowId: number) => void;
-  onRowsChange: (count: number) => void;
+  onFilledChange: (count: number) => void;
   onDirty: () => void;
   /** Live drag source shared across groups (a group only accepts its own) */
   dragging: { groupId: number; rowId: number } | null;
@@ -452,6 +462,8 @@ function GroupSection({
   );
   // rowId -> current to-value, feeding the next leg's carry-over start
   const [toByRow, setToByRow] = React.useState<Record<number, string>>({});
+  // Row ids that have at least one endpoint (what the buttons count)
+  const [filledIds, setFilledIds] = React.useState<Set<number>>(new Set());
   // Grip pressed but drag not confirmed yet; only that row turns draggable
   const [armedRow, setArmedRow] = React.useState<number | null>(null);
   // Insertion point while a same-group drag hovers this sheet
@@ -460,8 +472,18 @@ function GroupSection({
   const driverType = drivers.find(d => d.id === driverId)?.driver_type;
 
   React.useEffect(() => {
-    onRowsChange(rows.length);
-  }, [rows.length, onRowsChange]);
+    onFilledChange(filledIds.size);
+  }, [filledIds.size, onFilledChange]);
+
+  function handleFill(rowId: number, filled: boolean) {
+    setFilledIds(current => {
+      if (current.has(rowId) === filled) return current;
+      const next = new Set(current);
+      if (filled) next.add(rowId);
+      else next.delete(rowId);
+      return next;
+    });
+  }
 
   // Lift the picked driver so the parent can label this group's tab
   React.useEffect(() => {
@@ -478,6 +500,7 @@ function GroupSection({
   function removeRow(slot: RowSlot) {
     onDirty();
     onForgetRow(slot.id);
+    handleFill(slot.id, false);
     setRows(current => current.filter(r => r.id !== slot.id));
     setToByRow(current => {
       if (!(slot.id in current)) return current;
@@ -567,7 +590,7 @@ function GroupSection({
           />
         </label>
         <div className="ml-auto grid content-start justify-end gap-1.5 text-right text-xs">
-          <span className="font-medium text-muted-foreground">本组 {rows.length} 段</span>
+          <span className="font-medium text-muted-foreground">本组已填 {filledIds.size} 行</span>
           <span className="flex items-center justify-end gap-2.5">
             <span className="font-mono text-[13px] text-foreground">{money(paySum)}</span>
             <button type="button" className="linklike" onClick={addRow}>
@@ -608,6 +631,7 @@ function GroupSection({
                 onRemove={() => removeRow(slot)}
                 onPayChange={value => onPayChange(slot.id, value)}
                 onToChange={value => handleToChange(slot.id, value)}
+          onFillChange={filled => handleFill(slot.id, filled)}
                 draggable={armedRow === slot.id}
                 dropMark={dropAt?.id === slot.id ? (dropAt.before ? "before" : "after") : null}
                 onArmDrag={armed => setArmedRow(armed ? slot.id : null)}
@@ -700,16 +724,15 @@ export function TripEntryForm({
   );
   // "<groupId>:<rowId>" -> current pay value, for per-group and grand totals
   const [pays, setPays] = React.useState<Record<string, string>>({});
-  // groupId -> live row count (rows live inside GroupBlock once mounted)
-  const [rowCounts, setRowCounts] = React.useState<Record<number, number>>(() =>
-    Object.fromEntries(initialGroups.map(g => [g.id, g.rows.length]))
-  );
+  // groupId -> filled-row count (rows with at least one endpoint; reserve
+  // rows are skipped by the server and stay out of every count)
+  const [filledCounts, setFilledCounts] = React.useState<Record<number, number>>({});
   // Live drag source across groups (groupId gates which sheet accepts the drop)
   const [dragging, setDragging] = React.useState<{ groupId: number; rowId: number } | null>(null);
   // Whether the user has changed anything (guards photo-import replacement)
   const dirtyRef = React.useRef(false);
 
-  const totalRows = Object.values(rowCounts).reduce((acc, n) => acc + n, 0);
+  const totalRows = Object.values(filledCounts).reduce((acc, n) => acc + n, 0);
   const totalPay = Object.values(pays).reduce((acc, v) => acc + (Number(v) || 0), 0);
 
   const handlePayChange = React.useCallback((groupId: number, rowId: number, value: string) => {
@@ -731,8 +754,8 @@ export function TripEntryForm({
     });
   }, []);
 
-  const handleRowsChange = React.useCallback((groupId: number, count: number) => {
-    setRowCounts(current =>
+  const handleFilledChange = React.useCallback((groupId: number, count: number) => {
+    setFilledCounts(current =>
       current[groupId] === count ? current : { ...current, [groupId]: count }
     );
   }, []);
@@ -746,7 +769,7 @@ export function TripEntryForm({
     const id = nextGroupId.current++;
     setGroups(current => [
       ...current,
-      { id, driverId: "", truckId: "", date: todayIso(), rows: [{ id: 1 }] }
+      { id, driverId: "", truckId: "", date: todayIso(), rows: Array.from({ length: INITIAL_ROWS }, (_, i) => ({ id: i + 1 })) }
     ]);
     // Open the fresh tab so the clerk picks its driver right away
     setActiveId(String(id));
@@ -768,7 +791,7 @@ export function TripEntryForm({
       delete next[id];
       return next;
     });
-    setRowCounts(current => {
+    setFilledCounts(current => {
       if (!(id in current)) return current;
       const next = { ...current };
       delete next[id];
@@ -817,7 +840,6 @@ export function TripEntryForm({
     } else {
       setGroups([group]);
       setPays({});
-      setRowCounts({});
     }
     setDriverByGroup(current => ({ ...current, [id]: apply.driverId }));
     setActiveId(String(id));
@@ -825,17 +847,16 @@ export function TripEntryForm({
     setPhotoOpen(false);
   }
 
-  // Tab label: the picked driver's 车号, falling back to the ordinal
-  const tabLabel = (group: GroupSlot, index: number) =>
-    drivers.find(d => d.id === driverByGroup[group.id])?.driver_code || `组 ${index + 1}`;
+  // Tab label: the picked driver's name; "无" until one is picked
+  const tabLabel = (group: GroupSlot) =>
+    drivers.find(d => d.id === driverByGroup[group.id])?.full_name || "无";
 
   // The bottom "只记本组" button targets whichever tab is open
   const activeGroupIndex = Math.max(
     0,
     groups.findIndex(g => String(g.id) === activeId)
   );
-  const activeGroupRows =
-    rowCounts[Number(activeId)] ?? groups[activeGroupIndex]?.rows.length ?? 0;
+  const activeGroupRows = filledCounts[Number(activeId)] ?? 0;
 
   return (
     <form
@@ -861,9 +882,9 @@ export function TripEntryForm({
               import, and the page-wide primary submit (all tabs) */}
           <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
             <TabsList className="h-auto max-w-full flex-wrap">
-              {groups.map((group, i) => (
+              {groups.map(group => (
                 <TabsTrigger key={group.id} value={String(group.id)}>
-                  {tabLabel(group, i)}
+                  {tabLabel(group)}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -905,7 +926,7 @@ export function TripEntryForm({
                 }
                 onPayChange={(rowId, value) => handlePayChange(group.id, rowId, value)}
                 onForgetRow={rowId => handleForgetRow(group.id, rowId)}
-                onRowsChange={count => handleRowsChange(group.id, count)}
+                onFilledChange={count => handleFilledChange(group.id, count)}
                 onDirty={handleDirty}
                 dragging={dragging}
                 onDraggingChange={setDragging}

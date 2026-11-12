@@ -175,7 +175,7 @@ export async function addTripsBatch(formData: FormData) {
     );
     const rows: ParsedRow[] = [];
     for (let i = 0; i < rowCount; i++) {
-      rows.push({
+      const row: ParsedRow = {
         // Per-row date first (a sheet spans many days); falls back to the group default
         tripDate: str(formData, `g_${g}_row_${i}_trip_date`) || groupDate,
         operation: str(formData, `g_${g}_row_${i}_operation`),
@@ -185,7 +185,13 @@ export async function addTripsBatch(formData: FormData) {
         milesValue: str(formData, `g_${g}_row_${i}_miles`) || "0",
         payValue: str(formData, `g_${g}_row_${i}_pay_amount`) || "0",
         notes: str(formData, `g_${g}_row_${i}_notes`) || ""
-      });
+      };
+      // Reserve rows the clerk never touched are skipped silently (the sheet
+      // opens with 10 blank rows). A start alone does NOT count: the sticky
+      // carry-over fills the next leg's start automatically - a real row has
+      // a destination, a Load# or a note
+      if (!row.to && !row.loadNo && !row.notes) continue;
+      rows.push(row);
     }
     total += rows.length;
     groups.push({
@@ -199,8 +205,12 @@ export async function addTripsBatch(formData: FormData) {
   if (total === 0) backWithError("no_rows", formData, groups);
 
   // Single-tab submit: validate, resolve and persist only that group (the
-  // other tabs' half-filled state is intentionally left unvalidated)
-  const active = scope === null ? groups.map((_, i) => i) : [scope];
+  // other tabs' half-filled state is intentionally left unvalidated). Groups
+  // whose rows were all blank reserve rows drop out entirely.
+  const active = (scope === null ? groups.map((_, i) => i) : [scope]).filter(
+    g => groups[g].rows.length > 0
+  );
+  if (active.length === 0) backWithError("no_rows", formData, groups);
 
   for (const g of active) {
     const group = groups[g];
