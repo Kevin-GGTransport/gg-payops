@@ -4,6 +4,7 @@ import * as React from "react";
 import { CameraIcon, GripVerticalIcon, PlusIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ComboboxField } from "@/components/combobox-field";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
 import { calcTripWage } from "@/lib/wage";
@@ -50,6 +51,8 @@ type TripEntryFormProps = {
   defaultDate?: string;
   /** Present when redirected back after a validation error */
   refillGroups?: RefillGroup[];
+  /** Tab to open first (0-based group index, restored from redirect params) */
+  initialActiveIndex?: number;
 };
 
 const INITIAL_ROWS = 3;
@@ -411,18 +414,22 @@ type RowSlot = { id: number; defaults?: RefillRow };
 type GroupSlot = { id: number; driverId: string; date: string; rows: RowSlot[] };
 
 /**
- * One driver group rendered as a tbody of the shared sheet: a full-width
- * driver band row (driver picker, default date, add/remove actions) followed
- * by the group's trip rows. Row/driver/date state lives here once mounted;
- * the parent only tracks group existence, row counts and pay totals.
+ * One driver group as a tab panel: a navy-ruled driver band (driver picker,
+ * default date, add/remove actions), the group's own sheet table and a panel
+ * footer with this group's submit button (its name/value tells the server
+ * action to persist only this group). Row/driver/date state lives here once
+ * mounted; the parent only tracks group existence, row counts and pay totals.
  */
 function GroupSection({
   index,
   group,
   drivers,
   locations,
+  colWidths,
+  onResizeStart,
   removable,
   onRemove,
+  onDriverChange,
   onPayChange,
   onForgetRow,
   onRowsChange,
@@ -435,8 +442,12 @@ function GroupSection({
   group: GroupSlot;
   drivers: DriverOption[];
   locations: LocationOption[];
+  colWidths: number[];
+  onResizeStart: (e: React.PointerEvent<HTMLSpanElement>, colIndex: number) => void;
   removable: boolean;
   onRemove: () => void;
+  /** Reports the picked driver upward (feeds the tab label) */
+  onDriverChange: (driverId: string) => void;
   onPayChange: (rowId: number, value: string) => void;
   onForgetRow: (rowId: number) => void;
   onRowsChange: (count: number) => void;
@@ -464,6 +475,12 @@ function GroupSection({
   React.useEffect(() => {
     onRowsChange(rows.length);
   }, [rows.length, onRowsChange]);
+
+  // Lift the picked driver so the parent can label this group's tab
+  React.useEffect(() => {
+    onDriverChange(driverId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driverId]);
 
   function addRow() {
     onDirty();
@@ -511,131 +528,167 @@ function GroupSection({
   const prefix = `g_${index}`;
 
   return (
-    <tbody
-      className="tb-group"
-      onDragLeave={event => {
-        // Drag left this sheet entirely (moving between our own rows doesn't)
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          setDropAt(null);
-        }
-      }}
-    >
-      {/* Driver separator band: opens one group inside the single sheet */}
-      <tr className="row-band">
-        <td colSpan={COLUMNS.length + 2}>
-          <div className="flex flex-wrap items-end gap-x-4 gap-y-2.5 px-2.5">
-            <span className="mb-0.5 rounded-[3px] border border-line bg-card px-1.5 py-0.5 font-mono text-[11px] font-semibold text-foreground">
-              组 {index + 1}
-            </span>
-            <ComboboxField
-              label="司机 / 车主"
-              name={`${prefix}_driver_id`}
-              defaultValue={group.driverId}
-              placeholder="请选择司机"
-              searchPlaceholder="搜索车号或姓名"
-              mono
-              prominent
-              clearable={false}
-              className="w-56"
-              triggerClassName="h-10"
-              onValueChange={setDriverId}
-              options={drivers.map(d => ({
-                value: d.id,
-                label: d.driver_code,
-                description: `${d.full_name}（${DRIVER_TYPE_LABELS[d.driver_type]}）`,
-                group: DRIVER_TYPE_LABELS[d.driver_type]
-              }))}
-            />
-            <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-              日期（新行默认）
-              <Input
-                type="date"
-                name={`${prefix}_trip_date`}
-                defaultValue={group.date}
-                onChange={e => setDate(e.target.value)}
-                aria-label={`第 ${index + 1} 组新行默认日期`}
-                className="h-8 w-36 font-mono text-[13px]"
-              />
-            </label>
-            <div className="ml-auto flex items-center gap-3 pb-1.5 text-xs text-muted-foreground">
-              <span>
-                本组 {rows.length} 段 ·{" "}
-                <b className="font-mono text-foreground">{money(paySum)}</b>
-              </span>
-              <button type="button" className="linklike" onClick={addRow}>
-                <PlusIcon className="mr-0.5 inline size-3.5" />
-                添加行程
-              </button>
-              {removable && (
-                <button type="button" className="linklike danger" onClick={onRemove}>
-                  删除组
-                </button>
-              )}
-            </div>
-          </div>
-          <input type="hidden" name={`${prefix}_row_count`} value={rows.length} />
-        </td>
-      </tr>
-      {rows.map((slot, i) => (
-        <EntryRow
-          key={slot.id}
-          groupIndex={index}
-          rowIndex={i}
-          defaultDate={date}
-          driverType={driverType}
-          locations={locations}
-          defaults={slot.defaults}
-          removable={rows.length > 1}
-          carryFrom={i === 0 ? "" : (toByRow[rows[i - 1].id] ?? "")}
-          onRemove={() => removeRow(slot)}
-          onPayChange={value => onPayChange(slot.id, value)}
-          onToChange={value => handleToChange(slot.id, value)}
-          draggable={armedRow === slot.id}
-          dropMark={dropAt?.id === slot.id ? (dropAt.before ? "before" : "after") : null}
-          onArmDrag={armed => setArmedRow(armed ? slot.id : null)}
-          onRowDragStart={event => {
-            event.dataTransfer.effectAllowed = "move";
-            // Firefox only fires dragover when the drag carries some payload
-            event.dataTransfer.setData("text/plain", String(slot.id));
-            onDraggingChange({ groupId: group.id, rowId: slot.id });
-          }}
-          onRowDragEnd={endDrag}
-          onRowDragOver={event => {
-            // Same-group reorder only: a foreign group's drag keeps the no-drop cursor
-            if (!dragActive) return;
-            event.preventDefault();
-            event.dataTransfer.dropEffect = "move";
-            const rect = event.currentTarget.getBoundingClientRect();
-            const before = event.clientY < rect.top + rect.height / 2;
-            setDropAt(current =>
-              current?.id === slot.id && current.before === before
-                ? current
-                : { id: slot.id, before }
-            );
-          }}
-          onRowDrop={event => {
-            event.preventDefault();
-            if (dragging && dropAt) moveRow(dragging.rowId, dropAt.id, dropAt.before);
-            endDrag();
-          }}
+    <div>
+      {/* Driver band: navy top rule opens one group */}
+      <div className="group-band">
+        <span className="mb-0.5 rounded-[3px] border border-line bg-card px-1.5 py-0.5 font-mono text-[11px] font-semibold text-foreground">
+          组 {index + 1}
+        </span>
+        <ComboboxField
+          label="司机 / 车主"
+          name={`${prefix}_driver_id`}
+          defaultValue={group.driverId}
+          placeholder="请选择司机"
+          searchPlaceholder="搜索车号或姓名"
+          mono
+          prominent
+          clearable={false}
+          className="w-56"
+          triggerClassName="h-10"
+          onValueChange={setDriverId}
+          options={drivers.map(d => ({
+            value: d.id,
+            label: d.driver_code,
+            description: `${d.full_name}（${DRIVER_TYPE_LABELS[d.driver_type]}）`,
+            group: DRIVER_TYPE_LABELS[d.driver_type]
+          }))}
         />
-      ))}
-    </tbody>
+        <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+          日期（新行默认）
+          <Input
+            type="date"
+            name={`${prefix}_trip_date`}
+            defaultValue={group.date}
+            onChange={e => setDate(e.target.value)}
+            aria-label={`第 ${index + 1} 组新行默认日期`}
+            className="h-8 w-36 font-mono text-[13px]"
+          />
+        </label>
+        <div className="ml-auto flex items-center gap-3 pb-1.5 text-xs text-muted-foreground">
+          <span>
+            本组 {rows.length} 段 ·{" "}
+            <b className="font-mono text-foreground">{money(paySum)}</b>
+          </span>
+          <button type="button" className="linklike" onClick={addRow}>
+            <PlusIcon className="mr-0.5 inline size-3.5" />
+            添加行程
+          </button>
+          {removable && (
+            <button type="button" className="linklike danger" onClick={onRemove}>
+              删除组
+            </button>
+          )}
+        </div>
+        <input type="hidden" name={`${prefix}_row_count`} value={rows.length} />
+      </div>
+
+      <div className="table-wrap">
+        <table className="roster table-fixed w-full">
+          <colgroup>
+            <col style={{ width: HANDLE_COL_W }} />
+            {COLUMNS.map((column, i) => (
+              <col key={column.key} style={{ width: colWidths[i] }} />
+            ))}
+            <col style={{ width: ACTIONS_COL_W }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th className="px-1" aria-label="排序" />
+              {COLUMNS.map((column, i) => (
+                <th key={column.key} className={`col-th px-1.5${column.num ? " num" : ""}`}>
+                  {column.label}
+                  <span
+                    className="col-resizer"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label={`调整「${column.label}」列宽`}
+                    onPointerDown={e => onResizeStart(e, i)}
+                  />
+                </th>
+              ))}
+              <th className="px-1.5">删除</th>
+            </tr>
+          </thead>
+          <tbody
+            className="tb-group"
+            onDragLeave={event => {
+              // Drag left this sheet entirely (moving between our own rows doesn't)
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setDropAt(null);
+              }
+            }}
+          >
+            {rows.map((slot, i) => (
+              <EntryRow
+                key={slot.id}
+                groupIndex={index}
+                rowIndex={i}
+                defaultDate={date}
+                driverType={driverType}
+                locations={locations}
+                defaults={slot.defaults}
+                removable={rows.length > 1}
+                carryFrom={i === 0 ? "" : (toByRow[rows[i - 1].id] ?? "")}
+                onRemove={() => removeRow(slot)}
+                onPayChange={value => onPayChange(slot.id, value)}
+                onToChange={value => handleToChange(slot.id, value)}
+                draggable={armedRow === slot.id}
+                dropMark={dropAt?.id === slot.id ? (dropAt.before ? "before" : "after") : null}
+                onArmDrag={armed => setArmedRow(armed ? slot.id : null)}
+                onRowDragStart={event => {
+                  event.dataTransfer.effectAllowed = "move";
+                  // Firefox only fires dragover when the drag carries some payload
+                  event.dataTransfer.setData("text/plain", String(slot.id));
+                  onDraggingChange({ groupId: group.id, rowId: slot.id });
+                }}
+                onRowDragEnd={endDrag}
+                onRowDragOver={event => {
+                  // Same-group reorder only: a foreign group's drag keeps the no-drop cursor
+                  if (!dragActive) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const before = event.clientY < rect.top + rect.height / 2;
+                  setDropAt(current =>
+                    current?.id === slot.id && current.before === before
+                      ? current
+                      : { id: slot.id, before }
+                  );
+                }}
+                onRowDrop={event => {
+                  event.preventDefault();
+                  if (dragging && dropAt) moveRow(dragging.rowId, dropAt.id, dropAt.before);
+                  endDrag();
+                }}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex items-center justify-end border-t border-line px-3 py-2.5">
+        <Button type="submit" name="submit_group" value={String(index)} className="h-8 px-4">
+          记入本组 {rows.length} 段行程
+        </Button>
+      </div>
+    </div>
   );
 }
 
 /**
- * Full trip-entry form: driver groups stacked in one panel, each with its own
- * spreadsheet table whose rows carry their own dates (a recognized sheet is
- * one driver, many days). Submits everything to addTripsBatch in one atomic
- * multi-row INSERT.
+ * Full trip-entry form: one tab per driver group, each tab a complete entry
+ * sheet (driver band + spreadsheet table + its own submit button) whose rows
+ * carry their own dates (a recognized sheet is one driver, many days). The
+ * bottom bar submits every tab to addTripsBatch in one atomic multi-row
+ * INSERT; a tab's own button names its group so only that one is persisted.
  */
 export function TripEntryForm({
   drivers,
   locations,
   defaultDriverId = "",
   defaultDate,
-  refillGroups
+  refillGroups,
+  initialActiveIndex
 }: TripEntryFormProps) {
   const [photoOpen, setPhotoOpen] = React.useState(false);
   const [colWidths, setColWidths] = React.useState<number[]>(loadColWidths);
@@ -656,6 +709,18 @@ export function TripEntryForm({
       ];
   const [groups, setGroups] = React.useState<GroupSlot[]>(initialGroups);
   const nextGroupId = React.useRef(initialGroups.length + 1);
+  // groupId -> picked driver id (tab labels follow the picked 车号)
+  const [driverByGroup, setDriverByGroup] = React.useState<Record<number, string>>(() =>
+    Object.fromEntries(initialGroups.map(g => [g.id, g.driverId]))
+  );
+  // Open tab as a group id string (Radix tab values are strings)
+  const [activeId, setActiveId] = React.useState(() =>
+    String(
+      initialGroups[
+        Math.min(Math.max(initialActiveIndex ?? 0, 0), initialGroups.length - 1)
+      ].id
+    )
+  );
   // "<groupId>:<rowId>" -> current pay value, for per-group and grand totals
   const [pays, setPays] = React.useState<Record<string, string>>({});
   // groupId -> live row count (rows live inside GroupBlock once mounted)
@@ -742,11 +807,26 @@ export function TripEntryForm({
       ...current,
       { id, driverId: "", date: todayIso(), rows: [{ id: 1 }] }
     ]);
+    // Open the fresh tab so the clerk picks its driver right away
+    setActiveId(String(id));
   }
 
   function removeGroup(id: number) {
     dirtyRef.current = true;
-    setGroups(current => current.filter(g => g.id !== id));
+    const index = groups.findIndex(g => g.id === id);
+    const remaining = groups.filter(g => g.id !== id);
+    setGroups(remaining);
+    // Closing the open tab focuses its former neighbor
+    if (activeId === String(id)) {
+      const neighbor = remaining[Math.min(index, remaining.length - 1)];
+      if (neighbor) setActiveId(String(neighbor.id));
+    }
+    setDriverByGroup(current => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
     setRowCounts(current => {
       if (!(id in current)) return current;
       const next = { ...current };
@@ -770,8 +850,8 @@ export function TripEntryForm({
   }
 
   /**
-   * Drop one recognized photo sheet in as a group (one driver, rows keep their
-   * own dates). Appends after anything typed; only an untouched form is
+   * Drop one recognized photo sheet in as a new tab (one driver, rows keep
+   * their own dates). Appends after anything typed; only an untouched form is
    * replaced wholesale - appending never destroys input, so no confirm.
    */
   function applyFromPhoto(apply: PhotoApply) {
@@ -796,10 +876,17 @@ export function TripEntryForm({
     } else {
       setGroups([group]);
       setPays({});
+      setRowCounts({});
     }
+    setDriverByGroup(current => ({ ...current, [id]: apply.driverId }));
+    setActiveId(String(id));
     dirtyRef.current = true;
     setPhotoOpen(false);
   }
+
+  // Tab label: the picked driver's 车号, falling back to the ordinal
+  const tabLabel = (group: GroupSlot, index: number) =>
+    drivers.find(d => d.id === driverByGroup[group.id])?.driver_code || `组 ${index + 1}`;
 
   return (
     <form
@@ -813,7 +900,7 @@ export function TripEntryForm({
     >
       <div className="panel">
         <div className="panel-cap">
-          <span>按司机分组：每组一位司机，每行可单独改日期</span>
+          <span>一个司机一个标签页：可单独记入，也可底部一次记入全部</span>
           <button type="button" className="linklike" onClick={() => setPhotoOpen(true)}>
             <CameraIcon className="mr-1 inline size-3.5" />
             照片识别
@@ -828,42 +915,39 @@ export function TripEntryForm({
           onApply={applyFromPhoto}
         />
 
-        <div className="table-wrap">
-          <table className="roster table-fixed w-full">
-            <colgroup>
-              <col style={{ width: HANDLE_COL_W }} />
-              {COLUMNS.map((column, i) => (
-                <col key={column.key} style={{ width: colWidths[i] }} />
+        <Tabs value={activeId} onValueChange={setActiveId}>
+          {/* Tab bar + "add a group" at the top; labels follow the picked 车号 */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-line bg-muted/20 px-3 py-2">
+            <TabsList className="h-auto max-w-full flex-wrap">
+              {groups.map((group, i) => (
+                <TabsTrigger key={group.id} value={String(group.id)}>
+                  {tabLabel(group, i)}
+                </TabsTrigger>
               ))}
-              <col style={{ width: ACTIONS_COL_W }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th className="px-1" aria-label="排序" />
-                {COLUMNS.map((column, i) => (
-                  <th key={column.key} className={`col-th px-1.5${column.num ? " num" : ""}`}>
-                    {column.label}
-                    <span
-                      className="col-resizer"
-                      role="separator"
-                      aria-orientation="vertical"
-                      aria-label={`调整「${column.label}」列宽`}
-                      onPointerDown={e => startResize(e, i)}
-                    />
-                  </th>
-                ))}
-                <th className="px-1.5">删除</th>
-              </tr>
-            </thead>
-            {groups.map((group, gi) => (
+            </TabsList>
+            <Button type="button" variant="outline" className="h-8" onClick={addGroup}>
+              <PlusIcon className="size-4" />
+              添加一组（换司机）
+            </Button>
+          </div>
+
+          {/* forceMount keeps every tab's fields in the DOM (and the submit) */}
+          {groups.map((group, gi) => (
+            <TabsContent key={group.id} value={String(group.id)} forceMount>
               <GroupSection
-                key={group.id}
                 index={gi}
                 group={group}
                 drivers={drivers}
                 locations={locations}
+                colWidths={colWidths}
+                onResizeStart={startResize}
                 removable={groups.length > 1}
                 onRemove={() => removeGroup(group.id)}
+                onDriverChange={driverId =>
+                  setDriverByGroup(current =>
+                    current[group.id] === driverId ? current : { ...current, [group.id]: driverId }
+                  )
+                }
                 onPayChange={(rowId, value) => handlePayChange(group.id, rowId, value)}
                 onForgetRow={rowId => handleForgetRow(group.id, rowId)}
                 onRowsChange={count => handleRowsChange(group.id, count)}
@@ -872,22 +956,16 @@ export function TripEntryForm({
                 onDraggingChange={setDragging}
                 paySum={groupPaySum(group.id)}
               />
-            ))}
-          </table>
-        </div>
+            </TabsContent>
+          ))}
+        </Tabs>
 
         <input type="hidden" name="group_count" value={groups.length} />
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3">
-          <div className="flex items-center gap-3">
-            <Button type="button" variant="outline" className="h-8" onClick={addGroup}>
-              <PlusIcon className="size-4" />
-              添加一组（换司机）
-            </Button>
-            <span className="text-xs text-muted-foreground">
-              共 {groups.length} 组 · {totalRows} 段 · 工资合计 <b className="font-mono">{money(totalPay)}</b>
-            </span>
-          </div>
-          <Button type="submit" className="h-9 px-5">记入 {totalRows} 段行程</Button>
+          <span className="text-xs text-muted-foreground">
+            共 {groups.length} 组 · {totalRows} 段 · 工资合计 <b className="font-mono">{money(totalPay)}</b>
+          </span>
+          <Button type="submit" className="h-9 px-5">记入全部 {totalRows} 段行程</Button>
         </div>
       </div>
     </form>

@@ -39,6 +39,11 @@ export default async function EntryPage({
   const leg = Number.isFinite(legParam) && legParam >= 1 ? legParam : undefined;
   const saved = Number.parseInt(firstValue(sp.saved) ?? "", 10);
   const savedCount = Number.isFinite(saved) && saved >= 1 ? saved : undefined;
+  // Tab to open first (0-based group index; redirect sets it after a
+  // single-tab submit or to jump straight at the failing group)
+  const tabParam = Number.parseInt(firstValue(sp.tab) ?? "", 10);
+  const initialActiveIndex =
+    Number.isFinite(tabParam) && tabParam >= 0 ? tabParam : undefined;
 
   // Refill groups after a failed submit: f_group_count tells how many groups to
   // rebuild; each group restores its driver, default date and its own rows
@@ -87,7 +92,7 @@ export default async function EntryPage({
     <>
       <PageHeader
         title="录入行程"
-        description="按司机分组录入：每组一位司机，每行可单独改日期；起点 / 终点可从位置库选择，也可直接输入地址或邮编。"
+        description="一个司机一个标签页：每个标签页单独记入，也可一次记入全部；每行可单独改日期，起点 / 终点可从位置库选择或直接输入地址或邮编。"
       />
 
       {savedCount !== undefined && (
@@ -103,6 +108,7 @@ export default async function EntryPage({
         defaultDriverId={preselectedDriver}
         defaultDate={todayIso()}
         refillGroups={refillGroups}
+        initialActiveIndex={initialActiveIndex}
       />
 
       <p className="notice">

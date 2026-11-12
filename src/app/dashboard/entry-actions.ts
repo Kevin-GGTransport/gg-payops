@@ -48,9 +48,50 @@ function isIsoDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(value).toString() !== "Invalid Date";
 }
 
+const ROW_FIELDS = [
+  "trip_date",
+  "operation",
+  "load_no",
+  "from_location",
+  "to_location",
+  "miles",
+  "pay_amount",
+  "notes"
+] as const;
+
+/**
+ * Pack every group's raw input as refill params. Groups are renumbered 0..n
+ * sequentially; skipIndex drops one group (a single-tab submit that succeeded
+ * - that tab is done, the rest come back filled). Returns how many survived.
+ */
+function packRefill(
+  params: URLSearchParams,
+  formData: FormData,
+  groups: ParsedGroup[],
+  skipIndex?: number
+) {
+  let kept = 0;
+  for (let g = 0; g < groups.length; g++) {
+    if (g === skipIndex) continue;
+    const group = groups[g];
+    if (group.driverId) params.set(`f_g_${kept}_driver_id`, group.driverId);
+    if (group.tripDate) params.set(`f_g_${kept}_trip_date`, group.tripDate);
+    params.set(`f_g_${kept}_row_count`, String(group.rows.length));
+    for (let i = 0; i < group.rows.length; i++) {
+      for (const field of ROW_FIELDS) {
+        const value = str(formData, `g_${g}_row_${i}_${field}`);
+        if (value) params.set(`f_g_${kept}_row_${i}_${field}`, value);
+      }
+    }
+    kept++;
+  }
+  params.set("f_group_count", String(kept));
+  return kept;
+}
+
 /**
  * Redirect back to the entry page with the error code, the failing group / row
- * number, and every group's input refilled.
+ * number, and every group's input refilled (the failing group's tab opens).
  */
 function backWithError(
   error: string,
@@ -60,21 +101,12 @@ function backWithError(
   leg?: number
 ): never {
   const params = new URLSearchParams({ error });
-  if (grp !== undefined) params.set("grp", String(grp));
-  if (leg !== undefined) params.set("leg", String(leg));
-  params.set("f_group_count", String(groups.length));
-  for (let g = 0; g < groups.length; g++) {
-    const group = groups[g];
-    if (group.driverId) params.set(`f_g_${g}_driver_id`, group.driverId);
-    if (group.tripDate) params.set(`f_g_${g}_trip_date`, group.tripDate);
-    params.set(`f_g_${g}_row_count`, String(group.rows.length));
-    for (let i = 0; i < group.rows.length; i++) {
-      for (const field of ["trip_date", "operation", "load_no", "from_location", "to_location", "miles", "pay_amount", "notes"]) {
-        const value = str(formData, `g_${g}_row_${i}_${field}`);
-        if (value) params.set(`f_g_${g}_row_${i}_${field}`, value);
-      }
-    }
+  if (grp !== undefined) {
+    params.set("grp", String(grp));
+    params.set("tab", String(grp - 1));
   }
+  if (leg !== undefined) params.set("leg", String(leg));
+  packRefill(params, formData, groups);
   redirect(`/dashboard?${params.toString()}`);
 }
 
@@ -122,6 +154,14 @@ export async function addTripsBatch(formData: FormData) {
   const groupCount = clampCount(str(formData, "group_count"), MAX_GROUPS);
   if (groupCount === 0) backWithError("no_rows", formData, []);
 
+  // A tab's own submit button carries its group index; absent = submit all tabs
+  const scopeRaw = str(formData, "submit_group");
+  const scopeNum = Number.parseInt(scopeRaw, 10);
+  const scope =
+    scopeRaw !== "" && Number.isInteger(scopeNum) && scopeNum >= 0 && scopeNum < groupCount
+      ? scopeNum
+      : null;
+
   const groups: ParsedGroup[] = [];
   let total = 0;
   for (let g = 0; g < groupCount; g++) {
@@ -150,7 +190,11 @@ export async function addTripsBatch(formData: FormData) {
 
   if (total === 0) backWithError("no_rows", formData, groups);
 
-  for (let g = 0; g < groups.length; g++) {
+  // Single-tab submit: validate, resolve and persist only that group (the
+  // other tabs' half-filled state is intentionally left unvalidated)
+  const active = scope === null ? groups.map((_, i) => i) : [scope];
+
+  for (const g of active) {
     const group = groups[g];
     const grp = g + 1;
     if (!group.driverId) backWithError("missing_driver", formData, groups, grp);
@@ -177,7 +221,7 @@ export async function addTripsBatch(formData: FormData) {
   // Resolve every distinct endpoint once (free text may create a new location)
   const endpointIds = new Map<string, string>();
   for (const value of [
-    ...new Set(groups.flatMap(g => g.rows.flatMap(r => [r.from, r.to])).filter(Boolean))
+    ...new Set(active.flatMap(g => groups[g].rows.flatMap(r => [r.from, r.to])).filter(Boolean))
   ]) {
     const id = await resolveEndpointId(value);
     if (!id) backWithError("bad_location", formData, groups);
@@ -187,8 +231,8 @@ export async function addTripsBatch(formData: FormData) {
   // Duplicate guard: one DB read covering every driver and every date in this
   // batch, compared in memory (per row's own driver and date) against both
   // existing rows and this batch
-  const driverIds = [...new Set(groups.map(g => g.driverId))];
-  const batchDates = [...new Set(groups.flatMap(g => g.rows.map(r => r.tripDate)))];
+  const driverIds = [...new Set(active.map(g => groups[g].driverId))];
+  const batchDates = [...new Set(active.flatMap(g => groups[g].rows.map(r => r.tripDate)))];
   const existing = await prisma.$queryRaw<
     Array<{
       driver_id: string;
@@ -213,17 +257,17 @@ export async function addTripsBatch(formData: FormData) {
     )
   );
 
-  const insertRows = groups.flatMap((group, gi) =>
-    group.rows.map((row, ri) => {
+  const insertRows = active.flatMap(gi =>
+    groups[gi].rows.map((row, ri) => {
       const fromId = endpointIds.get(row.from) ?? "";
       const toId = endpointIds.get(row.to) ?? "";
       // Same driver + day + operation + route counts as a duplicate only when
       // the container matches too - sheets legitimately log two runs per route
-      const key = `${group.driverId}|${row.tripDate}|${row.operation}|${fromId}|${toId}|${row.loadNo}`;
+      const key = `${groups[gi].driverId}|${row.tripDate}|${row.operation}|${fromId}|${toId}|${row.loadNo}`;
       if (seen.has(key)) backWithError("dup_trip", formData, groups, gi + 1, ri + 1);
       seen.add(key);
       return {
-        driverId: group.driverId,
+        driverId: groups[gi].driverId,
         tripDate: row.tripDate,
         fromId,
         toId,
@@ -235,6 +279,7 @@ export async function addTripsBatch(formData: FormData) {
       };
     })
   );
+  if (insertRows.length === 0) backWithError("no_rows", formData, groups);
 
   const values = insertRows.map(r => Prisma.sql`
     (${r.driverId}::bigint, ${r.tripDate}::date, ${r.operation}::ops.operation_type, ${r.loadNo},
@@ -249,6 +294,21 @@ export async function addTripsBatch(formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/trips");
   revalidatePath("/dashboard/payroll");
-  // Keep the first driver preselected so the clerk can continue with their next date
-  redirect(`/dashboard?saved=${insertRows.length}&driver=${groups[0].driverId}`);
+
+  if (scope === null) {
+    // Keep the first driver preselected so the clerk can continue with their next date
+    redirect(`/dashboard?saved=${insertRows.length}&driver=${groups[0].driverId}`);
+  }
+
+  // Single-tab success: that tab's work is done. Refill the other tabs (they
+  // renumber around the removed one) and open the tab that took its place;
+  // with nothing left, preselect the same driver on the fresh form.
+  const params = new URLSearchParams({ saved: String(insertRows.length) });
+  const kept = packRefill(params, formData, groups, scope);
+  if (kept > 0) {
+    params.set("tab", String(Math.min(scope, kept - 1)));
+  } else {
+    params.set("driver", groups[scope].driverId);
+  }
+  redirect(`/dashboard?${params.toString()}`);
 }

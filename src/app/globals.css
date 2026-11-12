@@ -506,13 +506,9 @@ th.col-th {
 .roster tr.drop-after > td {
   box-shadow: inset 0 -2px 0 var(--color-route);
 }
-/* 司机分组带：navy 顶线 + 浅底，在一张表内开启一个分组 */
-.roster .row-band > td {
-  @apply whitespace-normal border-t-[1.5px] border-t-navy bg-muted/50 px-2 py-2.5;
-}
-/* 首组紧跟表头（表头自带 2px 舱制蓝底线），不再重复画线 */
-.roster tbody:first-of-type .row-band > td {
-  @apply border-t-0;
+/* 司机分组带：navy 顶线 + 浅底，开启一个司机标签页 */
+.group-band {
+  @apply flex flex-wrap items-end gap-x-4 gap-y-2.5 border-t-[1.5px] border-t-navy bg-muted/50 px-2.5 py-2.5;
 }
 /* 面板右上关闭链接 */
 .panel-cap .panel-x {
