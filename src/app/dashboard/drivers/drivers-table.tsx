@@ -25,13 +25,13 @@ export function DriversTable({
     {
       id: "code",
       header: "车号",
-      size: 96,
+      size: 88,
       cell: ({ row }) => <span className="mono strong">{row.original.driver_code}</span>
     },
     {
       id: "name",
       header: "姓名",
-      size: 120,
+      size: 152,
       cell: ({ row }) => <span className="strong">{row.original.full_name}</span>
     },
     {
@@ -50,7 +50,7 @@ export function DriversTable({
     {
       id: "license",
       header: "驾照号",
-      size: 168,
+      size: 152,
       meta: { headerClass: lgHidden, cellClass: `mono ${lgHidden}` },
       cell: ({ row }) => (
         <>
@@ -64,7 +64,7 @@ export function DriversTable({
     {
       id: "expiry",
       header: "驾照到期",
-      size: 136,
+      size: 128,
       meta: { headerClass: lgHidden, cellClass: lgHidden },
       cell: ({ row }) => {
         const expiry = row.original.license_expires_on;
@@ -82,20 +82,20 @@ export function DriversTable({
     {
       id: "hire",
       header: "入职日期",
-      size: 120,
+      size: 112,
       meta: { headerClass: lgHidden, cellClass: `mono ${lgHidden}` },
       cell: ({ row }) => row.original.hire_date ?? "—"
     },
     {
       id: "status",
       header: "状态",
-      size: 84,
+      size: 76,
       cell: ({ row }) => <StatusPill status={row.original.status} />
     },
     {
       id: "actions",
       header: "操作",
-      size: 148,
+      size: 132,
       enableResizing: false,
       meta: { cellClass: "actions" },
       cell: ({ row }) => {

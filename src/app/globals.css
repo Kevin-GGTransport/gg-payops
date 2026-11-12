@@ -510,9 +510,14 @@ th.col-th {
 .group-band {
   @apply flex flex-wrap items-end gap-x-4 gap-y-2.5 border-t-[1.5px] border-t-navy bg-muted/50 px-2.5 py-2.5;
 }
-/* TanStack+shadcn 表壳：表头回归台账规范（覆盖 TableHead 原语底色/字号） */
+/* TanStack+shadcn 表壳：表头回归台账规范（覆盖 TableHead 原语的底色/细线，
+   恢复 2px 舱单蓝底线这一签名元素） */
 .roster thead th {
-  @apply bg-transparent px-3 py-2.5 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground;
+  @apply border-b-2 border-b-navy bg-transparent px-3 py-2.5 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground;
+}
+/* shadcn TableRow 自带 tr 级边线，与 td 的台账细线叠加显粗——归零到 td 上统一 */
+.roster tbody tr {
+  border-bottom: 0;
 }
 /* 面板右上关闭链接 */
 .panel-cap .panel-x {

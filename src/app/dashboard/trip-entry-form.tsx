@@ -864,8 +864,9 @@ export function TripEntryForm({
         />
 
         <Tabs value={activeId} onValueChange={setActiveId}>
-          {/* Tab bar + "add a group" at the top; labels follow the picked 车号 */}
-          <div className="flex flex-wrap items-center gap-2 border-b border-line bg-muted/20 px-3 py-2">
+          {/* Tab bar + "add a group" at the top; labels follow the picked 车号.
+              No band background here - panel-cap above already reads as one strip */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
             <TabsList className="h-auto max-w-full flex-wrap">
               {groups.map((group, i) => (
                 <TabsTrigger key={group.id} value={String(group.id)}>
