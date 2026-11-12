@@ -141,7 +141,10 @@ export function RosterTable<TData>({
                       decorative={false}
                       orientation="vertical"
                       aria-label={`调整「${label}」列宽`}
-                      className="col-resizer"
+                      // bg-transparent cancels the Separator primitive's gray
+                      // fill; .col-resizer's ::after draws the route-blue hint
+                      // on hover/active only
+                      className="col-resizer bg-transparent"
                       onMouseDown={header.getResizeHandler()}
                       onTouchStart={header.getResizeHandler()}
                       onDoubleClick={() =>
