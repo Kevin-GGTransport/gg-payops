@@ -70,6 +70,37 @@ export function TextareaField({ label, name, placeholder, defaultValue, rows = 2
   );
 }
 
+/** Native checkbox: submits "1" when checked, nothing when unchecked */
+export function CheckboxField({
+  label,
+  name,
+  defaultChecked,
+  className,
+  hint
+}: {
+  label: string;
+  name: string;
+  defaultChecked?: boolean;
+  className?: string;
+  hint?: string;
+}) {
+  return (
+    <label className={cn(fieldClass, className)}>
+      {label}
+      <span className="flex h-9 items-center gap-2">
+        <input
+          type="checkbox"
+          name={name}
+          value="1"
+          defaultChecked={defaultChecked}
+          className="size-4 accent-(--color-route)"
+        />
+        <span className="text-[13px] font-normal text-foreground">{hint ?? label}</span>
+      </span>
+    </label>
+  );
+}
+
 export function FormGrid({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn("grid grid-cols-2 gap-x-2.5 gap-y-3 px-4 pt-3.5 max-md:grid-cols-1", className)}>{children}</div>;
 }

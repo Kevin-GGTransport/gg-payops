@@ -15,7 +15,6 @@ import { money, todayIso } from "@/lib/format";
 import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
 import {
   DRIVER_TYPE_LABELS,
-  OPERATION_META,
   type DriverType,
   type OperationType
 } from "@/lib/labels";
@@ -34,6 +33,14 @@ type TruckOption = {
   truck_code: string;
   plate_no: string | null;
   truck_type: string | null;
+};
+
+/** One dictionary operation (from /dashboard/operations) */
+export type OperationOption = {
+  code: string;
+  label: string;
+  description: string | null;
+  requires_load: boolean;
 };
 
 /** One row's initial values (photo import or failed-submit refill) */
@@ -59,6 +66,8 @@ type TripEntryFormProps = {
   drivers: DriverOption[];
   trucks: TruckOption[];
   locations: LocationOption[];
+  /** Operation dictionary (ACTIVE rows); the row dropdown reads it */
+  operations: OperationOption[];
   /** Wage-rule versions (current + scheduled); each row prices by its own date */
   wageRules: WageRuleData[];
   defaultDriverId?: string;
@@ -117,6 +126,7 @@ const EntryRow = React.memo(function EntryRow({
   rowIndex,
   driverType,
   locations,
+  operations,
   wageRules,
   defaults,
   removable,
@@ -141,6 +151,8 @@ const EntryRow = React.memo(function EntryRow({
   rowIndex: number;
   driverType: DriverType | undefined;
   locations: LocationOption[];
+  /** Operation dictionary; drives the dropdown and the Load# lock */
+  operations: OperationOption[];
   /** Wage-rule versions; the row's own date picks the governing one */
   wageRules: WageRuleData[];
   defaults?: RefillRow;
@@ -176,10 +188,14 @@ const EntryRow = React.memo(function EntryRow({
   const [dateValue, setDateValue] = React.useState(defaults?.trip_date || "");
   // Whether the current date came from carry-down, not the user's own edit
   const dateInherited = React.useRef(false);
-  const [operation, setOperation] = React.useState(defaults?.operation || "DEL");
-  // EMPTY legs haul no load: the Load# cell clears and locks with the operation
+  // Dictionary order decides the opening choice (seeds: DEL first)
+  const defaultOperation = operations[0]?.code ?? "DEL";
+  const [operation, setOperation] = React.useState(defaults?.operation || defaultOperation);
+  // Container-less operations (requires_load=false) clear and lock Load#
+  const operationRequiresLoad = (code: string) =>
+    operations.find(o => o.code === code)?.requires_load ?? true;
   const [loadNoValue, setLoadNoValue] = React.useState(
-    defaults?.operation === "EMPTY" ? "" : defaults?.load_no || ""
+    defaults?.operation && !operationRequiresLoad(defaults.operation) ? "" : defaults?.load_no || ""
   );
   const [fromValue, setFromValue] = React.useState(defaults?.from || "");
   const [toValue, setToValue] = React.useState(defaults?.to || "");
@@ -391,19 +407,19 @@ const EntryRow = React.memo(function EntryRow({
       <td className="px-1.5">
         <ComboboxField
           name={`${prefix}operation`}
-          defaultValue={defaults?.operation || "DEL"}
+          defaultValue={defaults?.operation || defaultOperation}
           clearable={false}
           searchable={false}
           aria-label={`${legLabel}操作`}
           triggerClassName="h-8 justify-start px-2 font-normal"
           onValueChange={value => {
             setOperation(value);
-            if (value === "EMPTY") setLoadNoValue("");
+            if (!operationRequiresLoad(value)) setLoadNoValue("");
           }}
           // Code-only labels keep the trigger narrow in the table row
-          options={(Object.keys(OPERATION_META) as OperationType[]).map(key => ({
-            value: key,
-            label: key
+          options={operations.map(op => ({
+            value: op.code,
+            label: op.code
           }))}
         />
       </td>
@@ -412,9 +428,9 @@ const EntryRow = React.memo(function EntryRow({
           name={`${prefix}load_no`}
           value={loadNoValue}
           onChange={e => setLoadNoValue(e.target.value)}
-          disabled={operation === "EMPTY"}
+          disabled={!operationRequiresLoad(operation)}
           maxLength={64}
-          placeholder={operation === "EMPTY" ? "空柜免填" : "如 LD101"}
+          placeholder={operationRequiresLoad(operation) ? "如 LD101" : "该操作免填"}
           aria-label={`${legLabel}Load#`}
           className={`${cellInput} font-mono font-semibold`}
         />
@@ -505,6 +521,7 @@ const GroupSection = React.memo(function GroupSection({
   drivers,
   trucks,
   locations,
+  operations,
   wageRules,
   sheetTable,
   removable,
@@ -523,6 +540,7 @@ const GroupSection = React.memo(function GroupSection({
   drivers: DriverOption[];
   trucks: TruckOption[];
   locations: LocationOption[];
+  operations: OperationOption[];
   wageRules: WageRuleData[];
   /** Shared columns-only TanStack instance (thead + colgroup for this sheet) */
   sheetTable: TanstackTable<unknown>;
@@ -779,6 +797,7 @@ const GroupSection = React.memo(function GroupSection({
                 rowIndex={i}
                 driverType={driverType}
                 locations={locations}
+                operations={operations}
                 wageRules={wageRules}
                 defaults={slot.defaults}
                 removable={rows.length > 1}
@@ -815,6 +834,7 @@ export function TripEntryForm({
   drivers,
   trucks,
   locations,
+  operations,
   wageRules,
   defaultDriverId = "",
   refillGroups,
@@ -1113,6 +1133,7 @@ export function TripEntryForm({
                 drivers={drivers}
                 trucks={trucks}
                 locations={locations}
+                operations={operations}
                 wageRules={wageRules}
                 sheetTable={sheetTable}
                 removable={groups.length > 1}

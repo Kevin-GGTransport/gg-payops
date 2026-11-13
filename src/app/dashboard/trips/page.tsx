@@ -15,7 +15,8 @@ import { requireUser } from "@/lib/auth";
 import { allValues, firstValue, type SearchParams } from "@/lib/search-params";
 import { miles as fmtMiles, money, todayIso } from "@/lib/format";
 import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
-import { OPERATION_META, type OperationType } from "@/lib/labels";
+import { type OperationType } from "@/lib/labels";
+import { listOperationTypes } from "@/lib/queries/operations";
 import {
   listTrips,
   payrollMatrix,
@@ -114,20 +115,32 @@ async function PeriodView({ sp }: { sp: SearchParams }) {
     ? driverPeriodTrips(period, pickedId)
     : null;
 
-  const [rows, periodTotals] = await Promise.all([payrollMatrix(period), periodPayTotals()]);
+  const [rows, periodTotals, operations] = await Promise.all([
+    payrollMatrix(period),
+    periodPayTotals(),
+    listOperationTypes()
+  ]);
+  // Matrix columns: dictionary order first, then any legacy codes still
+  // present in this period's trips (deactivated types keep their history)
+  const opCodes = [
+    ...operations.map(o => o.code),
+    ...[...new Set(rows.flatMap(r => Object.keys(r.op_counts)))].filter(
+      code => !operations.some(o => o.code === code)
+    )
+  ];
+  const opTotals = Object.fromEntries(opCodes.map(code => [code, 0]));
+  for (const row of rows) {
+    for (const code of opCodes) opTotals[code] += row.op_counts[code] ?? 0;
+  }
   const totals = rows.reduce(
     (acc, row) => ({
       drivers: acc.drivers + (row.leg_count > 0 ? 1 : 0),
       days: acc.days + row.trip_days,
-      del: acc.del + row.del_count,
-      live: acc.live + row.live_count,
-      empty: acc.empty + row.empty_count,
-      bobtail: acc.bobtail + row.bobtail_count,
       legs: acc.legs + row.leg_count,
       miles: acc.miles + Number(row.total_miles),
       pay: acc.pay + Number(row.total_pay)
     }),
-    { drivers: 0, days: 0, del: 0, live: 0, empty: 0, bobtail: 0, legs: 0, miles: 0, pay: 0 }
+    { drivers: 0, days: 0, legs: 0, miles: 0, pay: 0 }
   );
 
   const picked = pickedId ? rows.find(r => r.driver_id === pickedId) : undefined;
@@ -211,14 +224,15 @@ async function PeriodView({ sp }: { sp: SearchParams }) {
               <tr>
                 <th>司机 / 车主</th><th>类型</th>
                 <th className="num">天数</th>
-                <th className="num">DEL</th><th className="num">LIVE</th>
-                <th className="num">EMPTY</th><th className="num">BOBTAIL</th>
+                {opCodes.map(code => (
+                  <th key={code} className="num">{code}</th>
+                ))}
                 <th className="num">总段数</th><th className="num">总里程</th>
                 <th className="num">本期工资</th>
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && <LedgerEmpty colSpan={10}>还没有在职司机。</LedgerEmpty>}
+              {rows.length === 0 && <LedgerEmpty colSpan={6 + opCodes.length}>还没有在职司机。</LedgerEmpty>}
               {rows.map(row => (
                 <tr
                   key={row.driver_id}
@@ -232,10 +246,9 @@ async function PeriodView({ sp }: { sp: SearchParams }) {
                   </td>
                   <td><DriverTypeBadge type={row.driver_type} /></td>
                   <td className="num">{row.trip_days}</td>
-                  <td className="num">{row.del_count || "—"}</td>
-                  <td className="num">{row.live_count || "—"}</td>
-                  <td className="num">{row.empty_count || "—"}</td>
-                  <td className="num">{row.bobtail_count || "—"}</td>
+                  {opCodes.map(code => (
+                    <td key={code} className="num">{row.op_counts[code] || "—"}</td>
+                  ))}
                   <td className="num">{row.leg_count}</td>
                   <td className="num">{fmtMiles(row.total_miles)}</td>
                   <td className="num">{money(row.total_pay)}</td>
@@ -244,10 +257,9 @@ async function PeriodView({ sp }: { sp: SearchParams }) {
               <tr className="matrix-total">
                 <td colSpan={2}>合计 · {totals.drivers} 人出勤</td>
                 <td className="num">{totals.days}</td>
-                <td className="num">{totals.del}</td>
-                <td className="num">{totals.live}</td>
-                <td className="num">{totals.empty}</td>
-                <td className="num">{totals.bobtail}</td>
+                {opCodes.map(code => (
+                  <td key={code} className="num">{opTotals[code]}</td>
+                ))}
                 <td className="num">{totals.legs}</td>
                 <td className="num">{fmtMiles(totals.miles)}</td>
                 <td className="num">{money(totals.pay)}</td>
@@ -317,14 +329,21 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
   const q = (firstValue(sp.q) ?? "").trim();
   const dateFrom = dateParam(firstValue(sp.from));
   const dateTo = dateParam(firstValue(sp.to));
-  const operationParam = firstValue(sp.operation) as OperationType | undefined;
-  const operation = operationParam && operationParam in OPERATION_META ? operationParam : undefined;
   const page = intFromParam(firstValue(sp.page));
 
   // Sanitize driver ids from the URL (bigint identities are digits only);
   // doing this locally lets all three queries start in parallel
   const selectedIds = allValues(sp.driver).filter(id => /^\d+$/.test(id));
-  const hasFilter = selectedIds.length > 0 || Boolean(operation) || Boolean(q) || Boolean(dateFrom) || Boolean(dateTo);
+
+  // Dictionary-driven filter: any known code validates from the URL (a
+  // deactivated one still filters history); the dropdown offers ACTIVE rows
+  const operations = await listOperationTypes();
+  const knownCodes = new Set(operations.map(o => o.code));
+  const operationParam = firstValue(sp.operation);
+  const operation =
+    operationParam && knownCodes.has(operationParam) ? (operationParam as OperationType) : undefined;
+  const hasFilter =
+    selectedIds.length > 0 || Boolean(operation) || Boolean(q) || Boolean(dateFrom) || Boolean(dateTo);
 
   const [drivers, trips] = await Promise.all([
     activeDriverOptions(),
@@ -397,9 +416,14 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
             searchable={false}
             autoSubmit
             aria-label="按操作类型筛选"
-            options={(Object.entries(OPERATION_META) as Array<[OperationType, (typeof OPERATION_META)[OperationType]]>).map(
-              ([key, meta]) => ({ value: key, label: `${meta.label} · ${meta.desc}` })
-            )}
+            options={operations
+              .filter(o => o.status === "ACTIVE")
+              .map(o => ({
+                value: o.code,
+                label: [o.code, o.label !== o.code ? o.label : null, o.description]
+                  .filter(Boolean)
+                  .join(" · ")
+              }))}
           />
           <FilterSelect
             name="driver"

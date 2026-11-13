@@ -2,7 +2,6 @@ import { cn } from "@/lib/utils";
 import {
   DRIVER_TYPE_LABELS,
   LOCATION_TYPE_LABELS,
-  OPERATION_META,
   RECORD_STATUS_LABELS,
   type DriverType,
   type LocationType,
@@ -40,13 +39,18 @@ export function StatusPill({ status }: { status: RecordStatus }) {
   );
 }
 
-const OP_STYLES: Record<OperationType, string> = {
+/** Known codes keep their house colors; dictionary additions get neutral ink */
+const OP_STYLES: Partial<Record<string, string>> = {
   DEL: "border-route/30 bg-route/10 text-route",
-  LIVE: "border-audit/30 bg-audit/10 text-audit",
+  PU: "border-audit/30 bg-audit/10 text-audit",
   EMPTY: "border-slate-300 bg-slate-100 text-slate-600",
   BOBTAIL: "border-amber-500/40 bg-amber-50 text-amber-800"
 };
 
 export function OperationBadge({ operation }: { operation: OperationType }) {
-  return <span className={cn(tagBase, "font-mono tracking-wide", OP_STYLES[operation])}>{OPERATION_META[operation].label}</span>;
+  return (
+    <span className={cn(tagBase, "font-mono tracking-wide", OP_STYLES[operation] ?? "border-line bg-muted text-muted-foreground")}>
+      {operation}
+    </span>
+  );
 }

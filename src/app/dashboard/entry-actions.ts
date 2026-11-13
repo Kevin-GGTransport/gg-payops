@@ -7,9 +7,6 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { periodOf } from "@/lib/period";
 
-const OPERATIONS = ["DEL", "EMPTY", "BOBTAIL", "LIVE"] as const;
-/** Operations hauling a container: Load# required; BOBTAIL / EMPTY may leave it blank */
-const LOAD_REQUIRED = new Set<string>(["DEL", "LIVE"]);
 const MAX_GROUPS = 20;
 const MAX_ROWS_PER_GROUP = 50;
 const MAX_ROWS_TOTAL = 200;
@@ -254,6 +251,16 @@ export async function addTripsBatch(formData: FormData) {
   );
   if (active.length === 0) backWithError("no_rows", formData, groups);
 
+  // Operation dictionary: valid codes + whether Load# is required come from
+  // ops.operation_types (managed on /dashboard/operations), not a hard-coded list
+  const operationRows = await prisma.$queryRaw<
+    Array<{ code: string; requires_load: boolean }>
+  >`
+    SELECT code, requires_load FROM ops.operation_types WHERE status = 'ACTIVE'
+  `;
+  const validOperations = new Set(operationRows.map(o => o.code));
+  const loadRequired = new Set(operationRows.filter(o => o.requires_load).map(o => o.code));
+
   for (const g of active) {
     const group = groups[g];
     const grp = g + 1;
@@ -263,10 +270,10 @@ export async function addTripsBatch(formData: FormData) {
       const row = group.rows[i];
       const leg = i + 1;
       if (!isIsoDate(row.tripDate)) backWithError("bad_date", formData, groups, grp, leg);
-      if (!OPERATIONS.includes(row.operation as (typeof OPERATIONS)[number])) {
+      if (!validOperations.has(row.operation)) {
         backWithError("missing_operation", formData, groups, grp, leg);
       }
-      if (!row.loadNo && LOAD_REQUIRED.has(row.operation)) {
+      if (!row.loadNo && loadRequired.has(row.operation)) {
         backWithError("missing_load", formData, groups, grp, leg);
       }
       const milesNum = Number(row.milesValue);
@@ -390,7 +397,7 @@ export async function addTripsBatch(formData: FormData) {
   if (insertRows.length === 0) backWithError("no_rows", formData, groups);
 
   const values = insertRows.map(r => Prisma.sql`
-    (${r.driverId}::bigint, ${r.tripDate}::date, ${r.operation}::ops.operation_type, ${r.loadNo},
+    (${r.driverId}::bigint, ${r.tripDate}::date, ${r.operation}, ${r.loadNo},
      ${r.fromId || null}::bigint, ${r.toId || null}::bigint, ${r.milesNum}, ${r.payNum}, ${r.notes},
      ${r.driverName}, ${r.truckSnapshot}::jsonb)
   `);

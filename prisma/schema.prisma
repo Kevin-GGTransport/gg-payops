@@ -49,12 +49,21 @@ enum LocationType {
   @@schema("ops")
 }
 
-enum OperationType {
-  DEL
-  EMPTY
-  BOBTAIL
-  LIVE
+/// Managed operation dictionary for trip legs; entry dropdown, trips filter
+/// and badges read it. raw-SQL access only (bigint identity id, no Prisma writes)
+model OperationTypeDict {
+  id            BigInt    @id @default(autoincrement()) @db.BigInt
+  code          String    @unique @db.VarChar(16)
+  label         String    @db.VarChar(60)
+  description   String?   @db.VarChar(120)
+  sortOrder     Int       @default(100) @map("sort_order")
+  isSystem      Boolean   @default(false) @map("is_system")
+  requiresLoad  Boolean   @default(false) @map("requires_load")
+  status        String    @default("ACTIVE") @db.VarChar(16)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  @@map("operation_types")
   @@schema("ops")
 }
 
@@ -167,7 +176,7 @@ model Trip {
   id             Int           @id @default(autoincrement())
   driverId       Int           @map("driver_id")
   tripDate       DateTime      @default(dbgenerated("CURRENT_DATE")) @map("trip_date") @db.Date
-  operation      OperationType
+  operation      String        @db.VarChar(16)
   loadNo         String        @map("load_no") @db.VarChar(64)
   fromLocationId Int?          @map("from_location_id")
   toLocationId   Int?          @map("to_location_id")

@@ -54,7 +54,7 @@ export async function listTrips(filter: {
     clauses.push(Prisma.sql`t.driver_id IN (${Prisma.join(filter.driverIds.map(id => Prisma.sql`${id}::bigint`))})`);
   }
   if (filter.operation) {
-    clauses.push(Prisma.sql`t.operation = ${filter.operation}::ops.operation_type`);
+    clauses.push(Prisma.sql`t.operation = ${filter.operation}`);
   }
   if (filter.q) {
     const like = `%${filter.q}%`;
@@ -104,10 +104,8 @@ export type PayrollMatrixRow = {
   full_name: string;
   driver_type: DriverType;
   trip_days: number;
-  del_count: number;
-  live_count: number;
-  empty_count: number;
-  bobtail_count: number;
+  /** Leg counts keyed by operation code (codes from the ops.operation_types dictionary) */
+  op_counts: Record<string, number>;
   leg_count: number;
   total_miles: string;
   total_pay: string;
@@ -115,26 +113,39 @@ export type PayrollMatrixRow = {
 
 /** Payroll: driver x operation matrix for the period (includes active drivers without trips) */
 export async function payrollMatrix(period: Period) {
-  return prisma.$queryRaw<PayrollMatrixRow[]>`
-    SELECT d.id::text AS driver_id, d.driver_code, d.full_name,
-           d.driver_type::text AS driver_type,
-           count(DISTINCT t.trip_date)::int AS trip_days,
-           count(*) FILTER (WHERE t.operation = 'DEL')::int AS del_count,
-           count(*) FILTER (WHERE t.operation = 'LIVE')::int AS live_count,
-           count(*) FILTER (WHERE t.operation = 'EMPTY')::int AS empty_count,
-           count(*) FILTER (WHERE t.operation = 'BOBTAIL')::int AS bobtail_count,
-           count(t.id)::int AS leg_count,
-           COALESCE(SUM(t.miles), 0)::text AS total_miles,
-           COALESCE(SUM(t.pay_amount), 0)::text AS total_pay
-    FROM ops.drivers d
-    LEFT JOIN pay.trips t
-      ON t.driver_id = d.id
-      AND t.trip_date >= ${period.start}::date
-      AND t.trip_date <= ${period.end}::date
-    WHERE d.status = 'ACTIVE'
-    GROUP BY d.id, d.driver_code, d.full_name, d.driver_type
-    ORDER BY d.driver_code
-  `;
+  const [rows, counts] = await Promise.all([
+    prisma.$queryRaw<
+      Array<Omit<PayrollMatrixRow, "op_counts">>
+    >`
+      SELECT d.id::text AS driver_id, d.driver_code, d.full_name,
+             d.driver_type::text AS driver_type,
+             count(DISTINCT t.trip_date)::int AS trip_days,
+             count(t.id)::int AS leg_count,
+             COALESCE(SUM(t.miles), 0)::text AS total_miles,
+             COALESCE(SUM(t.pay_amount), 0)::text AS total_pay
+      FROM ops.drivers d
+      LEFT JOIN pay.trips t
+        ON t.driver_id = d.id
+        AND t.trip_date >= ${period.start}::date
+        AND t.trip_date <= ${period.end}::date
+      WHERE d.status = 'ACTIVE'
+      GROUP BY d.id, d.driver_code, d.full_name, d.driver_type
+      ORDER BY d.driver_code
+    `,
+    prisma.$queryRaw<Array<{ driver_id: string; operation: string; cnt: number }>>`
+      SELECT driver_id::text AS driver_id, operation, count(*)::int AS cnt
+      FROM pay.trips
+      WHERE trip_date >= ${period.start}::date AND trip_date <= ${period.end}::date
+      GROUP BY driver_id, operation
+    `
+  ]);
+  const byDriver = new Map<string, Record<string, number>>();
+  for (const c of counts) {
+    const bucket = byDriver.get(c.driver_id) ?? {};
+    bucket[c.operation] = c.cnt;
+    byDriver.set(c.driver_id, bucket);
+  }
+  return rows.map(r => ({ ...r, op_counts: byDriver.get(r.driver_id) ?? {} }));
 }
 
 export type DriverPeriodTripRow = {
