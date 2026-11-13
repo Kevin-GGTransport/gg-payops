@@ -48,11 +48,10 @@ export type RefillRow = {
   notes: string;
 };
 
-/** One group's initial shape: one driver + one truck + a default date + its own rows */
+/** One group's initial shape: one driver + one truck + its own rows */
 export type RefillGroup = {
   driverId: string;
   truckId: string;
-  date: string;
   rows: RefillRow[];
 };
 
@@ -116,7 +115,6 @@ const EntryRow = React.memo(function EntryRow({
   rowId,
   groupIndex,
   rowIndex,
-  defaultDate,
   driverType,
   locations,
   wageRules,
@@ -139,7 +137,6 @@ const EntryRow = React.memo(function EntryRow({
   rowId: number;
   groupIndex: number;
   rowIndex: number;
-  defaultDate: string;
   driverType: DriverType | undefined;
   locations: LocationOption[];
   /** Wage-rule versions; the row's own date picks the governing one */
@@ -167,8 +164,10 @@ const EntryRow = React.memo(function EntryRow({
 }) {
   const prefix = `g_${groupIndex}_row_${rowIndex}_`;
   const legLabel = `第 ${groupIndex + 1} 组第 ${rowIndex + 1} 程`;
-  // Controlled date: the wage rule is picked by the row's own date
-  const [dateValue, setDateValue] = React.useState(defaults?.trip_date || defaultDate);
+  // Controlled date: the wage rule is picked by the row's own date. No
+  // default - new rows open empty and the clerk types the date (refill and
+  // photo import still seed their own)
+  const [dateValue, setDateValue] = React.useState(defaults?.trip_date || "");
   const [operation, setOperation] = React.useState(defaults?.operation || "DEL");
   // EMPTY legs haul no load: the Load# cell clears and locks with the operation
   const [loadNoValue, setLoadNoValue] = React.useState(
@@ -452,8 +451,8 @@ const EntryRow = React.memo(function EntryRow({
 /** A row slot: stable id (React key, never reused) plus its one-shot defaults */
 type RowSlot = { id: number; defaults?: RefillRow };
 
-/** A group slot: stable id + one-shot initial driver/truck/date/rows */
-type GroupSlot = { id: number; driverId: string; truckId: string; date: string; rows: RowSlot[] };
+/** A group slot: stable id + one-shot initial driver/truck/rows */
+type GroupSlot = { id: number; driverId: string; truckId: string; rows: RowSlot[] };
 
 /**
  * One driver group as a tab panel: a navy-ruled driver band (driver picker,
@@ -507,7 +506,6 @@ const GroupSection = React.memo(function GroupSection({
   paySum: number;
 }) {
   const [driverId, setDriverId] = React.useState(group.driverId);
-  const [date, setDate] = React.useState(group.date);
   const [rows, setRows] = React.useState<RowSlot[]>(group.rows);
   const [nextRowId, setNextRowId] = React.useState(
     group.rows.reduce((max, r) => Math.max(max, r.id), 0) + 1
@@ -659,8 +657,8 @@ const GroupSection = React.memo(function GroupSection({
   return (
     <div>
       {/* Driver band: navy top rule opens one group. The tab above already
-          names the group (车号) - no duplicated ordinal badge here. The right
-          block mirrors the label-over-value structure so baselines align. */}
+          names the group (车号) - no duplicated ordinal badge here. Rows carry
+          their own dates (no group default), so the band is pickers + actions. */}
       <div className="group-band items-start">
         <ComboboxField
           label="司机 / 车主"
@@ -697,17 +695,6 @@ const GroupSection = React.memo(function GroupSection({
             description: [t.plate_no, t.truck_type].filter(Boolean).join(" · ") || undefined
           }))}
         />
-        <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-          新行默认日期
-          <Input
-            type="date"
-            name={`${prefix}_trip_date`}
-            defaultValue={group.date}
-            onChange={e => setDate(e.target.value)}
-            aria-label={`第 ${index + 1} 组新行默认日期`}
-            className="h-10 w-36 font-mono text-[13px]"
-          />
-        </label>
         <div className="ml-auto grid content-start justify-end gap-1.5 text-right text-xs">
           <span className="font-medium text-muted-foreground">本组已填 {filledIds.size} 行</span>
           <span className="flex items-center justify-end gap-2.5">
@@ -742,7 +729,6 @@ const GroupSection = React.memo(function GroupSection({
                 rowId={slot.id}
                 groupIndex={index}
                 rowIndex={i}
-                defaultDate={date}
                 driverType={driverType}
                 locations={locations}
                 wageRules={wageRules}
@@ -786,19 +772,13 @@ export function TripEntryForm({
   initialPeriodStart
 }: TripEntryFormProps) {
   const [photoOpen, setPhotoOpen] = React.useState(false);
-  // Sheet cover: the pay period this batch belongs to. It only steers the
-  // default date of new rows/groups - dates stay free per row.
+  // Sheet cover: the pay period this batch belongs to - context display only
+  // (rows carry their own dates, nothing defaults from the period anymore)
   const [periodStart, setPeriodStart] = React.useState(
     initialPeriodStart && /^\d{4}-\d{2}-\d{2}$/.test(initialPeriodStart)
       ? periodOf(initialPeriodStart).start
       : currentPeriod().start
   );
-  /** Today when it falls inside the picked period, else the period's first day */
-  const sheetDefaultDate = () => {
-    const today = todayIso();
-    const period = periodOf(periodStart);
-    return today >= period.start && today <= period.end ? today : period.start;
-  };
   // One columns-only instance shared by every tab's sheet (synced column widths)
   const sheetTable = useRosterTable({
     data: NO_ROWS,
@@ -810,7 +790,6 @@ export function TripEntryForm({
         id: i + 1,
         driverId: g.driverId,
         truckId: g.truckId,
-        date: g.date || todayIso(),
         rows: g.rows.map((row, j) => ({ id: j + 1, defaults: row }))
       }))
     : [
@@ -818,7 +797,6 @@ export function TripEntryForm({
           id: 1,
           driverId: defaultDriverId,
           truckId: "",
-          date: sheetDefaultDate(),
           rows: Array.from({ length: INITIAL_ROWS }, (_, i) => ({ id: i + 1 }))
         }
       ];
@@ -930,7 +908,7 @@ export function TripEntryForm({
     const id = nextGroupId.current++;
     setGroups(current => [
       ...current,
-      { id, driverId: "", truckId: "", date: sheetDefaultDate(), rows: Array.from({ length: INITIAL_ROWS }, (_, i) => ({ id: i + 1 })) }
+      { id, driverId: "", truckId: "", rows: Array.from({ length: INITIAL_ROWS }, (_, i) => ({ id: i + 1 })) }
     ]);
     // Open the fresh tab so the clerk picks its driver right away
     setActiveId(String(id));
@@ -950,7 +928,6 @@ export function TripEntryForm({
    * replaced wholesale - appending never destroys input, so no confirm.
    */
   function applyFromPhoto(apply: PhotoApply) {
-    const date = apply.rows.find(r => r.date)?.date || sheetDefaultDate();
     const id = nextGroupId.current++;
     const rows: RowSlot[] = apply.rows.map((row, i) => ({
       id: i + 1,
@@ -965,7 +942,7 @@ export function TripEntryForm({
         notes: row.notes
       }
     }));
-    const group: GroupSlot = { id, driverId: apply.driverId, truckId: "", date, rows };
+    const group: GroupSlot = { id, driverId: apply.driverId, truckId: "", rows };
     if (dirtyRef.current) {
       setGroups(current => [...current, group]);
     } else {
@@ -1008,9 +985,8 @@ export function TripEntryForm({
           onApply={applyFromPhoto}
         />
 
-        {/* Sheet cover: the pay period this batch is entered against. Only
-            steers default dates (today when in-period, else the period's
-            Saturday); switching never resets what's already typed. */}
+        {/* Sheet cover: the pay period this batch is entered against -
+            context display only; rows carry their own dates. */}
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
           <span className="text-[11px] font-semibold tracking-[0.06em] text-muted-foreground">
             工资周期

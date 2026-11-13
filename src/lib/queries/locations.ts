@@ -12,6 +12,8 @@ export type LocationRow = {
   city: string | null;
   state_code: string | null;
   postal_code: string | null;
+  latitude: string | null;
+  longitude: string | null;
   standard_pay_amount: string;
   status: RecordStatus;
 };
@@ -28,6 +30,7 @@ export async function listLocations(filter: { type: LocationType | "all"; q: str
   return prisma.$queryRaw<LocationRow[]>`
     SELECT l.id::text, l.code, l.name, l.location_type::text AS location_type,
            l.address_line, l.city, l.state_code, l.postal_code,
+           l.latitude::text AS latitude, l.longitude::text AS longitude,
            l.standard_pay_amount::text, l.status::text AS status
     FROM ops.locations l
     WHERE 1 = 1 ${typeClause} ${qClause}
@@ -39,6 +42,7 @@ export async function getLocationById(id: string) {
   const rows = await prisma.$queryRaw<LocationRow[]>`
     SELECT l.id::text, l.code, l.name, l.location_type::text AS location_type,
            l.address_line, l.city, l.state_code, l.postal_code,
+           l.latitude::text AS latitude, l.longitude::text AS longitude,
            l.standard_pay_amount::text, l.status::text AS status
     FROM ops.locations l WHERE l.id = ${id}::bigint LIMIT 1
   `;

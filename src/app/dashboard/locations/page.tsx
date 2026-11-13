@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { LedgerPanel } from "@/components/ledger";
 import { FormGrid, TextField, NumberField, SubmitButton, FormError } from "@/components/form-fields";
 import { ComboboxField } from "@/components/combobox-field";
+import { MapPicker } from "@/components/map-picker";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
 import { LOCATION_TYPE_LABELS, type LocationType } from "@/lib/labels";
@@ -21,6 +22,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   missing_name: "请填写位置名称。",
   missing_type: "请选择位置类型。",
   bad_pay: "基准金额必须是大于等于 0 的数字。",
+  bad_coords: "地图坐标无效，请重新选点或清空坐标。",
+  bad_state: "州代码不在系统州表中，请检查州一栏。",
   dup_code: "这个位置代码已存在。"
 };
 
@@ -126,12 +129,17 @@ export default async function LocationsPage({
               searchable={false}
               options={VALID_TYPES.map(t => ({ value: t, label: LOCATION_TYPE_LABELS[t] }))}
             />
-            <NumberField label="基准金额（$）" name="standard_pay_amount" min={0} step={0.01} defaultValue={values.pay} />
+            <NumberField label="基准金额（$，基地往返一趟）" name="standard_pay_amount" min={0} step={0.01} defaultValue={values.pay} />
             <TextField label="街道地址" name="address_line" placeholder="如 25503 Industrial Blvd" defaultValue={values.addressLine} maxLength={255} />
             <TextField label="城市" name="city" placeholder="如 Hayward" defaultValue={values.city} maxLength={80} />
             <TextField label="州" name="state_code" placeholder="如 CA" defaultValue={values.stateCode} maxLength={2} />
             <TextField label="邮编" name="postal_code" placeholder="如 94545" defaultValue={values.postalCode} maxLength={16} />
           </FormGrid>
+          {/* Map picker: search or click to pin, fills the address fields above */}
+          <MapPicker
+            initialLat={editing?.latitude != null ? Number(editing.latitude) : null}
+            initialLng={editing?.longitude != null ? Number(editing.longitude) : null}
+          />
           <SubmitButton>{editing ? "保存修改" : "登记位置"}</SubmitButton>
         </form>
       </ModalShell>

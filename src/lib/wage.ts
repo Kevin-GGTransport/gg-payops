@@ -96,9 +96,10 @@ export function pickVersion<T extends { effective_from: string }>(
 
 /**
  * Base wage before multipliers:
- * 1. a BASE endpoint prices the leg by the OTHER end's standard_pay_amount
- *    (from-BASE wins when both ends are BASE: price by `to`; missing
- *    counterpart -> $0);
+ * 1. a BASE endpoint prices the leg at HALF the OTHER end's standard_pay_amount
+ *    (a base round trip is one warehouse run = the full amount once, so a
+ *    single leg bills 50%; from-BASE wins when both ends are BASE: price by
+ *    `to`; missing counterpart -> $0);
  * 2. else a special postal pair bills its fixed price (zip-only legs);
  * 3. else the mileage tier table + overage increment.
  */
@@ -110,8 +111,10 @@ function resolveBaseWage(input: {
   toPostal?: string | null;
   rule: WageRuleData;
 }): number {
-  if (input.from?.location_type === "BASE") return input.to?.standard_pay_amount ?? 0;
-  if (input.to?.location_type === "BASE") return input.from?.standard_pay_amount ?? 0;
+  // Half of the counterpart amount, unrounded: calcTripWage rounds the final
+  // product, which keeps a round trip (two halves x multipliers) exact
+  if (input.from?.location_type === "BASE") return (input.to?.standard_pay_amount ?? 0) / 2;
+  if (input.to?.location_type === "BASE") return (input.from?.standard_pay_amount ?? 0) / 2;
   const special = resolveSpecialRoute(
     input.fromPostal,
     input.toPostal,

@@ -52,6 +52,8 @@ type ComboboxFieldProps = {
   onQueryChange?: (query: string) => void;
   /** Creatable pattern: an option derived from the current search text, offered after the groups */
   customOption?: (text: string) => ComboboxOption;
+  /** Always-visible action row under the list (e.g. the map picker entry); gets a close helper */
+  footerAction?: (helpers: { close: () => void }) => React.ReactNode;
   /** Display label for a value that is not among `options` (free-text creatable picks) */
   labelForValue?: (value: string) => string | undefined;
   className?: string;
@@ -91,6 +93,7 @@ export function ComboboxField({
   onValueChange,
   onQueryChange,
   customOption,
+  footerAction,
   labelForValue,
   className,
   triggerClassName,
@@ -241,6 +244,12 @@ export function ComboboxField({
               )}
             </CommandList>
           </Command>
+          {footerAction && (
+            // Outside Command: an action row must not be filtered by the search
+            <div className="border-t border-line p-1">
+              {footerAction({ close: () => setOpen(false) })}
+            </div>
+          )}
         </PopoverContent>
       </Popover>
     </div>

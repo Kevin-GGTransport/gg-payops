@@ -8,7 +8,8 @@ import { getLocationById } from "@/lib/queries/locations";
  * GET /api/distance?from=<endpoint>&to=<endpoint> -> { miles: number | null }
  * Endpoint protocol: "loc:<locationId>" for saved locations (geocoded via the
  * stored address) or "txt:<free text>" (typed as-is - a zip or address that
- * Google resolves directly).
+ * Google resolves directly). Map-picked text carries a "|geo:…" payload
+ * suffix which is stripped before geocoding.
  */
 async function resolveEndpoint(value: string): Promise<string> {
   if (value.startsWith("loc:")) {
@@ -17,7 +18,11 @@ async function resolveEndpoint(value: string): Promise<string> {
     const location = await getLocationById(id);
     return location ? fullAddress(location) : "";
   }
-  if (value.startsWith("txt:")) return value.slice(4).trim();
+  if (value.startsWith("txt:")) {
+    const text = value.slice(4);
+    const at = text.indexOf("|geo:");
+    return (at >= 0 ? text.slice(0, at) : text).trim();
+  }
   return "";
 }
 

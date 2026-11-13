@@ -32,8 +32,6 @@ type ParsedGroup = {
   driverId: string;
   /** Group-level truck (车号): snapshotted at submit, not a stored FK */
   truckId: string;
-  /** Group-level default date; each row may still carry its own */
-  tripDate: string;
   rows: ParsedRow[];
 };
 
@@ -79,7 +77,6 @@ function packRefill(
     const group = groups[g];
     if (group.driverId) params.set(`f_g_${kept}_driver_id`, group.driverId);
     if (group.truckId) params.set(`f_g_${kept}_truck_id`, group.truckId);
-    if (group.tripDate) params.set(`f_g_${kept}_trip_date`, group.tripDate);
     params.set(`f_g_${kept}_row_count`, String(group.rows.length));
     for (let i = 0; i < group.rows.length; i++) {
       for (const field of ROW_FIELDS) {
@@ -116,7 +113,10 @@ function backWithError(
 
 /**
  * Resolve one submitted endpoint ("loc:<id>" verified against the DB, "txt:<text>"
- * find-or-created as an OTHER location) into a bigint id string.
+ * find-or-created as an OTHER location) into a bigint id string. Map-picked
+ * endpoints carry a "|geo:<lat>,<lng>;<street>;<city>;<state>;<zip>" suffix
+ * (see location-picker) which enriches the created location with coordinates
+ * and structured address fields.
  */
 async function resolveEndpointId(value: string): Promise<string> {
   if (!value) return "";
@@ -129,17 +129,59 @@ async function resolveEndpointId(value: string): Promise<string> {
     return rows[0]?.id ?? "";
   }
   if (value.startsWith("txt:")) {
-    const text = value.slice(4).trim();
+    const [addressPart, geoPart] = value.slice(4).split("|geo:");
+    const text = addressPart.trim();
     const code = text.toUpperCase().slice(0, CODE_MAX);
     if (!code) return "";
     const existing = await prisma.$queryRaw<{ id: string }[]>`
       SELECT id::text FROM ops.locations WHERE code = ${code} LIMIT 1
     `;
     if (existing[0]) return existing[0].id;
+
+    // Parse the map payload; anything missing just stays null
+    let lat: number | null = null;
+    let lng: number | null = null;
+    let street: string | null = null;
+    let city: string | null = null;
+    let state: string | null = null;
+    let zip: string | null = null;
+    if (geoPart) {
+      const [coords, ...parts] = geoPart.split(";");
+      const [latRaw, lngRaw] = coords?.split(",") ?? [];
+      const latNum = Number(latRaw);
+      const lngNum = Number(lngRaw);
+      if (
+        Number.isFinite(latNum) &&
+        Number.isFinite(lngNum) &&
+        latNum >= -90 &&
+        latNum <= 90 &&
+        lngNum >= -180 &&
+        lngNum <= 180
+      ) {
+        lat = latNum;
+        lng = lngNum;
+      }
+      street = parts[0]?.trim() || null;
+      city = parts[1]?.trim() || null;
+      zip = parts[3]?.trim() || null;
+      const stateRaw = parts[2]?.trim().toUpperCase() || "";
+      // Guard the state_codes FK: unknown codes (non-US picks) file as null
+      if (stateRaw) {
+        const knownState = await prisma.$queryRaw<{ one: number }[]>`
+          SELECT 1 AS one FROM ops.state_codes WHERE code = ${stateRaw} LIMIT 1
+        `;
+        if (knownState[0]) state = stateRaw;
+      }
+    }
+
     // Rare race: concurrent insert loses ON CONFLICT and returns nothing -> re-select
     const inserted = await prisma.$queryRaw<{ id: string }[]>`
-      INSERT INTO ops.locations (code, name, location_type, address_line)
-      VALUES (${code}, ${text}, 'OTHER'::ops.location_type, ${text})
+      INSERT INTO ops.locations (code, name, location_type, address_line, city, state_code, postal_code, latitude, longitude)
+      VALUES (
+        ${code}, ${text}, 'OTHER'::ops.location_type,
+        ${street ?? text}, ${city}, ${state}, ${zip},
+        ${lat}::decimal(9,6), ${lng}::decimal(9,6)
+      )
       ON CONFLICT (code) DO NOTHING
       RETURNING id::text
     `;
@@ -169,7 +211,6 @@ export async function addTripsBatch(formData: FormData) {
   const groups: ParsedGroup[] = [];
   let total = 0;
   for (let g = 0; g < groupCount; g++) {
-    const groupDate = str(formData, `g_${g}_trip_date`);
     const rowCount = Math.min(
       clampCount(str(formData, `g_${g}_row_count`), MAX_ROWS_PER_GROUP),
       MAX_ROWS_TOTAL - total
@@ -177,8 +218,9 @@ export async function addTripsBatch(formData: FormData) {
     const rows: ParsedRow[] = [];
     for (let i = 0; i < rowCount; i++) {
       const row: ParsedRow = {
-        // Per-row date first (a sheet spans many days); falls back to the group default
-        tripDate: str(formData, `g_${g}_row_${i}_trip_date`) || groupDate,
+        // Per-row date only (a sheet spans many days) - no group default
+        // anymore; an empty date fails isIsoDate below with the exact leg
+        tripDate: str(formData, `g_${g}_row_${i}_trip_date`),
         operation: str(formData, `g_${g}_row_${i}_operation`),
         loadNo: str(formData, `g_${g}_row_${i}_load_no`),
         from: str(formData, `g_${g}_row_${i}_from_location`),
@@ -198,7 +240,6 @@ export async function addTripsBatch(formData: FormData) {
     groups.push({
       driverId: str(formData, `g_${g}_driver_id`),
       truckId: str(formData, `g_${g}_truck_id`),
-      tripDate: groupDate,
       rows
     });
   }

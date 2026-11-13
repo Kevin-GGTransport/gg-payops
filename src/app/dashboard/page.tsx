@@ -18,7 +18,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   missing_truck: "请选择车号（车辆需先在车辆管理登记）。",
   bad_truck: "所选车辆无效或已停用，请重新选择车号。",
   no_rows: "请至少录入一段行程。",
-  bad_date: "行程日期无效，请检查该行的日期。",
+  bad_date: "行程日期无效或未填写，请检查该行的日期。",
   missing_operation: "请选择操作类型。",
   missing_load: "带柜操作（DEL / LIVE）需填写 Load#。",
   missing_route: "请至少选择起点或终点。",
@@ -57,7 +57,7 @@ export default async function EntryPage({
   const periodTripsHref = `/dashboard/trips?view=period&period=${initialPeriodStart}`;
 
   // Refill groups after a failed submit: f_group_count tells how many groups to
-  // rebuild; each group restores its driver, default date and its own rows
+  // rebuild; each group restores its driver and its own rows (dates live per row)
   const refillCount = Number.parseInt(firstValue(sp.f_group_count) ?? "", 10);
   const refillGroups: RefillGroup[] | undefined =
     Number.isFinite(refillCount) && refillCount >= 1
@@ -79,7 +79,6 @@ export default async function EntryPage({
           return {
             driverId: firstValue(sp[`f_g_${g}_driver_id`]) ?? "",
             truckId: firstValue(sp[`f_g_${g}_truck_id`]) ?? "",
-            date: firstValue(sp[`f_g_${g}_trip_date`]) ?? "",
             rows
           };
         })

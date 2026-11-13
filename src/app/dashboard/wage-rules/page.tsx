@@ -183,7 +183,7 @@ export default async function WageRulesPage({
                 )}
                 <p className="mt-3 text-xs text-muted-foreground">
                   BOBTAIL 乘数 ×{Number(detail.bobtail_multiplier).toFixed(2)}；
-                  BASE 端点腿按位置基准金额计价（位置管理页维护），不落档位。
+                  BASE 端点腿按对端基准金额的 50% 计价（基地往返算一仓，单程即一半；基准金额在位置管理页维护），不落档位。
                 </p>
               </div>
             </div>
