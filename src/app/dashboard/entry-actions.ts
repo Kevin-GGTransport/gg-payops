@@ -21,6 +21,7 @@ type ParsedRow = {
   from: string;
   to: string;
   milesValue: string;
+  fuelValue: string;
   payValue: string;
   notes: string;
 };
@@ -53,6 +54,7 @@ const ROW_FIELDS = [
   "from_location",
   "to_location",
   "miles",
+  "fuel_gallons",
   "pay_amount",
   "notes"
 ] as const;
@@ -223,6 +225,7 @@ export async function addTripsBatch(formData: FormData) {
         from: str(formData, `g_${g}_row_${i}_from_location`),
         to: str(formData, `g_${g}_row_${i}_to_location`),
         milesValue: str(formData, `g_${g}_row_${i}_miles`) || "0",
+        fuelValue: str(formData, `g_${g}_row_${i}_fuel_gallons`) || "0",
         payValue: str(formData, `g_${g}_row_${i}_pay_amount`) || "0",
         notes: str(formData, `g_${g}_row_${i}_notes`) || ""
       };
@@ -278,6 +281,8 @@ export async function addTripsBatch(formData: FormData) {
       }
       const milesNum = Number(row.milesValue);
       if (!Number.isFinite(milesNum) || milesNum < 0) backWithError("bad_miles", formData, groups, grp, leg);
+      const fuelNum = Number(row.fuelValue);
+      if (!Number.isFinite(fuelNum) || fuelNum < 0) backWithError("bad_fuel", formData, groups, grp, leg);
       // Wage snapshot: trust the submitted amount (auto-calculated client-side or
       // hand-edited); no server-side recompute so manual overrides stick
       const payNum = Number(row.payValue);
@@ -389,6 +394,7 @@ export async function addTripsBatch(formData: FormData) {
         operation: row.operation,
         loadNo: row.loadNo,
         milesNum: Number(row.milesValue),
+        fuelNum: Math.round(Number(row.fuelValue) * 100) / 100,
         payNum: Math.round(Number(row.payValue) * 100) / 100,
         notes: row.notes || null
       };
@@ -398,12 +404,12 @@ export async function addTripsBatch(formData: FormData) {
 
   const values = insertRows.map(r => Prisma.sql`
     (${r.driverId}::bigint, ${r.tripDate}::date, ${r.operation}, ${r.loadNo},
-     ${r.fromId || null}::bigint, ${r.toId || null}::bigint, ${r.milesNum}, ${r.payNum}, ${r.notes},
-     ${r.driverName}, ${r.truckSnapshot}::jsonb)
+     ${r.fromId || null}::bigint, ${r.toId || null}::bigint, ${r.milesNum}, ${r.fuelNum}, ${r.payNum},
+     ${r.notes}, ${r.driverName}, ${r.truckSnapshot}::jsonb)
   `);
   await prisma.$executeRaw`
     INSERT INTO pay.trips(driver_id, trip_date, operation, load_no,
-      from_location_id, to_location_id, miles, pay_amount, notes,
+      from_location_id, to_location_id, miles, fuel_gallons, pay_amount, notes,
       driver_name, truck_snapshot)
     VALUES ${Prisma.join(values)}
   `;

@@ -181,6 +181,8 @@ model Trip {
   fromLocationId Int?          @map("from_location_id")
   toLocationId   Int?          @map("to_location_id")
   miles          Decimal       @default(0) @db.Decimal(10, 2)
+  /// Fuel added on this leg, US gallons (manual entry, not priced)
+  fuelGallons    Decimal       @default(0) @map("fuel_gallons") @db.Decimal(8, 2)
   payAmount      Decimal       @default(0) @map("pay_amount") @db.Decimal(12, 2)
   notes          String?
   /// Submit-time driver name snapshot (driver_id stays for payroll joins)

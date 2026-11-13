@@ -160,11 +160,20 @@ export function ComboboxField({
                 </span>
               ) : (
                 <>
-                  <span className={cn("text-[13px] leading-tight", mono && "font-mono font-semibold")}>
+                  <span
+                    title={selected.label}
+                    className={cn(
+                      "min-w-0 flex-1 truncate text-[13px] leading-tight",
+                      mono && "font-mono font-semibold"
+                    )}
+                  >
                     {selected.label}
                   </span>
                   {selected.description && (
-                    <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">
+                    <span
+                      title={selected.description}
+                      className="min-w-0 max-w-[60%] shrink-0 truncate text-xs font-normal text-muted-foreground"
+                    >
                       {selected.description}
                     </span>
                   )}

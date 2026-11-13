@@ -20,13 +20,10 @@ import { listOperationTypes } from "@/lib/queries/operations";
 import {
   listTrips,
   payrollMatrix,
-  driverPeriodTrips,
-  periodPayTotals,
-  type DriverPeriodTripRow
+  periodPayTotals
 } from "@/lib/queries/trips";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { TripsTable } from "./trips-table";
-import { PayrollLegsTable } from "./payroll-legs-table";
 
 export const metadata: Metadata = { title: "行程与工资 · G&G PayOps" };
 
@@ -61,27 +58,6 @@ function pageWindow(page: number, totalPages: number): Array<number | "…"> {
   return items;
 }
 
-/** Group one driver's period legs by date; each group carries day subtotals */
-function groupByDay(legs: DriverPeriodTripRow[]) {
-  const days: Array<{ date: string; legs: DriverPeriodTripRow[]; miles: number; pay: number }> = [];
-  for (const leg of legs) {
-    const day = days.find(d => d.date === leg.trip_date);
-    if (day) {
-      day.legs.push(leg);
-      day.miles += Number(leg.miles);
-      day.pay += Number(leg.pay_amount);
-    } else {
-      days.push({
-        date: leg.trip_date,
-        legs: [leg],
-        miles: Number(leg.miles),
-        pay: Number(leg.pay_amount)
-      });
-    }
-  }
-  return days;
-}
-
 export default async function TripsPage({
   searchParams
 }: {
@@ -107,13 +83,6 @@ async function PeriodView({ sp }: { sp: SearchParams }) {
   const today = todayIso();
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
-  const pickedId = firstValue(sp.driver) ?? "";
-
-  // Drill-down: start fetching before the matrix so both run in parallel;
-  // bigint identities are digits only, other values are dirty params we skip
-  const pickedLegsPromise = pickedId && /^\d+$/.test(pickedId)
-    ? driverPeriodTrips(period, pickedId)
-    : null;
 
   const [rows, periodTotals, operations] = await Promise.all([
     payrollMatrix(period),
@@ -143,22 +112,19 @@ async function PeriodView({ sp }: { sp: SearchParams }) {
     { drivers: 0, days: 0, legs: 0, miles: 0, pay: 0 }
   );
 
-  const picked = pickedId ? rows.find(r => r.driver_id === pickedId) : undefined;
-  const pickedLegs = picked && pickedLegsPromise ? await pickedLegsPromise : [];
-  const pickedDays = groupByDay(pickedLegs);
-  const pickedHref = (d: string | undefined) =>
-    `/dashboard/trips?view=period&period=${period.start}${d ? `&driver=${d}` : ""}`;
-  const navHref = (p: { start: string }) =>
-    `/dashboard/trips?view=period&period=${p.start}${pickedId ? `&driver=${pickedId}` : ""}`;
+  const navHref = (p: { start: string }) => `/dashboard/trips?view=period&period=${p.start}`;
+  /** Settlement-sheet drill-down for one driver x this period */
+  const sheetHref = (driverId: string) =>
+    `/dashboard/trips/${driverId}?period=${period.start}`;
 
   return (
     <>
       <PageHeader
         title="行程与工资"
-        description="按核算周期（周六 ~ 周五）汇总每位司机的行程与工资，点姓名查看周明细。"
+        description="按核算周期（周六 ~ 周五）汇总每位司机的行程与工资，点姓名或本期工资查看周期工资单。"
         actions={
           <div className="flex items-center gap-2">
-            <Link className="button button-quiet" href={`/dashboard${pickedId ? `?driver=${pickedId}` : ""}`}>
+            <Link className="button button-quiet" href="/dashboard">
               录入行程
             </Link>
             <Link className="button button-dark" href={`/dashboard/payroll/export?period=${period.start}`}>
@@ -234,12 +200,9 @@ async function PeriodView({ sp }: { sp: SearchParams }) {
             <tbody>
               {rows.length === 0 && <LedgerEmpty colSpan={6 + opCodes.length}>还没有在职司机。</LedgerEmpty>}
               {rows.map(row => (
-                <tr
-                  key={row.driver_id}
-                  className={`${row.leg_count === 0 ? "row-off" : ""} ${picked?.driver_id === row.driver_id ? "row-pick" : ""}`}
-                >
+                <tr key={row.driver_id} className={row.leg_count === 0 ? "row-off" : ""}>
                   <td>
-                    <Link className="cell-link" href={pickedHref(row.driver_id)}>
+                    <Link className="cell-link" href={sheetHref(row.driver_id)}>
                       {row.full_name}
                     </Link>
                     <span className="muted-inline">{row.driver_code}</span>
@@ -251,7 +214,11 @@ async function PeriodView({ sp }: { sp: SearchParams }) {
                   ))}
                   <td className="num">{row.leg_count}</td>
                   <td className="num">{fmtMiles(row.total_miles)}</td>
-                  <td className="num">{money(row.total_pay)}</td>
+                  <td className="num">
+                    <Link className="cell-link num" href={sheetHref(row.driver_id)}>
+                      {money(row.total_pay)}
+                    </Link>
+                  </td>
                 </tr>
               ))}
               <tr className="matrix-total">
@@ -268,32 +235,6 @@ async function PeriodView({ sp }: { sp: SearchParams }) {
           </table>
         </LedgerPanel>
       </section>
-
-      {picked && (
-        <section aria-label="每日明细" className="mt-4">
-          <LedgerPanel
-            label={
-              <>
-                <span className="flex items-center gap-3">
-                  {picked.full_name} · 本周明细
-                  <b>
-                    {pickedDays.length} 天 · {picked.leg_count} 段 · {money(picked.total_pay)}
-                  </b>
-                </span>
-                <Link className="panel-x" href={pickedHref(undefined)} aria-label="关闭明细">×</Link>
-              </>
-            }
-          >
-            <PayrollLegsTable
-              days={pickedDays}
-              totalMiles={picked.total_miles}
-              totalPay={picked.total_pay}
-              periodStart={period.start}
-              driverId={picked.driver_id}
-            />
-          </LedgerPanel>
-        </section>
-      )}
     </>
   );
 }

@@ -24,6 +24,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   missing_load: "带柜操作需填写 Load#（可在「操作类型」里调整是否必填）。",
   missing_route: "请至少选择起点或终点。",
   bad_miles: "里程必须是不小于 0 的数字。",
+  bad_fuel: "加油量必须是不小于 0 的数字。",
   bad_pay: "本趟工资必须是不小于 0 的数字。",
   bad_location: "所选位置无效，请重新选择。",
   dup_trip: "这一天相同操作、相同起终点、相同柜号的行程已存在，请勿重复录入。"
@@ -73,6 +74,7 @@ export default async function EntryPage({
                   to: firstValue(sp[`f_g_${g}_row_${i}_to_location`]) ?? "",
                   load_no: firstValue(sp[`f_g_${g}_row_${i}_load_no`]) ?? "",
                   miles: firstValue(sp[`f_g_${g}_row_${i}_miles`]) ?? "",
+                  fuel_gallons: firstValue(sp[`f_g_${g}_row_${i}_fuel_gallons`]) ?? "",
                   pay_amount: firstValue(sp[`f_g_${g}_row_${i}_pay_amount`]) ?? "",
                   notes: firstValue(sp[`f_g_${g}_row_${i}_notes`]) ?? ""
                 }))

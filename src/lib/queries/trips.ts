@@ -108,6 +108,7 @@ export type PayrollMatrixRow = {
   op_counts: Record<string, number>;
   leg_count: number;
   total_miles: string;
+  total_fuel: string;
   total_pay: string;
 };
 
@@ -122,6 +123,7 @@ export async function payrollMatrix(period: Period) {
              count(DISTINCT t.trip_date)::int AS trip_days,
              count(t.id)::int AS leg_count,
              COALESCE(SUM(t.miles), 0)::text AS total_miles,
+             COALESCE(SUM(t.fuel_gallons), 0)::text AS total_fuel,
              COALESCE(SUM(t.pay_amount), 0)::text AS total_pay
       FROM ops.drivers d
       LEFT JOIN pay.trips t
@@ -156,6 +158,7 @@ export type DriverPeriodTripRow = {
   from_code: string | null;
   to_code: string | null;
   miles: string;
+  fuel_gallons: string;
   pay_amount: string;
 };
 
@@ -166,7 +169,7 @@ export async function driverPeriodTrips(period: Period, driverId: string) {
            to_char(t.trip_date, 'YYYY-MM-DD') AS trip_date,
            t.operation::text AS operation, t.load_no,
            f.code AS from_code, o.code AS to_code,
-           t.miles::text, t.pay_amount::text
+           t.miles::text, t.fuel_gallons::text, t.pay_amount::text
     FROM pay.trips t
     LEFT JOIN ops.locations f ON f.id = t.from_location_id
     LEFT JOIN ops.locations o ON o.id = t.to_location_id

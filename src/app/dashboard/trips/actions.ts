@@ -13,8 +13,12 @@ function str(formData: FormData, key: string) {
 export async function deleteTrip(formData: FormData) {
   await requireUser();
   const id = str(formData, "id");
+  // Full paths (leading "/") land on the driver period detail page; anything
+  // else stays a query string against the trips list
   const returnTo = str(formData, "return_to");
-  const backTo = `/dashboard/trips${returnTo ? `?${returnTo}` : ""}`;
+  const backTo = returnTo.startsWith("/")
+    ? returnTo
+    : `/dashboard/trips${returnTo ? `?${returnTo}` : ""}`;
   if (!id) redirect(backTo);
 
   await prisma.$executeRaw`DELETE FROM pay.trips WHERE id = ${id}::bigint`;

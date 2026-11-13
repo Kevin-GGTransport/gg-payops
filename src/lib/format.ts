@@ -11,6 +11,12 @@ export function miles(value: string | number | null | undefined) {
   return Number(value ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
+/** Fuel gallons: 12.5 (0 shows as a muted dash - most legs fuel nothing; unit lives in the header) */
+export function fuel(value: string | number | null | undefined) {
+  const n = Number(value ?? 0);
+  return n > 0 ? n.toLocaleString("en-US", { maximumFractionDigits: 1 }) : "—";
+}
+
 /** Odometer reading with one decimal: 12,345.6 mi */
 export function odometerMi(value: string | number | null | undefined) {
   return value === null || value === undefined

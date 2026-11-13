@@ -8,7 +8,8 @@ export function PageHeader({
   className
 }: {
   title: string;
-  description: string;
+  /** Plain string, or inline markup (e.g. a mono driver code inside the sentence) */
+  description: ReactNode;
   actions?: ReactNode;
   className?: string;
 }) {

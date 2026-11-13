@@ -39,12 +39,12 @@ export async function GET(request: Request) {
     [
       "车号", "姓名", "类型", "出勤天数",
       ...opCodes,
-      "总段数", "总里程(mi)", "本期工资($)"
+      "总段数", "总里程(mi)", "加油(gal)", "本期工资($)"
     ],
     ...rows.map(r => [
       r.driver_code, r.full_name, DRIVER_TYPE_LABELS[r.driver_type], r.trip_days,
       ...opCodes.map(code => r.op_counts[code] ?? 0),
-      r.leg_count, r.total_miles, r.total_pay
+      r.leg_count, r.total_miles, r.total_fuel, r.total_pay
     ]),
     [
       "合计", `${attended} 人出勤`, "",
@@ -52,6 +52,7 @@ export async function GET(request: Request) {
       ...opCodes.map(code => sum(r => r.op_counts[code] ?? 0)),
       sum(r => r.leg_count),
       (sum(r => Number(r.total_miles))).toFixed(2),
+      (sum(r => Number(r.total_fuel))).toFixed(2),
       (sum(r => Number(r.total_pay))).toFixed(2)
     ]
   ];

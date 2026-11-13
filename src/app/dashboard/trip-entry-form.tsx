@@ -51,6 +51,7 @@ export type RefillRow = {
   to: string;
   load_no: string;
   miles: string;
+  fuel_gallons?: string;
   pay_amount: string;
   notes: string;
 };
@@ -99,6 +100,7 @@ const SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
   { id: "operation", header: "操作", size: 72, minSize: 64 },
   { id: "load_no", header: "Load#", size: 90, minSize: 76 },
   { id: "miles", header: "里程 (mi)", size: 82, minSize: 72, meta: { headerClass: "num" } },
+  { id: "fuel_gallons", header: "加油 (gal)", size: 78, minSize: 68, meta: { headerClass: "num" } },
   { id: "pay_amount", header: "本趟工资 ($)", size: 100, minSize: 92, meta: { headerClass: "num" } },
   { id: "notes", header: "备注", size: 182, minSize: 100 },
   { id: "delete", header: "删除", size: 40, enableResizing: false, meta: { headerClass: "px-1.5" } }
@@ -203,6 +205,9 @@ const EntryRow = React.memo(function EntryRow({
   // pick (refill/photo defaults count as manual - carry never overwrites them)
   const fromInherited = React.useRef(false);
   const [milesValue, setMilesValue] = React.useState(defaults?.miles || "0");
+  // Fuel-up log (US gallons): optional ledger field, never priced - most legs
+  // stay empty and submit as 0
+  const [fuelValue, setFuelValue] = React.useState(defaults?.fuel_gallons || "");
   const [status, setStatus] = React.useState<CalcStatus>("loading");
   const [manual, setManual] = React.useState(false);
   // Ignore stale responses after a quick endpoint re-pick
@@ -464,6 +469,19 @@ const EntryRow = React.memo(function EntryRow({
             {milesHint}
           </span>
         )}
+      </td>
+      <td className="px-1.5">
+        <Input
+          type="number"
+          name={`${prefix}fuel_gallons`}
+          min={0}
+          step={0.1}
+          value={fuelValue}
+          onChange={e => setFuelValue(e.target.value)}
+          placeholder="—"
+          aria-label={`${legLabel}加油量`}
+          className={`${cellInput} text-right font-mono`}
+        />
       </td>
       <td className="px-1.5">
         <Input
