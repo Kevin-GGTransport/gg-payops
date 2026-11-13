@@ -100,7 +100,8 @@ export async function periodGauge(period: Period) {
 
 export type PayrollMatrixRow = {
   driver_id: string;
-  driver_code: string;
+  /** Truck numbers this driver ran in the period, from trip snapshots */
+  trucks: string;
   full_name: string;
   driver_type: DriverType;
   trip_days: number;
@@ -118,7 +119,12 @@ export async function payrollMatrix(period: Period) {
     prisma.$queryRaw<
       Array<Omit<PayrollMatrixRow, "op_counts">>
     >`
-      SELECT d.id::text AS driver_id, d.driver_code, d.full_name,
+      SELECT d.id::text AS driver_id,
+             COALESCE(
+               string_agg(DISTINCT t.truck_snapshot->>'truck_code', ', ' ORDER BY t.truck_snapshot->>'truck_code'),
+               ''
+             ) AS trucks,
+             d.full_name,
              d.driver_type::text AS driver_type,
              count(DISTINCT t.trip_date)::int AS trip_days,
              count(t.id)::int AS leg_count,
@@ -131,8 +137,8 @@ export async function payrollMatrix(period: Period) {
         AND t.trip_date >= ${period.start}::date
         AND t.trip_date <= ${period.end}::date
       WHERE d.status = 'ACTIVE'
-      GROUP BY d.id, d.driver_code, d.full_name, d.driver_type
-      ORDER BY d.driver_code
+      GROUP BY d.id, d.full_name, d.driver_type
+      ORDER BY d.full_name
     `,
     prisma.$queryRaw<Array<{ driver_id: string; operation: string; cnt: number }>>`
       SELECT driver_id::text AS driver_id, operation, count(*)::int AS cnt

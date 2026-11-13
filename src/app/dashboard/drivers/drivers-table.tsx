@@ -23,12 +23,6 @@ export function DriversTable({
 }) {
   const columns: ColumnDef<DriverRow, unknown>[] = [
     {
-      id: "code",
-      header: "车号",
-      size: 88,
-      cell: ({ row }) => <span className="mono strong">{row.original.driver_code}</span>
-    },
-    {
       id: "name",
       header: "姓名",
       size: 152,

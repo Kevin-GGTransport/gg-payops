@@ -4,7 +4,6 @@ import type { DriverType, RecordStatus } from "@/lib/labels";
 
 export type DriverRow = {
   id: string;
-  driver_code: string;
   full_name: string;
   driver_type: DriverType;
   phone: string | null;
@@ -17,7 +16,7 @@ export type DriverRow = {
 };
 
 const DRIVER_SELECT = Prisma.sql`
-  SELECT d.id::text, d.driver_code, d.full_name, d.driver_type::text AS driver_type,
+  SELECT d.id::text, d.full_name, d.driver_type::text AS driver_type,
          d.phone, d.license_no, d.license_class,
          to_char(d.license_expires_on, 'YYYY-MM-DD') AS license_expires_on,
          to_char(d.hire_date, 'YYYY-MM-DD') AS hire_date,
@@ -34,13 +33,13 @@ export async function listDrivers(filter: {
     : Prisma.sql` AND d.driver_type = ${filter.type.toUpperCase()}::ops.driver_type`;
   const qPattern = `%${filter.q}%`;
   const qClause = filter.q
-    ? Prisma.sql` AND (d.full_name ILIKE ${qPattern} OR d.driver_code ILIKE ${qPattern} OR d.phone ILIKE ${qPattern} OR d.license_no ILIKE ${qPattern})`
+    ? Prisma.sql` AND (d.full_name ILIKE ${qPattern} OR d.phone ILIKE ${qPattern} OR d.license_no ILIKE ${qPattern})`
     : Prisma.sql``;
 
   return prisma.$queryRaw<DriverRow[]>`
     ${DRIVER_SELECT}
     WHERE 1 = 1 ${typeClause} ${qClause}
-    ORDER BY d.status = 'ACTIVE' DESC, d.driver_code
+    ORDER BY d.status = 'ACTIVE' DESC, d.full_name
   `;
 }
 
@@ -66,9 +65,9 @@ export async function driverTypeCounts() {
 }
 
 export async function activeDriverOptions() {
-  return prisma.$queryRaw<{ id: string; driver_code: string; full_name: string; driver_type: DriverType }[]>`
-    SELECT id::text, driver_code, full_name, driver_type::text AS driver_type
+  return prisma.$queryRaw<{ id: string; full_name: string; driver_type: DriverType }[]>`
+    SELECT id::text, full_name, driver_type::text AS driver_type
     FROM ops.drivers WHERE status = 'ACTIVE'
-    ORDER BY driver_type, driver_code
+    ORDER BY driver_type, full_name
   `;
 }

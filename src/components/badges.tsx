@@ -3,10 +3,12 @@ import {
   DRIVER_TYPE_LABELS,
   LOCATION_TYPE_LABELS,
   RECORD_STATUS_LABELS,
+  STATEMENT_STATUS_LABELS,
   type DriverType,
   type LocationType,
   type OperationType,
-  type RecordStatus
+  type RecordStatus,
+  type StatementStatus
 } from "@/lib/labels";
 
 /* 钢印标签：方角、细描边、淡底 */
@@ -37,6 +39,18 @@ export function StatusPill({ status }: { status: RecordStatus }) {
       {RECORD_STATUS_LABELS[status]}
     </span>
   );
+}
+
+/* 工资单流转：草稿=灰 · 审核=琥珀 · 核对=藏青 · 完成=审计绿 */
+const STATEMENT_STYLES: Record<StatementStatus, string> = {
+  DRAFT: "border-line bg-muted text-muted-foreground",
+  REVIEWED: "border-amber-500/40 bg-amber-50 text-amber-800",
+  VERIFIED: "border-route/30 bg-route/10 text-route",
+  DONE: "border-audit/30 bg-audit/10 text-audit"
+};
+
+export function StatementStatusBadge({ status }: { status: StatementStatus }) {
+  return <span className={cn(pillBase, STATEMENT_STYLES[status])}>{STATEMENT_STATUS_LABELS[status]}</span>;
 }
 
 /** Known codes keep their house colors; dictionary additions get neutral ink */

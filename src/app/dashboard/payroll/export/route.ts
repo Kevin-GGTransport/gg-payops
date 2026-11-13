@@ -1,8 +1,8 @@
 import { requireUser } from "@/lib/auth";
 import { DRIVER_TYPE_LABELS } from "@/lib/labels";
 import { currentPeriod, periodLabel, periodOf, type Period } from "@/lib/period";
-import { payrollMatrix } from "@/lib/queries/trips";
 import { listOperationTypes } from "@/lib/queries/operations";
+import { mergedPeriodStatements } from "@/lib/queries/statements";
 
 /** Quote one CSV cell (RFC 4180: wrap in quotes, double embedded quotes) */
 function cell(value: string | number) {
@@ -11,7 +11,9 @@ function cell(value: string | number) {
 
 /**
  * Payroll CSV for one period (Sat~Fri): one row per active driver plus a
- * totals row. UTF-8 BOM keeps Chinese headers readable when opened in Excel.
+ * totals row. Generated statements win over the live aggregates (frozen
+ * snapshot); drivers without one keep the live numbers. UTF-8 BOM keeps
+ * Chinese headers readable when opened in Excel.
  */
 export async function GET(request: Request) {
   await requireUser();
@@ -20,12 +22,16 @@ export async function GET(request: Request) {
   const period: Period =
     param && /^\d{4}-\d{2}-\d{2}$/.test(param) ? periodOf(param) : currentPeriod();
 
-  const [rows, operations] = await Promise.all([payrollMatrix(period), listOperationTypes()]);
+  const [rows, operations] = await Promise.all([
+    mergedPeriodStatements(period),
+    listOperationTypes()
+  ]);
+
   const attended = rows.filter(r => r.leg_count > 0).length;
   const sum = (pick: (r: (typeof rows)[number]) => number) =>
     rows.reduce((acc, r) => acc + pick(r), 0);
   // Operation columns follow the dictionary, plus legacy codes still present
-  // in this period's trips so totals never lose history
+  // in this period's trips/statements so totals never lose history
   const opCodes = [
     ...operations.map(o => o.code),
     ...[...new Set(rows.flatMap(r => Object.keys(r.op_counts)))].filter(
@@ -42,7 +48,7 @@ export async function GET(request: Request) {
       "总段数", "总里程(mi)", "加油(gal)", "本期工资($)"
     ],
     ...rows.map(r => [
-      r.driver_code, r.full_name, DRIVER_TYPE_LABELS[r.driver_type], r.trip_days,
+      r.trucks, r.full_name, DRIVER_TYPE_LABELS[r.driver_type], r.trip_days,
       ...opCodes.map(code => r.op_counts[code] ?? 0),
       r.leg_count, r.total_miles, r.total_fuel, r.total_pay
     ]),

@@ -6,7 +6,6 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 
 const FIELDS = [
-  "driver_code",
   "full_name",
   "driver_type",
   "phone",
@@ -37,7 +36,6 @@ export async function saveDriver(formData: FormData) {
   await requireUser();
 
   const id = str(formData, "id");
-  const code = str(formData, "driver_code").toUpperCase();
   const fullName = str(formData, "full_name");
   const driverType = str(formData, "driver_type");
   const phone = str(formData, "phone") || null;
@@ -48,65 +46,37 @@ export async function saveDriver(formData: FormData) {
   const notes = str(formData, "notes") || null;
   const returnTo = str(formData, "return_to");
 
-  if (!code) backWithError("missing_code", formData);
   if (!fullName) backWithError("missing_name", formData);
   if (driverType !== "DRIVER" && driverType !== "OWNER") {
     backWithError("missing_type", formData);
   }
 
-  const conflicts = id
-    ? await prisma.$queryRaw<{ one: number }[]>`
-        SELECT 1 AS one FROM ops.drivers
-        WHERE driver_code = ${code}
-          AND id <> ${id}::bigint
-        LIMIT 1
-      `
-    : await prisma.$queryRaw<{ one: number }[]>`
-        SELECT 1 AS one FROM ops.drivers
-        WHERE driver_code = ${code}
-        LIMIT 1
-      `;
-  if (conflicts.length > 0) backWithError("dup_code", formData);
-
-  let duplicate = false;
-  try {
-    if (id) {
-      await prisma.$executeRaw`
-        UPDATE ops.drivers SET
-          driver_code = ${code},
-          full_name = ${fullName},
-          driver_type = ${driverType}::ops.driver_type,
-          phone = ${phone},
-          license_no = ${licenseNo},
-          license_class = ${licenseClass},
-          license_expires_on = ${licenseExpiresOn}::date,
-          hire_date = ${hireDate}::date,
-          notes = ${notes},
-          updated_at = now()
-        WHERE id = ${id}::bigint
-      `;
-    } else {
-      await prisma.$executeRaw`
-        INSERT INTO ops.drivers(
-          driver_code, full_name, driver_type,
-          phone, license_no, license_class, license_expires_on, hire_date, notes
-        )
-        VALUES (
-          ${code}, ${fullName}, ${driverType}::ops.driver_type,
-          ${phone}, ${licenseNo}, ${licenseClass}, ${licenseExpiresOn}::date, ${hireDate}::date, ${notes}
-        )
-      `;
-    }
-  } catch (error) {
-    const err = error as { code?: unknown; meta?: { cause?: unknown } };
-    if (err && typeof (err as { message?: unknown }).message === "string" && (err as { message: string }).message.includes("23505")) {
-      duplicate = true;
-    } else {
-      throw error;
-    }
+  if (id) {
+    await prisma.$executeRaw`
+      UPDATE ops.drivers SET
+        full_name = ${fullName},
+        driver_type = ${driverType}::ops.driver_type,
+        phone = ${phone},
+        license_no = ${licenseNo},
+        license_class = ${licenseClass},
+        license_expires_on = ${licenseExpiresOn}::date,
+        hire_date = ${hireDate}::date,
+        notes = ${notes},
+        updated_at = now()
+      WHERE id = ${id}::bigint
+    `;
+  } else {
+    await prisma.$executeRaw`
+      INSERT INTO ops.drivers(
+        full_name, driver_type,
+        phone, license_no, license_class, license_expires_on, hire_date, notes
+      )
+      VALUES (
+        ${fullName}, ${driverType}::ops.driver_type,
+        ${phone}, ${licenseNo}, ${licenseClass}, ${licenseExpiresOn}::date, ${hireDate}::date, ${notes}
+      )
+    `;
   }
-
-  if (duplicate) backWithError("dup_code", formData);
 
   revalidatePath("/dashboard/drivers");
   revalidatePath("/dashboard");

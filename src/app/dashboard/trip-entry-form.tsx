@@ -23,7 +23,6 @@ import { PhotoImport, type PhotoApply } from "./photo-import";
 
 type DriverOption = {
   id: string;
-  driver_code: string;
   full_name: string;
   driver_type: DriverType;
 };
@@ -762,8 +761,7 @@ const GroupSection = React.memo(function GroupSection({
           name={`${prefix}_driver_id`}
           defaultValue={group.driverId}
           placeholder="请选择司机"
-          searchPlaceholder="搜索车号或姓名"
-          mono
+          searchPlaceholder="搜索姓名"
           prominent
           clearable={false}
           className="w-56"
@@ -771,8 +769,8 @@ const GroupSection = React.memo(function GroupSection({
           onValueChange={setDriverId}
           options={drivers.map(d => ({
             value: d.id,
-            label: d.driver_code,
-            description: `${d.full_name}（${DRIVER_TYPE_LABELS[d.driver_type]}）`,
+            label: d.full_name,
+            description: DRIVER_TYPE_LABELS[d.driver_type],
             group: DRIVER_TYPE_LABELS[d.driver_type]
           }))}
         />

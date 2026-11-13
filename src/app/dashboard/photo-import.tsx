@@ -11,7 +11,6 @@ import type { OcrSheet } from "@/lib/vision-ocr";
 
 type DriverOption = {
   id: string;
-  driver_code: string;
   full_name: string;
   driver_type: DriverType;
 };
@@ -29,7 +28,7 @@ type PhotoState = {
   status: "recognizing" | "done" | "failed";
   sheet?: OcrSheet;
   error?: string;
-  /** Locally picked driver when the sheet's truck number matches no driver */
+  /** Locally picked driver when the sheet's driver name matches no roster entry */
   pickedDriverId?: string;
 };
 
@@ -59,18 +58,11 @@ function endpointValue(code: string, zip: string, locations: LocationOption[]): 
   return normalized ? `txt:${normalized}` : "";
 }
 
-/**
- * Match the sheet's truck number to a driver: some archive records store the
- * truck number as the code, others typed it into the name field - check both.
- */
-function matchDriver(code: string, drivers: DriverOption[]): DriverOption | null {
-  const normalized = code.trim().toUpperCase();
+/** Match the sheet's handwritten driver name against the roster (exact, case-insensitive) */
+function matchDriver(name: string, drivers: DriverOption[]): DriverOption | null {
+  const normalized = name.trim().toUpperCase();
   if (!normalized) return null;
-  return (
-    drivers.find(d => d.driver_code.toUpperCase() === normalized) ??
-    drivers.find(d => d.full_name.trim().toUpperCase() === normalized) ??
-    null
-  );
+  return drivers.find(d => d.full_name.trim().toUpperCase() === normalized) ?? null;
 }
 
 /** Split a nature like "HW - MCE1" into its two endpoint codes */
@@ -208,7 +200,7 @@ export function PhotoImport({ drivers, locations, open, onOpenChange, onApply }:
   function applySheet(photo: PhotoState) {
     const sheet = photo.sheet;
     if (!sheet) return;
-    const matched = matchDriver(sheet.driver_code, drivers);
+    const matched = matchDriver(sheet.driver_name, drivers);
     const driverId = photo.pickedDriverId || matched?.id || "";
     if (!driverId) return;
     const rows = sheet.rows.map(row => {
@@ -319,7 +311,7 @@ function PhotoCard({
   onApply: () => void;
 }) {
   const [expanded, setExpanded] = React.useState(false);
-  const matched = photo.sheet ? matchDriver(photo.sheet.driver_code, drivers) : null;
+  const matched = photo.sheet ? matchDriver(photo.sheet.driver_name, drivers) : null;
   const driverId = photo.pickedDriverId || matched?.id || "";
   const dates = photo.sheet?.rows.map(r => r.date) ?? [];
   const range = dates.length > 0 ? `${dates[0]} ~ ${dates[dates.length - 1]}` : "";
@@ -364,11 +356,11 @@ function PhotoCard({
             <>
               <div className="text-xs text-muted-foreground">
                 识别司机：<span className="text-foreground">{photo.sheet.driver_name || "—"}</span> · 车号{" "}
-                <span className="font-mono text-foreground">{photo.sheet.driver_code || "—"}</span>
+                <span className="font-mono text-foreground">{photo.sheet.truck_code || "—"}</span>
                 {matched ? (
-                  <span className="ml-1 text-emerald-600">✓ 已匹配 {matched.driver_code} {matched.full_name}</span>
+                  <span className="ml-1 text-emerald-600">✓ 已匹配 {matched.full_name}</span>
                 ) : (
-                  <span className="ml-1 text-amber-600">车号未匹配到司机，请手选：</span>
+                  <span className="ml-1 text-amber-600">未匹配到司机，请手选：</span>
                 )}
               </div>
               {!matched && (
@@ -376,15 +368,14 @@ function PhotoCard({
                   name={`photo_driver_${photo.id}`}
                   defaultValue={driverId}
                   placeholder="选择司机"
-                  searchPlaceholder="搜索车号或姓名"
-                  mono
+                  searchPlaceholder="搜索姓名"
                   className="max-w-64"
                   triggerClassName="h-8"
                   onValueChange={onPickDriver}
                   options={drivers.map(d => ({
                     value: d.id,
-                    label: d.driver_code,
-                    description: `${d.full_name}（${DRIVER_TYPE_LABELS[d.driver_type]}）`,
+                    label: d.full_name,
+                    description: DRIVER_TYPE_LABELS[d.driver_type],
                     group: DRIVER_TYPE_LABELS[d.driver_type]
                   }))}
                 />

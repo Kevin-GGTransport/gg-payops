@@ -21,3 +21,27 @@ export const RECORD_STATUS_LABELS: Record<RecordStatus, string> = {
   INACTIVE: "停用",
   ARCHIVED: "归档"
 };
+
+export type StatementStatus = "DRAFT" | "REVIEWED" | "VERIFIED" | "DONE";
+
+export const STATEMENT_STATUS_LABELS: Record<StatementStatus, string> = {
+  DRAFT: "草稿",
+  REVIEWED: "审核",
+  VERIFIED: "核对",
+  DONE: "完成"
+};
+
+/** Forward flow order; edit is allowed in DRAFT and VERIFIED only */
+export const STATEMENT_STATUS_FLOW: readonly StatementStatus[] = [
+  "DRAFT",
+  "REVIEWED",
+  "VERIFIED",
+  "DONE"
+];
+
+/** Statuses selectable inside the edit dialog (DONE only via advance) */
+export const STATE_EDITABLE_STATUSES: readonly StatementStatus[] = [
+  "DRAFT",
+  "REVIEWED",
+  "VERIFIED"
+];

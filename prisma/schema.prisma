@@ -69,15 +69,40 @@ model OperationTypeDict {
 
 enum StatementStatus {
   DRAFT
-  SUBMITTED
-  PAID
+  REVIEWED
+  VERIFIED
+  DONE
 
+  @@schema("pay")
+}
+
+model PayrollStatement {
+  id           Int             @id @default(autoincrement())
+  driver       Driver          @relation(fields: [driverId], references: [id])
+  driverId     Int             @map("driver_id")
+  periodStart  DateTime        @map("period_start") @db.Date
+  periodEnd    DateTime        @map("period_end") @db.Date
+  status       StatementStatus @default(DRAFT)
+  tripDays     Int             @map("trip_days")
+  legCount     Int             @map("leg_count")
+  totalMiles   Decimal         @map("total_miles") @db.Decimal(10, 2)
+  totalFuel    Decimal         @map("total_fuel") @db.Decimal(10, 2)
+  totalPay     Decimal         @map("total_pay") @db.Decimal(12, 2)
+  opCounts     Json            @default("{}") @map("op_counts")
+  trucks       String          @default("")
+  note         String?
+  generatedAt  DateTime        @default(now()) @map("generated_at") @db.Timestamptz(6)
+  updatedAt    DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([driverId, periodStart], map: "uq_statements_driver_period")
+  @@index([periodStart(sort: Desc)], map: "idx_statements_period")
+  @@index([status], map: "idx_statements_status")
+  @@map("payroll_statements")
   @@schema("pay")
 }
 
 model Driver {
   id               Int          @id @default(autoincrement())
-  driverCode       String       @map("driver_code") @db.VarChar(32)
   fullName         String       @map("full_name") @db.VarChar(120)
   driverType       DriverType   @default(DRIVER) @map("driver_type")
   phone            String?      @db.VarChar(32)
@@ -88,12 +113,12 @@ model Driver {
   hireDate         DateTime?    @map("hire_date") @db.Date
   terminationDate  DateTime?    @map("termination_date") @db.Date
   linkedUserId     Int?         @unique @map("linked_user_id")
+  statements       PayrollStatement[]
   status           RecordStatus @default(ACTIVE)
   notes            String?
   createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@unique([driverCode], map: "uq_drivers_code")
   @@index([driverType, status], map: "idx_drivers_type_status")
   @@map("drivers")
   @@schema("ops")

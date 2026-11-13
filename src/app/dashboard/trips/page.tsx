@@ -3,9 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
-import { LedgerPanel, LedgerEmpty } from "@/components/ledger";
-import { DriverTypeBadge } from "@/components/badges";
-import { PeriodPicker } from "@/components/period-picker";
+import { LedgerPanel } from "@/components/ledger";
 import { ComboboxField } from "@/components/combobox-field";
 import { AutoSubmitDate } from "@/components/auto-submit";
 import { FilterSelect } from "@/components/filter-select";
@@ -13,32 +11,19 @@ import { BatchDeleteTrips } from "@/components/batch-delete";
 import { CleanForm } from "@/components/clean-form";
 import { requireUser } from "@/lib/auth";
 import { allValues, firstValue, type SearchParams } from "@/lib/search-params";
-import { miles as fmtMiles, money, todayIso } from "@/lib/format";
-import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
 import { type OperationType } from "@/lib/labels";
 import { listOperationTypes } from "@/lib/queries/operations";
-import {
-  listTrips,
-  payrollMatrix,
-  periodPayTotals
-} from "@/lib/queries/trips";
+import { listTrips } from "@/lib/queries/trips";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { TripsTable } from "./trips-table";
 
-export const metadata: Metadata = { title: "行程与工资 · G&G PayOps" };
+export const metadata: Metadata = { title: "行程台账 · G&G PayOps" };
 
 const PAGE_SIZE = 20;
-
-const arrowClass =
-  "grid h-9.5 w-8 shrink-0 place-items-center rounded-md border border-line bg-card font-mono text-base text-route no-underline transition-colors hover:border-route hover:bg-muted/40";
 
 function dateParam(value: string | undefined) {
   const v = (value ?? "").trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(v).toString() !== "Invalid Date" ? v : undefined;
-}
-
-function periodParam(value: string | undefined) {
-  return dateParam(value) ? periodOf(dateParam(value)!) : currentPeriod();
 }
 
 function intFromParam(value: string | undefined) {
@@ -65,207 +50,18 @@ export default async function TripsPage({
 }) {
   await requireUser();
   const sp = await searchParams;
-  // Two views over the same ledger: period rollup (default) / flat ledger
-  const view = firstValue(sp.view) === "all" ? "all" : "period";
-
-  if (view === "all") {
-    return <AllTripsView sp={sp} />;
+  // The period rollup moved to the payroll page; old links keep working
+  const view = firstValue(sp.view);
+  if (view === "period") {
+    const p = dateParam(firstValue(sp.period));
+    redirect(`/dashboard/payroll${p ? `?period=${p}` : ""}`);
   }
-  return <PeriodView sp={sp} />;
+  return <AllTripsView sp={sp} />;
 }
 
 /* ---------------------------------------------------------------------------
-   View 1 · 按周期汇总（司机 x 周期矩阵 + 周明细钻取，可删行程）
+   行程台账（平铺：筛选 / 分页 / 批量删除；周期汇总在工资单页）
    ------------------------------------------------------------------------- */
-async function PeriodView({ sp }: { sp: SearchParams }) {
-  const period = periodParam(firstValue(sp.period));
-  const thisWeek = currentPeriod();
-  const today = todayIso();
-  const prev = shiftPeriod(period, -1);
-  const next = shiftPeriod(period, 1);
-
-  const [rows, periodTotals, operations] = await Promise.all([
-    payrollMatrix(period),
-    periodPayTotals(),
-    listOperationTypes()
-  ]);
-  // Matrix columns: dictionary order first, then any legacy codes still
-  // present in this period's trips (deactivated types keep their history)
-  const opCodes = [
-    ...operations.map(o => o.code),
-    ...[...new Set(rows.flatMap(r => Object.keys(r.op_counts)))].filter(
-      code => !operations.some(o => o.code === code)
-    )
-  ];
-  const opTotals = Object.fromEntries(opCodes.map(code => [code, 0]));
-  for (const row of rows) {
-    for (const code of opCodes) opTotals[code] += row.op_counts[code] ?? 0;
-  }
-  const totals = rows.reduce(
-    (acc, row) => ({
-      drivers: acc.drivers + (row.leg_count > 0 ? 1 : 0),
-      days: acc.days + row.trip_days,
-      legs: acc.legs + row.leg_count,
-      miles: acc.miles + Number(row.total_miles),
-      pay: acc.pay + Number(row.total_pay)
-    }),
-    { drivers: 0, days: 0, legs: 0, miles: 0, pay: 0 }
-  );
-
-  const navHref = (p: { start: string }) => `/dashboard/trips?view=period&period=${p.start}`;
-  /** Settlement-sheet drill-down for one driver x this period */
-  const sheetHref = (driverId: string) =>
-    `/dashboard/trips/${driverId}?period=${period.start}`;
-
-  return (
-    <>
-      <PageHeader
-        title="行程与工资"
-        description="按核算周期（周六 ~ 周五）汇总每位司机的行程与工资，点姓名或本期工资查看周期工资单。"
-        actions={
-          <div className="flex items-center gap-2">
-            <Link className="button button-quiet" href="/dashboard">
-              录入行程
-            </Link>
-            <Link className="button button-dark" href={`/dashboard/payroll/export?period=${period.start}`}>
-              导出工资表
-            </Link>
-          </div>
-        }
-      />
-
-      <ViewTabs view="period" />
-
-      <div className="trip-filter">
-        <div className="flex items-center gap-2">
-          <Link href={navHref(prev)} aria-label="上一周期" className={arrowClass}>‹</Link>
-          <PeriodPicker
-            selectedStart={period.start}
-            selectedLabel={periodLabel(period)}
-            todayIso={today}
-            totals={periodTotals}
-            hrefBase="/dashboard/trips?view=period"
-          />
-          <Link href={navHref(next)} aria-label="下一周期" className={arrowClass}>›</Link>
-        </div>
-        <div className="filter-actions">
-          {period.start !== thisWeek.start && <Link href="/dashboard/trips?view=period">回到本周</Link>}
-        </div>
-      </div>
-
-      <section className="gauge" aria-label="本周期读数">
-        <header className="gauge-head">
-          <span className="gauge-title">本周期读数</span>
-          <span className="gauge-range">{periodLabel(period)} · 周六 ~ 周五</span>
-        </header>
-        <div className="gauge-ticks" aria-hidden="true" />
-        <div className="gauge-grid">
-          <div className="gauge-cell">
-            <span className="gauge-label">出勤人数</span>
-            <strong className="gauge-value">{totals.drivers}<em>人</em></strong>
-            <span className="gauge-sub">本周期有行程记录</span>
-          </div>
-          <div className="gauge-cell">
-            <span className="gauge-label">行程</span>
-            <strong className="gauge-value">{totals.legs}<em>段</em></strong>
-            <span className="gauge-sub">{totals.days} 个出勤日</span>
-          </div>
-          <div className="gauge-cell">
-            <span className="gauge-label">总里程</span>
-            <strong className="gauge-value">{fmtMiles(totals.miles)}<em>mi</em></strong>
-            <span className="gauge-sub">周期累计</span>
-          </div>
-          <div className="gauge-cell gauge-hot">
-            <span className="gauge-label">工资总额</span>
-            <strong className="gauge-value">{money(totals.pay)}</strong>
-            <span className="gauge-sub">本期应付 · 来自行程本趟工资</span>
-          </div>
-        </div>
-      </section>
-
-      <section aria-label="周期汇总">
-        <LedgerPanel label={<>核算矩阵<b>{totals.drivers} 人出勤</b></>}>
-          <table className="roster matrix">
-            <thead>
-              <tr>
-                <th>司机 / 车主</th><th>类型</th>
-                <th className="num">天数</th>
-                {opCodes.map(code => (
-                  <th key={code} className="num">{code}</th>
-                ))}
-                <th className="num">总段数</th><th className="num">总里程</th>
-                <th className="num">本期工资</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 && <LedgerEmpty colSpan={6 + opCodes.length}>还没有在职司机。</LedgerEmpty>}
-              {rows.map(row => (
-                <tr key={row.driver_id} className={row.leg_count === 0 ? "row-off" : ""}>
-                  <td>
-                    <Link className="cell-link" href={sheetHref(row.driver_id)}>
-                      {row.full_name}
-                    </Link>
-                    <span className="muted-inline">{row.driver_code}</span>
-                  </td>
-                  <td><DriverTypeBadge type={row.driver_type} /></td>
-                  <td className="num">{row.trip_days}</td>
-                  {opCodes.map(code => (
-                    <td key={code} className="num">{row.op_counts[code] || "—"}</td>
-                  ))}
-                  <td className="num">{row.leg_count}</td>
-                  <td className="num">{fmtMiles(row.total_miles)}</td>
-                  <td className="num">
-                    <Link className="cell-link num" href={sheetHref(row.driver_id)}>
-                      {money(row.total_pay)}
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-              <tr className="matrix-total">
-                <td colSpan={2}>合计 · {totals.drivers} 人出勤</td>
-                <td className="num">{totals.days}</td>
-                {opCodes.map(code => (
-                  <td key={code} className="num">{opTotals[code]}</td>
-                ))}
-                <td className="num">{totals.legs}</td>
-                <td className="num">{fmtMiles(totals.miles)}</td>
-                <td className="num">{money(totals.pay)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </LedgerPanel>
-      </section>
-    </>
-  );
-}
-
-/* ---------------------------------------------------------------------------
-   View 2 · 全部行程（平铺台账：筛选 / 分页 / 批量删除）
-   ------------------------------------------------------------------------- */
-function ViewTabs({ view }: { view: "period" | "all" }) {
-  const tabs = [
-    { key: "period", label: "按周期汇总", href: "/dashboard/trips?view=period" },
-    { key: "all", label: "全部行程", href: "/dashboard/trips?view=all" }
-  ] as const;
-  return (
-    // Wrapper keeps the nav out of ".main > * { width: 100% }" so the pill
-    // trough hugs its two links instead of stretching across the page
-    <div className="mb-3">
-      <nav className="tabs" aria-label="视图切换">
-        {tabs.map(tab => (
-          <Link
-            key={tab.key}
-            href={tab.href}
-            {...(view === tab.key ? { "aria-current": "page" as const } : {})}
-          >
-            {tab.label}
-          </Link>
-        ))}
-      </nav>
-    </div>
-  );
-}
-
 async function AllTripsView({ sp }: { sp: SearchParams }) {
   const q = (firstValue(sp.q) ?? "").trim();
   const dateFrom = dateParam(firstValue(sp.from));
@@ -303,7 +99,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
 
   /** Serialize current filters + a page number into list URL params */
   function queryWith(over: { page?: number } = {}) {
-    const params = new URLSearchParams({ view: "all" });
+    const params = new URLSearchParams();
     for (const id of selectedIds) params.append("driver", id);
     if (operation) params.set("operation", operation);
     if (q) params.set("q", q);
@@ -319,24 +115,24 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
     redirect(`/dashboard/trips?${queryWith().toString()}`);
   }
 
-  const resetHref = "/dashboard/trips?view=all";
+  const resetHref = "/dashboard/trips";
   // Trip entry lives on the home page now; keep the current driver filter preselected
   const entryHref = `/dashboard${selectedIds[0] ? `?driver=${selectedIds[0]}` : ""}`;
 
   return (
     <>
       <PageHeader
-        title="行程与工资"
-        description="全部行程的平铺台账：按司机、操作类型与日期区间筛选核对，可勾选批量删除。"
+        title="行程台账"
+        description="全部行程的平铺台账：按司机、操作类型与日期区间筛选核对，可勾选批量删除；周期汇总与工资单在「工资单」页。"
         actions={
-          <Link className="button button-dark" href={entryHref}>录入行程</Link>
+          <div className="flex items-center gap-2">
+            <Link className="button button-quiet" href="/dashboard/payroll">工资单</Link>
+            <Link className="button button-dark" href={entryHref}>录入行程</Link>
+          </div>
         }
       />
 
-      <ViewTabs view="all" />
-
       <CleanForm className="trip-filter" action="/dashboard/trips" method="get">
-        <input type="hidden" name="view" value="all" />
         <div className="toolbar">
           <div className="search">
             <input
@@ -369,7 +165,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
           <FilterSelect
             name="driver"
             multiple
-            options={drivers.map(d => ({ value: d.id, label: `${d.driver_code} · ${d.full_name}` }))}
+            options={drivers.map(d => ({ value: d.id, label: d.full_name }))}
             selected={selectedIds}
             placeholder="全部司机"
             aria-label="按司机筛选"

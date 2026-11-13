@@ -128,11 +128,11 @@ export async function truckOdometerHistory(truckId: string) {
 
 /** Owner picker options: active OWNER-type drivers */
 export async function activeOwnerOptions() {
-  return prisma.$queryRaw<{ id: string; driver_code: string; full_name: string }[]>`
-    SELECT id::text, driver_code, full_name
+  return prisma.$queryRaw<{ id: string; full_name: string; phone: string | null }[]>`
+    SELECT id::text, full_name, phone
     FROM ops.drivers
     WHERE driver_type = 'OWNER' AND status = 'ACTIVE'
-    ORDER BY driver_code
+    ORDER BY full_name
   `;
 }
 

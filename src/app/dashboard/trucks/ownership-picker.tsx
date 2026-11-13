@@ -6,7 +6,7 @@ import { BuildingIcon, TruckIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ComboboxField } from "@/components/combobox-field";
 
-type OwnerOption = { id: string; driver_code: string; full_name: string };
+type OwnerOption = { id: string; full_name: string; phone: string | null };
 
 const cardBase =
   "grid cursor-pointer grid-cols-[auto_1fr] items-center gap-x-2.5 rounded-md border border-line bg-card px-3 py-2.5 transition-colors hover:border-slate-300 has-[input:focus-visible]:outline has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-route";
@@ -68,13 +68,13 @@ export function OwnershipPicker({
             name="owner_driver_id"
             defaultValue={defaultOwnerId}
             placeholder="请选择车主"
-            searchPlaceholder="搜索车号或姓名"
+            searchPlaceholder="搜索姓名"
             clearable={false}
             className="text-xs font-medium text-muted-foreground"
             options={owners.map(o => ({
               value: o.id,
               label: o.full_name,
-              description: o.driver_code
+              description: o.phone ?? undefined
             }))}
           />
         </div>

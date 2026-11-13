@@ -9,7 +9,8 @@ const items = [
   { href: "/dashboard/trucks", label: "车辆管理", exact: false },
   { href: "/dashboard/locations", label: "位置管理", exact: false },
   { href: "/dashboard/operations", label: "操作类型", exact: false },
-  { href: "/dashboard/trips", label: "行程与工资", exact: false },
+  { href: "/dashboard/trips", label: "行程台账", exact: false },
+  { href: "/dashboard/payroll", label: "工资单", exact: false },
   { href: "/dashboard/wage-rules", label: "工资规则", exact: false }
 ] as const;
 

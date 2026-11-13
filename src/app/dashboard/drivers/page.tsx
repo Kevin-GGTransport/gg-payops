@@ -15,10 +15,8 @@ import { DriversTable } from "./drivers-table";
 export const metadata: Metadata = { title: "司机管理 · G&G PayOps" };
 
 const ERROR_MESSAGES: Record<string, string> = {
-  missing_code: "请填写车号。",
   missing_name: "请填写姓名。",
-  missing_type: "请选择人员类型：司机或车主。",
-  dup_code: "这个车号已存在，请换一个。"
+  missing_type: "请选择人员类型：司机或车主。"
 };
 
 export default async function DriversPage({
@@ -51,7 +49,6 @@ export default async function DriversPage({
   ]);
 
   const values = {
-    code: formField(sp, "driver_code", editing?.driver_code),
     name: formField(sp, "full_name", editing?.full_name),
     type: formField(sp, "driver_type", editing?.driver_type) as DriverType,
     phone: formField(sp, "phone", editing?.phone),
@@ -101,7 +98,7 @@ export default async function DriversPage({
           </nav>
           <form className="search" action="/dashboard/drivers" method="get">
             {typeFilter !== "all" && <input type="hidden" name="type" value={typeFilter.toLowerCase()} />}
-            <input type="search" name="q" defaultValue={q} placeholder="搜索车号、姓名、电话或驾照号" aria-label="搜索司机" />
+            <input type="search" name="q" defaultValue={q} placeholder="搜索姓名、电话或驾照号" aria-label="搜索司机" />
             <button type="submit">搜索</button>
           </form>
         </div>
@@ -122,7 +119,7 @@ export default async function DriversPage({
       <ModalShell
         open={isNew || Boolean(editing) || Boolean(errorCode)}
         closeHref={closeHref}
-        title={editing ? `编辑 ${editing.driver_code}` : "登记司机 / 车主"}
+        title={editing ? `编辑 ${editing.full_name}` : "登记司机 / 车主"}
       >
         <form action={saveDriver} aria-label="司机登记卡">
           <input type="hidden" name="id" value={editing?.id ?? ""} />
@@ -130,7 +127,6 @@ export default async function DriversPage({
           <FormError message={errorCode ? ERROR_MESSAGES[errorCode] : undefined} />
           <DriverTypeCards defaultValue={values.type === "OWNER" ? "OWNER" : "DRIVER"} />
           <FormGrid>
-            <TextField label="车号" name="driver_code" required placeholder="如 1018" defaultValue={values.code} maxLength={32} />
             <TextField label="姓名" name="full_name" required placeholder="中英文均可" defaultValue={values.name} maxLength={120} />
             <TextField label="电话" name="phone" placeholder="+1-209-…" defaultValue={values.phone} maxLength={32} />
             <TextField label="驾照号" name="license_no" placeholder="如 D1234567" defaultValue={values.licenseNo} maxLength={64} />

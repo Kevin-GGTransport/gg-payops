@@ -16,8 +16,8 @@ export type OcrTripRow = {
 /** One recognized photo: header info plus its trip rows */
 export type OcrSheet = {
   driver_name: string;
-  /** Truck number as written on the sheet, e.g. "0608" (matches drivers.driver_code) */
-  driver_code: string;
+  /** Truck number as written on the sheet, e.g. "0608" - display only, drivers are matched by name */
+  truck_code: string;
   rows: OcrTripRow[];
 };
 
@@ -27,10 +27,10 @@ function responseSchema(operations: string[]) {
     type: "object",
     name: "pu_del_record",
     additionalProperties: false,
-    required: ["driver_name", "driver_code", "rows"],
+    required: ["driver_name", "truck_code", "rows"],
     properties: {
       driver_name: { type: "string" },
-      driver_code: { type: "string" },
+      truck_code: { type: "string" },
       rows: {
         type: "array",
         items: {
@@ -61,7 +61,7 @@ Extract EVERY trip row, top to bottom, following the sheet's own order:
 - nature: the From-To codes as written, e.g. "HW - MCE1".
 - operation guess: only use codes from this list: {OPERATIONS}. Picking up / 提货 / 提柜 (hauling a container out of the yard) -> PU; delivering / 卸货 / 还柜 -> DEL; 空车 / 空木柜 / 车架 (no container, chassis only) -> BOBTAIL; 带空柜 (empty container reposition) -> EMPTY. Default DEL.
 - note: extra marks like 等卸/detention time ranges (14:30-18:30), 还柜, 提货; empty string if none.
-driver_name = the handwritten name in the 司机/Driver header; driver_code = the handwritten 车号 (truck number, e.g. 0608). Use "" when a value is unreadable.`;;
+driver_name = the handwritten name in the 司机/Driver header; truck_code = the handwritten 车号 (truck number, e.g. 0608). Use "" when a value is unreadable.`;;
 
 type ChatCompletionResponse = {
   choices?: Array<{ message?: { content?: string | null } }>;
@@ -136,6 +136,6 @@ export async function recognizeTripPhoto(file: File, operations: string[]): Prom
 
   parsed.rows = parsed.rows.filter(row => isValidRow(row, operations));
   parsed.driver_name ??= "";
-  parsed.driver_code = String(parsed.driver_code ?? "").trim();
+  parsed.truck_code = String(parsed.truck_code ?? "").trim();
   return parsed;
 }
