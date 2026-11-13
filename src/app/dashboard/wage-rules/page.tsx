@@ -4,6 +4,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel } from "@/components/ledger";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { FormError, FormGrid, SubmitButton, TextField } from "@/components/form-fields";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
@@ -239,10 +240,21 @@ export default async function WageRulesPage({
         open={Boolean(editing) && !editLocked}
         closeHref={`/dashboard/wage-rules?v=${editId}`}
         title={`编辑 ${editing?.name ?? ""}`}
+        wide
+        footer={
+          editing && !editLocked ? (
+            <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+              {errorMessage && (
+                <p role="alert" className="mr-auto text-[13px] text-destructive">
+                  {errorMessage}
+                </p>
+              )}
+              <Button type="submit" form="wage-version-edit">保存版本</Button>
+            </div>
+          ) : undefined
+        }
       >
-        {editing && !editLocked && (
-          <VersionForm version={editing} errorMessage={errorMessage} />
-        )}
+        {editing && !editLocked && <VersionForm version={editing} />}
       </ModalShell>
     </>
   );

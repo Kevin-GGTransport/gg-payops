@@ -4,7 +4,7 @@ import * as React from "react";
 import { PlusIcon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { FormError, FormGrid, NumberField, SubmitButton, TextField } from "@/components/form-fields";
+import { FormGrid, NumberField, TextField } from "@/components/form-fields";
 import type { WageRuleVersionDetail } from "@/lib/queries/wage-rules";
 import { updateVersion } from "./actions";
 
@@ -15,14 +15,9 @@ const cellInput =
   "h-8 border-0 bg-transparent px-2 shadow-none rounded-none text-[13px] focus-visible:ring-1";
 
 /** Whole-version editor for a PENDING version: dynamic tier/special rows
- *  submit positional FormData (same convention as the entry sheet). */
-export function VersionForm({
-  version,
-  errorMessage
-}: {
-  version: WageRuleVersionDetail;
-  errorMessage?: string;
-}) {
+ *  submit positional FormData (same convention as the entry sheet).
+ *  The save button lives in the modal's pinned footer via form="wage-version-edit". */
+export function VersionForm({ version }: { version: WageRuleVersionDetail }) {
   const [tiers, setTiers] = React.useState<TierRow[]>(
     version.tiers.map(t => ({
       miles_from: String(t.miles_from),
@@ -58,16 +53,22 @@ export function VersionForm({
     setSpecials(current => [...current, { from_postal: "", to_postal: "", amount: "", note: "" }]);
 
   return (
-    <form action={updateVersion} aria-label="版本编辑">
+    <form id="wage-version-edit" action={updateVersion} aria-label="版本编辑">
       <input type="hidden" name="id" value={version.id} />
       <input type="hidden" name="tier_count" value={tiers.length} />
       <input type="hidden" name="special_count" value={specials.length} />
-      <FormError message={errorMessage} />
 
-      <div className="grid gap-4 px-5 py-4">
-        <FormGrid>
-          <TextField label="版本名" name="name" required defaultValue={version.name} maxLength={120} />
-          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+      <div className="grid gap-5 px-5 py-4">
+        <FormGrid className="gap-x-3 px-0 pt-0 md:grid-cols-6">
+          <TextField
+            label="版本名"
+            name="name"
+            required
+            defaultValue={version.name}
+            maxLength={120}
+            className="md:col-span-3"
+          />
+          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground md:col-span-3">
             生效日期
             <Input
               type="date"
@@ -84,6 +85,7 @@ export function VersionForm({
             min={0.01}
             step={0.01}
             defaultValue={Number(version.owner_multiplier).toFixed(2)}
+            className="md:col-span-2"
           />
           <NumberField
             label="BOBTAIL 乘数（×）"
@@ -91,6 +93,7 @@ export function VersionForm({
             min={0.01}
             step={0.01}
             defaultValue={Number(version.bobtail_multiplier).toFixed(2)}
+            className="md:col-span-2"
           />
           <NumberField
             label="超档递增（$/50mi）"
@@ -98,6 +101,7 @@ export function VersionForm({
             min={0}
             step={0.01}
             defaultValue={Number(version.overage_increment).toFixed(2)}
+            className="md:col-span-2"
           />
         </FormGrid>
 
@@ -246,7 +250,7 @@ export function VersionForm({
                       }
                       maxLength={255}
                       aria-label={`特例 ${i + 1} 备注`}
-                      className={`${cellInput} w-40`}
+                      className={`${cellInput} w-52`}
                     />
                   </td>
                   <td className="actions">
@@ -270,10 +274,6 @@ export function VersionForm({
             </tbody>
           </table>
         </div>
-      </div>
-
-      <div className="flex justify-end border-t border-line px-5 py-3">
-        <SubmitButton>保存版本</SubmitButton>
       </div>
     </form>
   );
