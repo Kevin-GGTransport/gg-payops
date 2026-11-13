@@ -2,6 +2,12 @@
 
 import * as React from "react";
 import { Input } from "@/components/ui/input";
+import {
+  Command,
+  CommandGroup,
+  CommandItem,
+  CommandList
+} from "@/components/ui/command";
 
 /**
  * Map point-picking core shared by the locations form (MapPicker wrapper)
@@ -282,22 +288,28 @@ export function MapPointPicker({
           className="h-9 bg-card text-[13px]"
         />
         {query.trim().length >= 3 && (searching || hits.length > 0) && (
-          <ul className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-md border border-line bg-card shadow-sm">
-            {searching && hits.length === 0 && (
-              <li className="px-3 py-2 text-xs text-muted-foreground">搜索中…</li>
-            )}
-            {hits.map(hit => (
-              <li key={`${hit.lat},${hit.lng}`}>
-                <button
-                  type="button"
-                  className="block w-full px-3 py-2 text-left text-[13px] hover:bg-accent"
-                  onClick={() => chooseHit(hit)}
-                >
-                  {hit.label}
-                </button>
-              </li>
-            ))}
-          </ul>
+          // cmdk list without filtering (the geocoder already ranked results)
+          <div className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-md border border-line bg-card p-1 shadow-sm">
+            <Command shouldFilter={false} loop>
+              <CommandList className="max-h-48">
+                {searching && hits.length === 0 && (
+                  <div className="px-2 py-2 text-xs text-muted-foreground">搜索中…</div>
+                )}
+                <CommandGroup>
+                  {hits.map(hit => (
+                    <CommandItem
+                      key={`${hit.lat},${hit.lng}`}
+                      value={hit.label}
+                      onSelect={() => chooseHit(hit)}
+                      className="text-[13px]"
+                    >
+                      {hit.label}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </div>
         )}
       </div>
       <div

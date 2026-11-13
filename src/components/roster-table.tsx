@@ -8,7 +8,6 @@ import {
   useReactTable,
   type ColumnDef,
   type ColumnSizingState,
-  type Updater,
   type RowData,
   type Table as TanstackTable
 } from "@tanstack/react-table";
@@ -30,10 +29,23 @@ declare module "@tanstack/react-table" {
 }
 
 /**
- * TanStack instance wired the shadcn data-table way: column sizing commits on
- * drag release ("onEnd" - zero re-renders while dragging, the handle itself
- * tracks the cursor via deltaOffset), persisted per storageKey; a stored size
- * is dropped on double-click so the column falls back to its default.
+ * Sizing change channel: RosterTable shells re-render THEMSELVES on sizing
+ * changes. React.memo walls (the entry sheet memoizes each group so a
+ * keystroke doesn't reconcile every row) would otherwise freeze the rendered
+ * <col> widths even though the table state and storage already updated -
+ * drags felt dead and stored widths never applied back.
+ */
+const sizingListeners = new WeakMap<TanstackTable<unknown>, Set<() => void>>();
+
+function notifySizing(table: TanstackTable<unknown>) {
+  sizingListeners.get(table)?.forEach(listener => listener());
+}
+
+/**
+ * TanStack instance wired the shadcn data-table way: column sizing follows
+ * the cursor live ("onChange") and persists per storageKey (write debounced -
+ * onChange fires per mousemove); a stored size is dropped on double-click so
+ * the column falls back to its default.
  */
 export function useRosterTable<TData>(options: {
   data: TData[];
@@ -42,6 +54,7 @@ export function useRosterTable<TData>(options: {
 }): TanstackTable<TData> {
   const { data, columns, storageKey } = options;
   const [columnSizing, setColumnSizing] = React.useState<ColumnSizingState>({});
+  const writeTimer = React.useRef<number | undefined>(undefined);
 
   // Restore after mount: server render keeps defaults, so no hydration mismatch
   React.useEffect(() => {
@@ -55,33 +68,45 @@ export function useRosterTable<TData>(options: {
     }
   }, [storageKey]);
 
-  // Stable handler identity: churn here feeds TanStack's internal state sync
-  // loop on hot components (the entry sheet re-renders on every pay report)
-  const persistSizing = React.useCallback(
-    (updater: Updater<ColumnSizingState>) => {
-      setColumnSizing(prev => {
-        const next = typeof updater === "function" ? updater(prev) : updater;
-        if (next === prev) return prev;
-        try {
-          window.localStorage.setItem(storageKey, JSON.stringify(next));
-        } catch {
-          // Storage unavailable -> widths stay session-only
-        }
-        return next;
-      });
-    },
-    [storageKey]
-  );
-
-  return useReactTable({
+  const table = useReactTable({
     data,
     columns,
     state: { columnSizing },
-    onColumnSizingChange: persistSizing,
-    columnResizeMode: "onEnd",
+    onColumnSizingChange: updater => {
+      // Stable identity: churn here feeds TanStack's internal state sync loop
+      setColumnSizing(prev => {
+        const next = typeof updater === "function" ? updater(prev) : updater;
+        if (next === prev) return prev;
+        // Debounced storage write: live mode fires per mousemove
+        window.clearTimeout(writeTimer.current);
+        writeTimer.current = window.setTimeout(() => {
+          try {
+            window.localStorage.setItem(storageKey, JSON.stringify(next));
+          } catch {
+            // Storage unavailable -> widths stay session-only
+          }
+        }, 250);
+        return next;
+      });
+    },
+    columnResizeMode: "onChange",
     getCoreRowModel: getCoreRowModel(),
     defaultColumn: { minSize: 48 }
   });
+
+  // Register the notify channel synchronously during render: children
+  // (RosterTable shells) run their subscribe effects before this component's
+  // effects, so the set must already exist when they look themselves up
+  const core = table as TanstackTable<unknown>;
+  if (!sizingListeners.has(core)) sizingListeners.set(core, new Set());
+
+  // Notify after every sizing state change (restore + every drag move);
+  // parent re-renders run first in the batch, so shells read fresh widths
+  React.useEffect(() => {
+    notifySizing(table as TanstackTable<unknown>);
+  }, [columnSizing, table]);
+
+  return table;
 }
 
 /** Human label of a header column (string headers only), for the drag handle */
@@ -113,7 +138,17 @@ export function RosterTable<TData>({
 }) {
   const rows = table.getRowModel().rows;
   const columns = table.getVisibleLeafColumns();
-  const sizing = table.getState().columnSizingInfo;
+  // Re-render this shell on sizing changes: React.memo walls between the
+  // table owner and this tree (entry sheet groups) would otherwise keep the
+  // <col> widths frozen at first paint
+  const [, bumpShell] = React.useReducer((count: number) => count + 1, 0);
+  React.useEffect(() => {
+    const core = table as TanstackTable<unknown>;
+    sizingListeners.get(core)?.add(bumpShell);
+    return () => {
+      sizingListeners.get(core)?.delete(bumpShell);
+    };
+  }, [table, bumpShell]);
 
   return (
     <Table className={cn("roster table-fixed", className)}>
@@ -155,12 +190,6 @@ export function RosterTable<TData>({
                           return next;
                         })
                       }
-                      style={{
-                        transform:
-                          sizing.isResizingColumn === header.column.id
-                            ? `translateX(${sizing.deltaOffset ?? 0}px)`
-                            : undefined
-                      }}
                     />
                   )}
                 </TableHead>

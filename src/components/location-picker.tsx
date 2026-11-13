@@ -164,17 +164,19 @@ export function LocationPicker({
         footerAction={
           creatable
             ? ({ close }) => (
-                <button
+                <Button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-[13px] hover:bg-accent"
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start gap-2 px-2 font-normal text-[13px]"
                   onClick={() => openMap(close)}
                 >
                   <MapPinIcon className="size-4 shrink-0 opacity-60" />
                   地图选点
-                  <span className="ml-auto text-[11px] text-muted-foreground">
+                  <span className="ml-auto text-[11px] font-normal text-muted-foreground">
                     搜索或点选地图位置
                   </span>
-                </button>
+                </Button>
               )
             : undefined
         }

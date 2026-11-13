@@ -121,9 +121,11 @@ const EntryRow = React.memo(function EntryRow({
   defaults,
   removable,
   carryFrom,
+  carryDate,
   onRemove,
   onPayChange,
   onToChange,
+  onDateChange,
   onFillChange,
   onArmDrag,
   onRowDragStart,
@@ -145,10 +147,14 @@ const EntryRow = React.memo(function EntryRow({
   removable: boolean;
   /** Current to-value of the previous leg in this group ("" when none yet) */
   carryFrom: string;
+  /** Current date of the previous leg ("" when none yet) - sticky follow */
+  carryDate: string;
   onRemove: (rowId: number) => void;
   onPayChange: (rowId: number, value: string) => void;
   /** Reports every endpoint pick upward (feeds the next leg's carry) */
   onToChange: (rowId: number, value: string) => void;
+  /** Reports every date change upward (feeds the next leg's date carry) */
+  onDateChange: (rowId: number, value: string) => void;
   /** Reports whether this row has any endpoint picked (filled-row counting) */
   onFillChange: (rowId: number, filled: boolean) => void;
   /** Grip press arms / releases whole-row native drag */
@@ -164,10 +170,12 @@ const EntryRow = React.memo(function EntryRow({
 }) {
   const prefix = `g_${groupIndex}_row_${rowIndex}_`;
   const legLabel = `第 ${groupIndex + 1} 组第 ${rowIndex + 1} 程`;
-  // Controlled date: the wage rule is picked by the row's own date. No
-  // default - new rows open empty and the clerk types the date (refill and
-  // photo import still seed their own)
+  // Controlled date: the wage rule is picked by the row's own date. No fixed
+  // default - new rows open empty; the previous leg's date stickily carries
+  // down while this row is untouched (one keystroke covers the whole sheet)
   const [dateValue, setDateValue] = React.useState(defaults?.trip_date || "");
+  // Whether the current date came from carry-down, not the user's own edit
+  const dateInherited = React.useRef(false);
   const [operation, setOperation] = React.useState(defaults?.operation || "DEL");
   // EMPTY legs haul no load: the Load# cell clears and locks with the operation
   const [loadNoValue, setLoadNoValue] = React.useState(
@@ -205,6 +213,29 @@ const EntryRow = React.memo(function EntryRow({
     if (toValue) onToChange(rowId, toValue);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Date carry-down (sticky follow): while this row's date is empty or still
+  // carry-inherited, the previous leg's date fills it - a hand edit sticks
+  React.useEffect(() => {
+    if (!carryDate) return;
+    if (dateInherited.current || dateValue === "") {
+      dateInherited.current = true;
+      setDateValue(carryDate);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [carryDate]);
+
+  // Report the initial (refill/photo) date once so the next leg can carry it
+  React.useEffect(() => {
+    if (dateValue) onDateChange(rowId, dateValue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep the group's date map current (carry source + wage-rule recompute)
+  React.useEffect(() => {
+    onDateChange(rowId, dateValue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateValue]);
 
   // Filled = has a destination. A start alone can be the sticky carry-over
   // from the previous leg, which must not turn a reserve row "filled"
@@ -319,7 +350,10 @@ const EntryRow = React.memo(function EntryRow({
           type="date"
           name={`${prefix}trip_date`}
           value={dateValue}
-          onChange={e => setDateValue(e.target.value)}
+          onChange={e => {
+            dateInherited.current = false;
+            setDateValue(e.target.value);
+          }}
           aria-label={`${legLabel}日期`}
           className={`${cellInput} font-mono`}
         />
@@ -512,6 +546,8 @@ const GroupSection = React.memo(function GroupSection({
   );
   // rowId -> current to-value, feeding the next leg's carry-over start
   const [toByRow, setToByRow] = React.useState<Record<number, string>>({});
+  // rowId -> current date, feeding the next leg's date carry-down
+  const [dateByRow, setDateByRow] = React.useState<Record<number, string>>({});
   // Row ids that have at least one endpoint (what the buttons count)
   const [filledIds, setFilledIds] = React.useState<Set<number>>(new Set());
   // Grip pressed but drag not confirmed yet; only that row turns draggable
@@ -573,6 +609,12 @@ const GroupSection = React.memo(function GroupSection({
         delete next[rowId];
         return next;
       });
+      setDateByRow(current => {
+        if (!(rowId in current)) return current;
+        const next = { ...current };
+        delete next[rowId];
+        return next;
+      });
     },
     [group.id, onDirty, onForgetRow]
   );
@@ -603,6 +645,12 @@ const GroupSection = React.memo(function GroupSection({
 
   const handleToChange = React.useCallback((rowId: number, value: string) => {
     setToByRow(current =>
+      current[rowId] === value ? current : { ...current, [rowId]: value }
+    );
+  }, []);
+
+  const handleDateChange = React.useCallback((rowId: number, value: string) => {
+    setDateByRow(current =>
       current[rowId] === value ? current : { ...current, [rowId]: value }
     );
   }, []);
@@ -735,9 +783,11 @@ const GroupSection = React.memo(function GroupSection({
                 defaults={slot.defaults}
                 removable={rows.length > 1}
                 carryFrom={i === 0 ? "" : (toByRow[rows[i - 1].id] ?? "")}
+                carryDate={i === 0 ? "" : (dateByRow[rows[i - 1].id] ?? "")}
                 onRemove={removeRowById}
                 onPayChange={handleRowPayChange}
                 onToChange={handleToChange}
+                onDateChange={handleDateChange}
                 onFillChange={handleFill}
                 draggable={armedRow === slot.id}
                 dropMark={dropAt?.id === slot.id ? (dropAt.before ? "before" : "after") : null}
