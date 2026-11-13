@@ -293,6 +293,16 @@ const EntryRow = React.memo(function EntryRow({
   const wageEndpoint = (value: string) =>
     locations.find(l => `loc:${l.id}` === value) ?? null;
 
+  // A BASE leg prices by the counterpart's standard pay; when that is unset
+  // (OTHER locations, free-text ends) the rule falls back to mileage tiers -
+  // surfaced as a hint so the tier price is not mistaken for the 50% basis
+  const baseFallbackLeg =
+    Boolean(fromValue && toValue) &&
+    ((wageEndpoint(fromValue)?.location_type === "BASE" &&
+      !((wageEndpoint(toValue)?.standard_pay_amount ?? 0) > 0)) ||
+      (wageEndpoint(toValue)?.location_type === "BASE" &&
+        !((wageEndpoint(fromValue)?.standard_pay_amount ?? 0) > 0)));
+
   // Special-route lookup key: the picked location's zip, or the raw free-text
   // value when it is itself a 5-digit zip (txt:94545)
   const postalOf = (value: string): string | null => {
@@ -476,6 +486,9 @@ const EntryRow = React.memo(function EntryRow({
         )}
         {!rule && manualPay === null && (
           <span className={`${cellHint} text-right`}>该日期无生效规则</span>
+        )}
+        {rule && baseFallbackLeg && manualPay === null && (
+          <span className={`${cellHint} text-right`}>对端未设基准，按里程档</span>
         )}
       </td>
       <td className="px-1.5">

@@ -99,7 +99,8 @@ export function pickVersion<T extends { effective_from: string }>(
  * 1. a BASE endpoint prices the leg at HALF the OTHER end's standard_pay_amount
  *    (a base round trip is one warehouse run = the full amount once, so a
  *    single leg bills 50%; from-BASE wins when both ends are BASE: price by
- *    `to`; missing counterpart -> $0);
+ *    `to`). An unpriced counterpart (0/unset, incl. free-text ends) does NOT
+ *    bill $0 - the leg falls through to 2/3 instead;
  * 2. else a special postal pair bills its fixed price (zip-only legs);
  * 3. else the mileage tier table + overage increment.
  */
@@ -113,8 +114,13 @@ function resolveBaseWage(input: {
 }): number {
   // Half of the counterpart amount, unrounded: calcTripWage rounds the final
   // product, which keeps a round trip (two halves x multipliers) exact
-  if (input.from?.location_type === "BASE") return (input.to?.standard_pay_amount ?? 0) / 2;
-  if (input.to?.location_type === "BASE") return (input.from?.standard_pay_amount ?? 0) / 2;
+  if (input.from?.location_type === "BASE") {
+    const amount = input.to?.standard_pay_amount ?? 0;
+    if (amount > 0) return amount / 2;
+  } else if (input.to?.location_type === "BASE") {
+    const amount = input.from?.standard_pay_amount ?? 0;
+    if (amount > 0) return amount / 2;
+  }
   const special = resolveSpecialRoute(
     input.fromPostal,
     input.toPostal,
