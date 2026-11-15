@@ -46,7 +46,11 @@ export function StatementsTable({
       id: "period",
       header: "周期",
       size: 128,
-      cell: ({ row }) => <span className="mono strong">{shortPeriod(row.original.period_start, row.original.period_end)}</span>
+      cell: ({ row }) => (
+        <Link className="cell-link mono" href={`/dashboard/payroll?period=${row.original.period_start}`}>
+          {shortPeriod(row.original.period_start, row.original.period_end)}
+        </Link>
+      )
     },
     {
       id: "driver",

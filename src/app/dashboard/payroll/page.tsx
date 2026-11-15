@@ -53,6 +53,10 @@ export default async function PayrollPage({
   await requireUser();
   const sp = await searchParams;
 
+  // Two tabs: the period rollup is the default landing view; the archive
+  // (statements across all periods) is the second tab
+  const view = firstValue(sp.view) === "all" ? "all" : "period";
+
   const q = (firstValue(sp.q) ?? "").trim();
   const periodParam = (firstValue(sp.period) ?? "").trim();
   const period = /^\d{4}-\d{2}-\d{2}$/.test(periodParam) ? periodParam : null;
@@ -61,13 +65,12 @@ export default async function PayrollPage({
   const generated = Number(firstValue(sp.generated) ?? NaN);
   const eligible = Number(firstValue(sp.eligible) ?? NaN);
 
-  // Keep status/q when the picker navigates between periods (archive mode)
   const baseParams = new URLSearchParams();
+  if (view === "all") baseParams.set("view", "all");
   if (q) baseParams.set("q", q);
-  const baseQuery = baseParams.toString();
 
   const thisWeek = currentPeriod();
-  const shownPeriod = period ? periodOf(period) : null;
+  const shownPeriod = view === "period" ? periodOf(period ?? thisWeek.start) : null;
   const prev = shownPeriod ? shiftPeriod(shownPeriod, -1) : null;
   const next = shownPeriod ? shiftPeriod(shownPeriod, 1) : null;
 
@@ -79,15 +82,17 @@ export default async function PayrollPage({
   const closeHref = returnTo;
 
   // Period mode: the period rollup (statements + live rows merged);
-  // Archive mode (no period): generated statements across all periods
+  // Archive mode: generated statements across all periods
   const [merged, archive, pickerTotals, editing] = await Promise.all([
     shownPeriod ? mergedPeriodStatements(shownPeriod) : Promise.resolve(null),
-    period ? Promise.resolve(null) : listStatements({ period: null, status: statusFromTab(firstValue(sp.status)), q }),
+    view === "all"
+      ? listStatements({ period: null, status: statusFromTab(firstValue(sp.status)), q })
+      : Promise.resolve(null),
     statementPeriodTotals(),
     editId ? getStatementById(editId) : Promise.resolve(null)
   ]);
 
-  const statusFilter = period ? "all" : statusFromTab(firstValue(sp.status));
+  const statusFilter = view === "all" ? statusFromTab(firstValue(sp.status)) : "all";
   const counts = archive?.counts ?? { total: 0, draft: 0, reviewed: 0, verified: 0, done: 0 };
 
   const values = {
@@ -128,14 +133,14 @@ export default async function PayrollPage({
       <PageHeader
         title="工资单"
         description={
-          period && shownPeriod
-            ? `${periodLabel(shownPeriod)} 的汇总：未生成的按行程实时计，生成后冻结走 草稿 → 审核 → 核对 → 完成。`
-            : "每司机每核算周期一张，生成时冻结快照；点周期查看该周汇总与流转。"
+          view === "period" && shownPeriod
+            ? `${periodLabel(shownPeriod)} 的汇总：录入的行程都在这里，未生成的按实时计，生成后冻结走 草稿 → 审核 → 核对 → 完成。`
+            : "已生成的工资单档案（所有周期）；行程汇总与生成在「按周期」页签。"
         }
         actions={
           <div className="flex items-center gap-2">
-            {period && (
-              <Link className="button button-dark" href={`/dashboard/payroll/export?period=${period}`}>
+            {view === "period" && (
+              <Link className="button button-dark" href={`/dashboard/payroll/export?period=${shownPeriod!.start}`}>
                 导出工资表
               </Link>
             )}
@@ -146,14 +151,33 @@ export default async function PayrollPage({
         }
       />
 
-      {period && shownPeriod ? (
+      {/* View tabs: the period rollup is the landing view (trips live there);
+          the archive is the second tab */}
+      <div className="mb-3">
+        <nav className="tabs" aria-label="视图切换">
+          <Link
+            href={`/dashboard/payroll${period ? `?period=${period}` : ""}`}
+            {...(view === "period" ? { "aria-current": "page" as const } : {})}
+          >
+            按周期
+          </Link>
+          <Link
+            href={`/dashboard/payroll?view=all`}
+            {...(view === "all" ? { "aria-current": "page" as const } : {})}
+          >
+            全部周期
+          </Link>
+        </nav>
+      </div>
+
+      {view === "period" && shownPeriod ? (
         /* ---------- Period mode: one period's full rollup ---------- */
         <section aria-label="周期汇总">
           <div className="trip-filter">
             <div className="flex items-center gap-2">
               <Link href={`/dashboard/payroll?period=${prev!.start}`} aria-label="上一周期" className={arrowClass}>‹</Link>
               <PeriodPicker
-                selectedStart={period}
+                selectedStart={shownPeriod.start}
                 selectedLabel={periodLabel(shownPeriod)}
                 todayIso={todayIso()}
                 totals={pickerTotals}
@@ -162,11 +186,11 @@ export default async function PayrollPage({
               <Link href={`/dashboard/payroll?period=${next!.start}`} aria-label="下一周期" className={arrowClass}>›</Link>
             </div>
             <div className="filter-actions">
-              {period !== thisWeek.start && <Link href="/dashboard/payroll">回到本周</Link>}
-              <Link href={`/dashboard/payroll${baseQuery ? `?${baseQuery}` : ""}`}>全部周期档案</Link>
+              {shownPeriod.start !== thisWeek.start && <Link href="/dashboard/payroll">回到本周</Link>}
+              <Link href="/dashboard/payroll?view=all">全部周期档案</Link>
               {ungenerated > 0 && (
                 <form action={generateStatements}>
-                  <input type="hidden" name="period" value={period} />
+                  <input type="hidden" name="period" value={shownPeriod.start} />
                   <button type="submit" className="linklike">
                     生成本期工资单（{ungenerated} 人待生成）
                   </button>
@@ -174,7 +198,7 @@ export default async function PayrollPage({
               )}
               {pendingAdvance > 0 && (
                 <form action={advancePeriod}>
-                  <input type="hidden" name="period" value={period} />
+                  <input type="hidden" name="period" value={shownPeriod.start} />
                   <input type="hidden" name="return_to" value={returnTo} />
                   <button type="submit" className="linklike">
                     本周期全部推进（{pendingAdvance} 张未完成）
@@ -260,18 +284,6 @@ export default async function PayrollPage({
             </form>
           </div>
 
-          <div className="toolbar">
-            <div className="flex items-center gap-2">
-              <PeriodPicker
-                selectedStart={thisWeek.start}
-                selectedLabel="按周期查看汇总"
-                todayIso={todayIso()}
-                totals={pickerTotals}
-                hrefBase="/dashboard/payroll"
-              />
-            </div>
-          </div>
-
           <LedgerPanel label={<>工资单档案<b>{archive!.rows.length} 张</b></>}>
             <StatementsTable
               statements={archive!.rows}
@@ -279,8 +291,8 @@ export default async function PayrollPage({
               returnQuery={returnQuery}
               empty={
                 q || statusFilter !== "all"
-                  ? "没有符合条件的工资单。换个筛选条件，或点周期去生成。"
-                  : "还没有工资单。点上方周期选择任一周，进去点「生成本期工资单」。"
+                  ? "没有符合条件的工资单。换个筛选条件，或切到「按周期」生成。"
+                  : "还没有工资单。切到「按周期」页签，选一周点「生成本期工资单」。"
               }
             />
           </LedgerPanel>
