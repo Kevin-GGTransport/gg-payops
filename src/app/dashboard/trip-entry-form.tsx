@@ -88,11 +88,13 @@ const cellHint = "block text-[10px] leading-tight font-normal text-muted-foregro
 /**
  * Column layout of every group sheet, fed to the shared TanStack shell
  * (columns-only instance - the body rows are the form grid below). Defaults
- * stay under ~1000px so common laptop widths fit without horizontal
- * scrolling; widths persist per storageKey and reset on double-click.
+ * sum past common laptop widths (~1080px), so narrow screens scroll the sheet
+ * horizontally; widths persist per storageKey and reset on double-click.
  */
 const SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
   { id: "handle", header: "", size: 28, enableResizing: false, meta: { headerClass: "px-1" } },
+  // Row ordinal = render index, so drag/delete/add renumber it for free
+  { id: "seq", header: "序号", size: 48, enableResizing: false, meta: { headerClass: "ctr" } },
   { id: "trip_date", header: "日期", size: 100, minSize: 84 },
   { id: "from_location", header: "起点", size: 130, minSize: 100 },
   { id: "to_location", header: "终点", size: 130, minSize: 100 },
@@ -364,7 +366,7 @@ const EntryRow = React.memo(function EntryRow({
       onDrop={onRowDrop}
       className={`${draggable ? "row-dragging" : ""}${dropMark ? ` drop-${dropMark}` : ""}`}
     >
-      <td className="px-1 text-center">
+      <td className="ctr px-1">
         <span
           className="drag-handle"
           aria-label={`拖拽调整${legLabel}顺序`}
@@ -374,6 +376,9 @@ const EntryRow = React.memo(function EntryRow({
         >
           <GripVerticalIcon className="size-3.5" />
         </span>
+      </td>
+      <td className="ctr px-1.5 font-mono text-[12px] tabular-nums text-muted-foreground">
+        {rowIndex + 1}
       </td>
       <td className="px-1.5">
         <Input

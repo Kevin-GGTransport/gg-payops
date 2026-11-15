@@ -470,6 +470,12 @@ th.num,
 td.num {
   @apply text-right;
 }
+/* Centered column (row ordinals); unlayered like .num so it beats the
+   utilities-layer text-center that the base td/th reset overrides */
+th.ctr,
+td.ctr {
+  @apply text-center;
+}
 .roster tbody tr {
   transition: background-color 120ms ease;
 }
