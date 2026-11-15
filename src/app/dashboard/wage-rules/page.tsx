@@ -6,8 +6,8 @@ import { PageHeader } from "@/components/page-header";
 import { LedgerPanel } from "@/components/ledger";
 import { WageRuleStateBadge } from "@/components/badges";
 import { ConfirmButton } from "@/components/confirm-button";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { DateField } from "@/components/date-field";
 import { FormError, FormGrid, SubmitButton, TextField } from "@/components/form-fields";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
@@ -246,17 +246,12 @@ export default async function WageRulesPage({
                 defaultValue={formField(sp, "name", `CA Local ${tomorrow.slice(0, 7).replace("-", "年")} 版`)}
                 maxLength={120}
               />
-              <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-                生效日期（须晚于今天）
-                <Input
-                  type="date"
-                  name="effective_from"
-                  defaultValue={formField(sp, "effective_from", tomorrow)}
-                  required
-                  aria-label="生效日期"
-                  className="h-9 font-mono text-[13px]"
-                />
-              </label>
+              <DateField
+                label="生效日期（须晚于今天）"
+                name="effective_from"
+                defaultValue={formField(sp, "effective_from", tomorrow)}
+                required
+              />
             </FormGrid>
           </div>
           <div className="flex justify-end border-t border-line px-5 py-3">

@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel } from "@/components/ledger";
 import { ComboboxField } from "@/components/combobox-field";
-import { AutoSubmitDate } from "@/components/auto-submit";
+import { AutoSubmitDateField } from "@/components/auto-submit";
 import { FilterSelect } from "@/components/filter-select";
 import { BatchDeleteTrips } from "@/components/batch-delete";
 import { CleanForm } from "@/components/clean-form";
@@ -170,19 +170,19 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
             placeholder="全部司机"
             aria-label="按司机筛选"
           />
-          <AutoSubmitDate
-            type="date"
-            className="filter-select"
+          <AutoSubmitDateField
             name="from"
             defaultValue={dateFrom ?? ""}
             aria-label="开始日期"
+            className="w-36"
+            groupClassName="h-9.5"
           />
-          <AutoSubmitDate
-            type="date"
-            className="filter-select"
+          <AutoSubmitDateField
             name="to"
             defaultValue={dateTo ?? ""}
             aria-label="结束日期"
+            className="w-36"
+            groupClassName="h-9.5"
           />
           <div className="filter-actions">
             {hasFilter && <Link href={resetHref}>重置筛选</Link>}

@@ -4,6 +4,7 @@ import * as React from "react";
 import { PlusIcon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { DateField } from "@/components/date-field";
 import { FormGrid, NumberField, TextField } from "@/components/form-fields";
 import type { WageRuleVersionDetail } from "@/lib/queries/wage-rules";
 import { updateVersion } from "./actions";
@@ -68,17 +69,13 @@ export function VersionForm({ version }: { version: WageRuleVersionDetail }) {
             maxLength={120}
             className="md:col-span-3"
           />
-          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground md:col-span-3">
-            生效日期
-            <Input
-              type="date"
-              name="effective_from"
-              defaultValue={version.effective_from}
-              required
-              aria-label="生效日期"
-              className="h-9 font-mono text-[13px]"
-            />
-          </label>
+          <DateField
+            label="生效日期"
+            name="effective_from"
+            defaultValue={version.effective_from}
+            required
+            className="md:col-span-3"
+          />
           <NumberField
             label="车主乘数（×）"
             name="owner_multiplier"

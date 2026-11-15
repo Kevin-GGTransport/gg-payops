@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PeriodPicker } from "@/components/period-picker";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { ComboboxField } from "@/components/combobox-field";
+import { DateField } from "@/components/date-field";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
 import { calcTripWage, pickVersion, type WageRuleData } from "@/lib/wage";
 import { money, todayIso } from "@/lib/format";
@@ -81,8 +82,8 @@ type TripEntryFormProps = {
 
 const INITIAL_ROWS = 10;
 
-/** Bare input for table cells: no label, no border, inherits the roster rhythm */
-const cellInput = "h-8 border-0 bg-transparent px-2 shadow-none rounded-none text-[13px] focus-visible:ring-1";
+/** Compact bordered input for table cells: standard shadcn Input at h-8 */
+const cellInput = "h-8 px-2 text-[13px]";
 const cellHint = "block text-[10px] leading-tight font-normal text-muted-foreground";
 
 /**
@@ -95,7 +96,7 @@ const SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
   { id: "handle", header: "", size: 28, enableResizing: false, meta: { headerClass: "px-1" } },
   // Row ordinal = render index, so drag/delete/add renumber it for free
   { id: "seq", header: "序号", size: 48, enableResizing: false, meta: { headerClass: "ctr" } },
-  { id: "trip_date", header: "日期", size: 100, minSize: 84 },
+  { id: "trip_date", header: "日期", size: 132, minSize: 112 },
   { id: "from_location", header: "起点", size: 130, minSize: 100 },
   { id: "to_location", header: "终点", size: 130, minSize: 100 },
   { id: "operation", header: "操作", size: 72, minSize: 64 },
@@ -381,16 +382,15 @@ const EntryRow = React.memo(function EntryRow({
         {rowIndex + 1}
       </td>
       <td className="px-1.5">
-        <Input
-          type="date"
+        <DateField
           name={`${prefix}trip_date`}
           value={dateValue}
-          onChange={e => {
+          onValueChange={value => {
             dateInherited.current = false;
-            setDateValue(e.target.value);
+            setDateValue(value);
           }}
           aria-label={`${legLabel}日期`}
-          className={`${cellInput} font-mono`}
+          size="sm"
         />
       </td>
       <td className="px-1.5">
@@ -401,7 +401,7 @@ const EntryRow = React.memo(function EntryRow({
           value={fromValue}
           placeholder="起点"
           aria-label={`${legLabel}起点`}
-          triggerClassName="h-8 justify-start px-2 font-normal"
+          triggerClassName="h-8"
           onValueChange={value => {
             fromInherited.current = false;
             setFromValue(value);
@@ -416,7 +416,7 @@ const EntryRow = React.memo(function EntryRow({
           defaultValue={defaults?.to || ""}
           placeholder="终点"
           aria-label={`${legLabel}终点`}
-          triggerClassName="h-8 justify-start px-2 font-normal"
+          triggerClassName="h-8"
           onValueChange={value => {
             setToValue(value);
             onToChange(rowId, value);
@@ -430,7 +430,7 @@ const EntryRow = React.memo(function EntryRow({
           clearable={false}
           searchable={false}
           aria-label={`${legLabel}操作`}
-          triggerClassName="h-8 justify-start px-2 font-normal"
+          triggerClassName="h-8"
           onValueChange={value => {
             setOperation(value);
             if (!operationRequiresLoad(value)) setLoadNoValue("");
@@ -506,7 +506,7 @@ const EntryRow = React.memo(function EntryRow({
             </button>
           </span>
         )}
-        {!rule && manualPay === null && (
+        {dateValue && !rule && manualPay === null && (
           <span className={`${cellHint} text-right`}>该日期无生效规则</span>
         )}
         {rule && baseFallbackLeg && manualPay === null && (

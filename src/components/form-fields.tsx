@@ -4,6 +4,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+// Calendar-combo date picker (typed input + calendar popover), official
+// date-picker-input pattern - replaces the old native type="date" input
+export { DateField } from "@/components/date-field";
+
 type BaseField = {
   label: string;
   name: string;
@@ -20,15 +24,6 @@ export function TextField({ label, name, required, placeholder, defaultValue, ma
     <label className={cn(fieldClass, className)}>
       {label}
       <Input name={name} required={required} placeholder={placeholder} defaultValue={defaultValue} maxLength={maxLength} />
-    </label>
-  );
-}
-
-export function DateField({ label, name, required, defaultValue, className }: BaseField) {
-  return (
-    <label className={cn(fieldClass, className)}>
-      {label}
-      <Input type="date" name={name} required={required} defaultValue={defaultValue} />
     </label>
   );
 }

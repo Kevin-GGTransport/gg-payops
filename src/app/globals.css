@@ -459,13 +459,24 @@ th,
 td {
   @apply border-b border-line px-3 py-2 text-left align-middle whitespace-nowrap;
 }
-/* 表头强规则：2px 舱单蓝 */
+/* 表头回归 shadcn 标准：灰底、xs 常规字重、细线（与 TableHead 原语一致，
+   raw <th> 也自动同款） */
 th {
-  @apply border-b-2 border-b-navy bg-transparent px-3 py-2.5 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground;
+  @apply bg-muted/40 text-xs font-medium text-muted-foreground;
 }
 th.num,
 td.num {
   @apply text-right;
+}
+/* 日历（react-day-picker）内部也有 table/th/td：上面的全局重置会把它的
+   网格撑到 ~420×490（popover 在对话框旁放不下、定位抖动）。这里用同层级
+   更高优先级的选择器把日历内部表格还原为组件自身的紧凑布局。 */
+[data-slot="calendar"] table {
+  @apply w-auto border-collapse;
+}
+[data-slot="calendar"] th,
+[data-slot="calendar"] td {
+  @apply border-0 bg-transparent p-0 text-left;
 }
 /* Centered column (row ordinals); unlayered like .num so it beats the
    utilities-layer text-center that the base td/th reset overrides */
@@ -583,11 +594,6 @@ th.col-th {
 /* 司机分组带：navy 顶线 + 浅底 + 底部细线，与下方表格明确分段 */
 .group-band {
   @apply flex flex-wrap gap-x-4 gap-y-2.5 border-b border-line border-t-[1.5px] border-t-navy bg-muted/50 px-2.5 py-3;
-}
-/* TanStack+shadcn 表壳：表头回归台账规范（覆盖 TableHead 原语的底色/细线，
-   恢复 2px 舱单蓝底线这一签名元素） */
-.roster thead th {
-  @apply border-b-2 border-b-navy bg-transparent px-3 py-2.5 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground;
 }
 /* shadcn TableRow 自带 tr 级边线，与 td 的台账细线叠加显粗——归零到 td 上统一 */
 .roster tbody tr {
