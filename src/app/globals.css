@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+@custom-variant dark (&:is(.dark *));
+
 /* ==========================================================================
    G&G PayOps — 「调度台账」
    shadcn/ui (new-york, neutral) + Tailwind v4
@@ -33,14 +35,15 @@
   --chart-3: oklch(0.511 0.262 276.966);
   --chart-4: oklch(0.457 0.24 277.023);
   --chart-5: oklch(0.398 0.195 277.366);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.546 0.245 262.881);
-  --sidebar-primary-foreground: oklch(0.97 0.014 254.604);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* 舱单书脊：navy 底 + 白字 + 琥珀刻度（与旧 .rail 视觉一致） */
+  --sidebar: #0c1f30;
+  --sidebar-foreground: #cbd5e1;
+  --sidebar-primary: #e79a2f;
+  --sidebar-primary-foreground: #0c1f30;
+  --sidebar-accent: rgb(255 255 255 / 10%);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgb(255 255 255 / 15%);
+  --sidebar-ring: #e79a2f;
 }
 
 .dark {
@@ -232,50 +235,44 @@
 
 /* ==========================================================================
    后台骨架 · 舱单书脊
-   视口锁定双栏：左侧书脊不随内容滚动，右侧台账面板独立滚动
+   结构由 shadcn ui/sidebar 承担；本节统一书脊视觉 token：
+   232px 脊宽 / 3px 钢印圆角 / 琥珀刻度高亮 / 邮戳小节头
    ========================================================================== */
-.dashboard {
-  @apply grid h-dvh grid-cols-[232px_minmax(0,1fr)] overflow-hidden;
-}
-.rail {
-  @apply flex flex-col overflow-y-auto bg-navy p-4;
-}
-.rail-brand {
-  @apply mb-4 flex items-center gap-2.5 border-b border-white/15 pb-4;
-}
-.rail-mark {
-  @apply grid size-10 shrink-0 place-items-center rounded-[3px] border border-amber/70 font-mono text-[13px] font-bold text-amber-200;
-}
-.rail-brand h1 {
-  @apply m-0 text-[15px] font-bold tracking-tight text-white;
-}
-.rail-brand p {
-  @apply m-0 mt-0.5 text-[10px] tracking-[0.22em] text-slate-400;
-}
-.nav {
-  @apply grid gap-0.5;
-}
-.nav a {
-  @apply rounded-sm px-3 py-2.5 text-[14px] text-slate-300 no-underline transition-colors hover:bg-white/10 hover:text-white;
-}
-.nav a[aria-current="page"] {
-  @apply bg-white/10 font-semibold text-white;
-  box-shadow: inset 2.5px 0 0 0 var(--color-amber);
-}
-.user-box {
-  @apply mt-auto border-t border-white/15 pt-3.5;
-}
-.user-name {
-  @apply text-[13px] font-semibold text-white;
-}
-.user-roles {
-  @apply mt-0.5 text-[11px] text-slate-400;
-}
-.user-box form {
-  @apply mt-2.5;
-}
 .main {
-  @apply min-w-0 overflow-y-auto p-6 pb-16 md:px-9;
+  @apply min-w-0 flex-1 overflow-y-auto p-6 pb-16 md:px-9;
+}
+/* Content column: centered and capped so wide ledgers stay readable on ultrawide */
+.main > * {
+  @apply mx-auto w-full max-w-[1360px];
+}
+
+/* 脊宽：与旧 232px 书脊一致；图标收缩 56px（容纳品牌方块+触发钮竖排）。
+   !important 用于盖过组件内联 style 里的 16rem/3rem 默认值 */
+[data-slot="sidebar-wrapper"] {
+  --sidebar-width: 232px !important;
+  --sidebar-width-icon: 56px !important;
+}
+
+/* 统一钢印圆角：菜单行、分组标签、触发钮都走 3px（与徽章 rounded-[3px] 同语言） */
+[data-slot="sidebar-menu-button"],
+[data-slot="sidebar-group-label"],
+[data-slot="sidebar-trigger"] {
+  border-radius: 3px;
+}
+[data-slot="sidebar-menu-button"] {
+  height: 40px;
+}
+/* 书脊签名：当前项左侧琥珀刻度 + 白/15 底 + semibold */
+[data-slot="sidebar-menu-button"][data-active="true"] {
+  background: rgb(255 255 255 / 15%);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 0 var(--color-amber);
+}
+
+/* 分组箭头：随 Radix data-state 旋转提亮（transition 在组件 className 上） */
+[data-slot="sidebar-group-label"][data-state="open"] > svg {
+  transform: rotate(90deg);
+  color: #cbd5e1;
 }
 /* Content column: centered and capped so wide ledgers stay readable on ultrawide */
 .main > * {
@@ -733,31 +730,9 @@ th.col-th {
    响应式
    ========================================================================== */
 @media (max-width: 800px) {
-  .dashboard {
-    @apply block h-auto overflow-visible;
-  }
-  /* Mobile: the spine becomes a sticky top bar so the menu stays reachable */
-  .rail {
-    @apply sticky top-0 z-30;
-  }
-  .rail-brand {
-    @apply mb-3 pb-3;
-  }
-  .nav {
-    @apply flex overflow-x-auto;
-    scrollbar-width: none;
-  }
-  .nav::-webkit-scrollbar {
-    display: none;
-  }
-  .nav a {
-    @apply shrink-0;
-  }
-  .user-box {
-    @apply hidden;
-  }
+  /* Mobile: sidebar collapses to a sheet; only tighten the content column */
   .main {
-    @apply overflow-visible p-4 pb-10;
+    @apply p-4 pb-10;
   }
   .tabs a {
     @apply px-2.5;

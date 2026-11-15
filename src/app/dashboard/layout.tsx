@@ -1,30 +1,23 @@
 import { requireUser } from "@/lib/auth";
-import { signOutAction } from "@/app/actions";
-import { RailNav } from "@/components/rail-nav";
+import { AppSidebar } from "@/components/app-sidebar";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
 
   return (
-    <div className="dashboard">
-      <aside className="rail">
-        <div className="rail-brand">
-          <span className="rail-mark" aria-hidden="true">G&amp;G</span>
-          <div>
-            <h1>G&amp;G PayOps</h1>
-            <p>运输结算中心</p>
-          </div>
-        </div>
-        <RailNav />
-        <div className="user-box">
-          <div className="user-name">{user.displayName}</div>
-          <div className="user-roles">{user.roles.join(" / ") || "未分配角色"}</div>
-          <form action={signOutAction}>
-            <button className="ghost" type="submit">退出登录</button>
-          </form>
-        </div>
-      </aside>
-      <main className="main">{children}</main>
-    </div>
+    <SidebarProvider>
+      <AppSidebar displayName={user.displayName} roles={user.roles} />
+      <SidebarInset className="h-svh overflow-hidden">
+        {/* Mobile-only slim bar: opens the sheet. Desktop has no top bar (old ledger layout). */}
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-background px-4 md:hidden">
+          <SidebarTrigger className="-ml-1" />
+          <span className="font-mono text-xs tracking-[0.22em] text-muted-foreground">
+            GG·PAYOPS
+          </span>
+        </header>
+        <div className="main flex-1 min-h-0">{children}</div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
