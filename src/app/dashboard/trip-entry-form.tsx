@@ -15,6 +15,12 @@ import { calcTripWage, pickVersion, type WageRuleData } from "@/lib/wage";
 import { money, todayIso } from "@/lib/format";
 import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
 import {
+  clearEntryDraft,
+  collectDraftFromDOM,
+  readEntryDraft,
+  writeEntryDraft
+} from "@/lib/entry-draft";
+import {
   DRIVER_TYPE_LABELS,
   type DriverType,
   type OperationType
@@ -81,6 +87,9 @@ type TripEntryFormProps = {
 };
 
 const INITIAL_ROWS = 10;
+
+/** Draft-restored groups take ids from here so they always mount fresh */
+const DRAFT_GROUP_ID_BASE = 1_000;
 
 /** Compact bordered input for table cells: standard shadcn Input at h-8 */
 const cellInput = "h-8 px-2 text-[13px]";
@@ -499,7 +508,9 @@ const EntryRow = React.memo(function EntryRow({
           className={`${cellInput} text-right font-mono`}
         />
         {manualPay !== null && (
-          <span className={`${cellHint} text-right`}>
+          // data-manual-pay: the draft collector keeps hand-edited wages as
+          // manual on restore; auto-priced rows restore empty and recalc
+          <span data-manual-pay className={`${cellHint} text-right`}>
             手动 ·{" "}
             <button type="button" className="linklike" onClick={() => setManualPay(null)}>
               重算
@@ -918,6 +929,11 @@ export function TripEntryForm({
       ].id
     )
   );
+  /** Restore banner copy; null = fresh form, nothing to announce */
+  const [restoredFrom, setRestoredFrom] = React.useState<{
+    groups: number;
+    filled: number;
+  } | null>(null);
   // "<groupId>:<rowId>" -> current pay value, for per-group and grand totals
   const [pays, setPays] = React.useState<Record<string, string>>({});
   // groupId -> filled-row count (rows with at least one endpoint; reserve
@@ -956,10 +972,6 @@ export function TripEntryForm({
     );
   }, []);
 
-  const handleDirty = React.useCallback(() => {
-    dirtyRef.current = true;
-  }, []);
-
   // Latest groups / activeId behind refs so the callbacks below stay stable
   // (a new identity would defeat GroupSection's memo on every tab switch)
   const groupsRef = React.useRef(groups);
@@ -970,6 +982,76 @@ export function TripEntryForm({
   React.useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
+
+  /* --- Draft autosave: debounce-serialize the form DOM into localStorage --- */
+  const formRef = React.useRef<HTMLFormElement>(null);
+  const periodStartRef = React.useRef(periodStart);
+  React.useEffect(() => {
+    periodStartRef.current = periodStart;
+  }, [periodStart]);
+  const saveTimer = React.useRef<number | undefined>(undefined);
+  const scheduleSave = React.useCallback(() => {
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      const form = formRef.current;
+      if (!form) return;
+      const activeIndex = groupsRef.current.findIndex(g => String(g.id) === activeIdRef.current);
+      writeEntryDraft(
+        collectDraftFromDOM(form, {
+          activeIndex: activeIndex < 0 ? 0 : activeIndex,
+          periodStart: periodStartRef.current
+        })
+      );
+    }, 600);
+  }, []);
+
+  /** Dirty mark + draft save; every structural mutation routes through here */
+  const handleDirty = React.useCallback(() => {
+    dirtyRef.current = true;
+    scheduleSave();
+  }, [scheduleSave]);
+
+  /**
+   * Draft restore, post-mount: reading localStorage during the first render
+   * would mismatch the SSR html (hydration error), so the sheet starts blank
+   * and swaps to the draft here. Server refill params win - a submit clears
+   * the draft, so both only coexist when the URL was opened stale. Restored
+   * groups get fresh high ids so every GroupSection mounts new (their row
+   * defaults are one-shot state that a reused instance would ignore).
+   */
+  /* eslint-disable react-hooks/set-state-in-effect -- one-shot client-only restore; reading localStorage during render would mismatch SSR html */
+  React.useEffect(() => {
+    if (refillGroups) return;
+    const draft = readEntryDraft();
+    if (!draft) return;
+    const restored: GroupSlot[] = draft.groups.map((g, i) => ({
+      id: DRAFT_GROUP_ID_BASE + i + 1,
+      driverId: g.driverId,
+      truckId: g.truckId,
+      rows: g.rows.map((row, j) => ({ id: j + 1, defaults: row }))
+    }));
+    setGroups(restored);
+    nextGroupId.current = DRAFT_GROUP_ID_BASE + restored.length + 1;
+    setDriverByGroup(Object.fromEntries(restored.map(g => [g.id, g.driverId])));
+    setFilledCounts({});
+    setPays({});
+    setActiveId(String(restored[Math.min(draft.activeIndex, restored.length - 1)].id));
+    if (/^\d{4}-\d{2}-\d{2}$/.test(draft.periodStart)) setPeriodStart(draft.periodStart);
+    dirtyRef.current = true;
+    setRestoredFrom({
+      groups: draft.groups.length,
+      filled: draft.groups.reduce((acc, g) => acc + g.rows.filter(r => r.to).length, 0)
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  /** Drop the stored draft and reset to a blank sheet (both clear affordances) */
+  function discardDraft() {
+    window.clearTimeout(saveTimer.current);
+    clearEntryDraft();
+    window.location.reload();
+  }
 
   const removeGroup = React.useCallback((id: number) => {
     dirtyRef.current = true;
@@ -999,7 +1081,8 @@ export function TripEntryForm({
       if (!keys.some(k => k.startsWith(prefix))) return current;
       return Object.fromEntries(keys.filter(k => !k.startsWith(prefix)).map(k => [k, current[k]]));
     });
-  }, []);
+    scheduleSave();
+  }, [scheduleSave]);
 
   const handleGroupDriverChange = React.useCallback((groupId: number, driverId: string) => {
     setDriverByGroup(current =>
@@ -1016,6 +1099,7 @@ export function TripEntryForm({
     ]);
     // Open the fresh tab so the clerk picks its driver right away
     setActiveId(String(id));
+    scheduleSave();
   }
 
   function groupPaySum(id: number) {
@@ -1057,6 +1141,7 @@ export function TripEntryForm({
     setActiveId(String(id));
     dirtyRef.current = true;
     setPhotoOpen(false);
+    scheduleSave();
   }
 
   // Tab label: the picked driver's name; "无" until one is picked
@@ -1072,12 +1157,23 @@ export function TripEntryForm({
 
   return (
     <form
+      ref={formRef}
       action={addTripsBatch}
       aria-label="录入行程"
       onChange={e => {
         // Photo-panel events bubble too (it lives inside the form); those
-        // don't make the entry rows dirty
-        if (!(e.target as HTMLElement).closest("[data-photo-panel]")) dirtyRef.current = true;
+        // don't make the entry rows dirty or feed the draft
+        if (!(e.target as HTMLElement).closest("[data-photo-panel]")) {
+          dirtyRef.current = true;
+          scheduleSave();
+        }
+      }}
+      onSubmit={() => {
+        // Submitting either button hands every value to the server action;
+        // success refills leftovers via redirect params and failure refills
+        // everything, so the local draft must not outlive this submit
+        window.clearTimeout(saveTimer.current);
+        clearEntryDraft();
       }}
     >
       <div className="panel">
@@ -1088,6 +1184,17 @@ export function TripEntryForm({
           onOpenChange={setPhotoOpen}
           onApply={applyFromPhoto}
         />
+
+        {restoredFrom && (
+          <div className="flex flex-wrap items-center gap-x-3 border-b border-line bg-amber-50/70 px-3 py-2 text-[13px] text-amber-900/85">
+            <span>
+              已恢复未提交的草稿：{restoredFrom.groups} 组 · {restoredFrom.filled} 段已填
+            </span>
+            <button type="button" className="linklike" onClick={discardDraft}>
+              清空重来
+            </button>
+          </div>
+        )}
 
         {/* Sheet cover: the pay period this batch is entered against -
             context display only; rows carry their own dates. */}
@@ -1189,9 +1296,20 @@ export function TripEntryForm({
         {/* Bottom bar: running totals + the current tab's secondary submit.
             The page-wide primary submit lives in the top tab strip. */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3">
-          <span className="text-xs text-muted-foreground">
-            共 {groups.length} 组 · {totalRows} 段 · 工资合计{" "}
-            <b className="font-mono text-sm text-foreground">{money(totalPay)}</b>
+          <span className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span>
+              共 {groups.length} 组 · {totalRows} 段 · 工资合计{" "}
+              <b className="font-mono text-sm text-foreground">{money(totalPay)}</b>
+            </span>
+            <button
+              type="button"
+              className="linklike danger"
+              onClick={() => {
+                if (window.confirm("清空未提交的草稿并重置表单？")) discardDraft();
+              }}
+            >
+              清空表单
+            </button>
           </span>
           <Button
             type="submit"
