@@ -3,31 +3,20 @@
 import Link from "next/link";
 import { type ColumnDef } from "@tanstack/react-table";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
+import { WageRuleStateBadge } from "@/components/badges";
 import { money } from "@/lib/format";
 import type { WageRuleVersionSummary } from "@/lib/queries/wage-rules";
-
-/** 钢印标签：已生效（audit 绿）/ 待生效（amber） */
-function EffectiveBadge({ effective }: { effective: boolean }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-[3px] border px-1.5 py-px text-[11px] font-semibold leading-4 ${
-        effective
-          ? "border-audit/30 bg-audit/10 text-audit"
-          : "border-amber-500/40 bg-amber-50 text-amber-800"
-      }`}
-    >
-      {effective ? "已生效" : "待生效"}
-    </span>
-  );
-}
 
 /** Version timeline on the shared TanStack + shadcn table shell */
 export function WageRulesTable({
   versions,
-  today
+  today,
+  selectedId
 }: {
   versions: WageRuleVersionSummary[];
   today: string;
+  /** Currently opened version: its row gets the route-blue pick line */
+  selectedId?: string;
 }) {
   const columns: ColumnDef<WageRuleVersionSummary, unknown>[] = [
     {
@@ -47,21 +36,20 @@ export function WageRulesTable({
       header: "状态",
       size: 90,
       cell: ({ row }) => (
-        <EffectiveBadge effective={row.original.effective_from <= today} />
+        <WageRuleStateBadge effective={row.original.effective_from <= today} />
       )
     },
     {
       id: "summary",
       header: "规则摘要",
-      size: 360,
+      size: 280,
       meta: { cellClass: "text-muted-foreground" },
       cell: ({ row }) => {
         const v = row.original;
         return (
           <span>
             {v.tier_count} 档 {money(v.min_amount)}~{money(v.max_amount)} · 车主×
-            {Number(v.owner_multiplier).toFixed(2)} · BOBTAIL×
-            {Number(v.bobtail_multiplier).toFixed(2)} · 超档+{money(v.overage_increment)}/50mi · 特例 {v.special_count} 条
+            {Number(v.owner_multiplier).toFixed(2)} · 特例 {v.special_count} 条
           </span>
         );
       }
@@ -84,5 +72,11 @@ export function WageRulesTable({
     storageKey: "payops.wage-rules.cols"
   });
 
-  return <RosterTable table={table} empty="还没有任何规则版本。" />;
+  return (
+    <RosterTable
+      table={table}
+      empty="还没有任何规则版本。"
+      rowClassName={row => (row.id === selectedId ? "row-pick" : undefined)}
+    />
+  );
 }

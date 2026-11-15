@@ -41,6 +41,20 @@ export function StatusPill({ status }: { status: RecordStatus }) {
   );
 }
 
+/** 工资规则版本状态：已生效（audit 绿）/ 待生效（琥珀） */
+export function WageRuleStateBadge({ effective, label }: { effective: boolean; label?: string }) {
+  return (
+    <span
+      className={cn(
+        pillBase,
+        effective ? "border-audit/30 bg-audit/10 text-audit" : "border-amber-500/40 bg-amber-50 text-amber-800"
+      )}
+    >
+      {label ?? (effective ? "已生效" : "待生效")}
+    </span>
+  );
+}
+
 /* 工资单流转：草稿=灰 · 审核=琥珀 · 核对=藏青 · 完成=审计绿 */
 const STATEMENT_STYLES: Record<StatementStatus, string> = {
   DRAFT: "border-line bg-muted text-muted-foreground",

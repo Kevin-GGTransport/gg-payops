@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { PlusIcon } from "lucide-react";
 import { ModalShell } from "@/components/modal-shell";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel } from "@/components/ledger";
+import { WageRuleStateBadge } from "@/components/badges";
+import { ConfirmButton } from "@/components/confirm-button";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { FormError, FormGrid, SubmitButton, TextField } from "@/components/form-fields";
@@ -54,9 +57,13 @@ export default async function WageRulesPage({
   const today = todayIso();
   const tomorrow = isoPlusDays(today, 1);
 
-  const [versions, detail, editing] = await Promise.all([
-    wageRuleVersionsList(),
-    viewId ? wageRuleVersionDetail(viewId) : Promise.resolve(null),
+  const versions = await wageRuleVersionsList();
+  // Default open: the version governing today (latest effective), else newest —
+  // the page lands as timeline + detail instead of half empty
+  const openId =
+    viewId || versions.find(v => v.effective_from <= today)?.id || versions[0]?.id || "";
+  const [detail, editing] = await Promise.all([
+    openId ? wageRuleVersionDetail(openId) : Promise.resolve(null),
     editId ? wageRuleVersionDetail(editId) : Promise.resolve(null)
   ]);
 
@@ -78,10 +85,10 @@ export default async function WageRulesPage({
         actions={
           createSourceId ? (
             <Link
-              className="button button-quiet"
+              className="button button-dark"
               href={`/dashboard/wage-rules?new=1&from=${createSourceId}`}
             >
-              基于当前版创建新版本
+              <PlusIcon className="size-4" aria-hidden /> 新建版本
             </Link>
           ) : undefined
         }
@@ -91,7 +98,7 @@ export default async function WageRulesPage({
 
       <section aria-label="版本时间线">
         <LedgerPanel>
-          <WageRulesTable versions={versions} today={today} />
+          <WageRulesTable versions={versions} today={today} selectedId={detail?.id} />
         </LedgerPanel>
       </section>
 
@@ -99,25 +106,51 @@ export default async function WageRulesPage({
         <section aria-label="版本详情" className="mt-4">
           <LedgerPanel
             label={
-              <span className="flex flex-wrap items-center gap-2">
-                <b className="mono">{detail.name}</b>
-                <span className="mono text-muted-foreground">生效 {detail.effective_from}</span>
-                <span
-                  className={`inline-flex items-center rounded-[3px] border px-1.5 py-px text-[11px] font-semibold leading-4 ${
-                    detail.effective_from <= today
-                      ? "border-audit/30 bg-audit/10 text-audit"
-                      : "border-amber-500/40 bg-amber-50 text-amber-800"
-                  }`}
-                >
-                  {detail.effective_from <= today ? "已生效（只读）" : "待生效"}
-                </span>
-                {detail.effective_from > today && (
-                  <Link href={`/dashboard/wage-rules?edit=${detail.id}`}>编辑</Link>
-                )}
-              </span>
+              <>
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 tracking-normal">
+                  <b className="mono text-[15px] font-bold tracking-normal text-foreground">
+                    {detail.name}
+                  </b>
+                  <span className="mono text-xs font-medium tracking-normal">
+                    生效 {detail.effective_from}
+                  </span>
+                  <WageRuleStateBadge
+                    effective={detail.effective_from <= today}
+                    label={detail.effective_from <= today ? "已生效（只读）" : "待生效"}
+                  />
+                </div>
+                <div className="flex shrink-0 items-center gap-2 tracking-normal">
+                  {detail.effective_from <= today ? (
+                    <Link
+                      className="button button-quiet h-7! px-2.5! text-xs"
+                      href={`/dashboard/wage-rules?new=1&from=${detail.id}`}
+                    >
+                      复制为新版本
+                    </Link>
+                  ) : (
+                    <>
+                      <Link
+                        className="button button-dark h-7! px-3! text-xs"
+                        href={`/dashboard/wage-rules?edit=${detail.id}`}
+                      >
+                        编辑
+                      </Link>
+                      <form action={deleteVersion} className="contents">
+                        <input type="hidden" name="id" value={detail.id} />
+                        <ConfirmButton
+                          className="button button-quiet button-danger h-7! px-2.5! text-xs"
+                          message="确定删除该待生效版本？此操作不可撤销。"
+                        >
+                          删除
+                        </ConfirmButton>
+                      </form>
+                    </>
+                  )}
+                </div>
+              </>
             }
           >
-            <div className="grid gap-6 px-4 py-4 md:grid-cols-2">
+            <div className="grid gap-6 px-4 pt-4 md:grid-cols-2">
               <div>
                 <p className="mb-2 text-xs font-medium text-muted-foreground">
                   里程档位（司机价；车主 = 司机 × {ownerMultiplier.toFixed(2)}）
@@ -142,7 +175,7 @@ export default async function WageRulesPage({
                         </tr>
                       );
                     })}
-                    <tr>
+                    <tr className="matrix-sub">
                       <td className="mono">超档</td>
                       <td className="num" colSpan={2}>
                         最高档后每 50 mi + {money(Number(detail.overage_increment))}
@@ -181,18 +214,14 @@ export default async function WageRulesPage({
                     </tbody>
                   </table>
                 )}
-                <p className="mt-3 text-xs text-muted-foreground">
-                  BOBTAIL 乘数 ×{Number(detail.bobtail_multiplier).toFixed(2)}；
-                  BASE 端点腿按对端基准金额的 50% 计价（基地往返算一仓，单程即一半；基准金额在位置管理页维护），不落档位。
-                </p>
               </div>
             </div>
-            {detail.effective_from > today && (
-              <form action={deleteVersion} className="flex justify-end px-4 pb-4">
-                <input type="hidden" name="id" value={detail.id} />
-                <button type="submit" className="linklike danger">删除此待生效版本</button>
-              </form>
-            )}
+            <div className="px-4 pb-4">
+              <p className="notice">
+                BOBTAIL 乘数 ×{Number(detail.bobtail_multiplier).toFixed(2)}；BASE
+                端点腿按对端基准金额的 50% 计价（基地往返算一仓，单程即一半；基准金额在位置管理页维护），不落里程档位。
+              </p>
+            </div>
           </LedgerPanel>
         </section>
       )}
