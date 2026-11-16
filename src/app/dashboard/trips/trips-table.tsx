@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { type ColumnDef } from "@tanstack/react-table";
 
 import { DriverTypeBadge, OperationBadge } from "@/components/badges";
@@ -114,17 +115,24 @@ export function TripsTable({
     {
       id: "actions",
       header: "操作",
-      size: 64,
+      size: 88,
       enableResizing: false,
       meta: { cellClass: "actions" },
       cell: ({ row }) => (
-        <form action={deleteTrip}>
-          <input type="hidden" name="id" value={row.original.id} />
-          <input type="hidden" name="return_to" value={returnTo} />
-          <ConfirmButton type="submit" className="linklike danger" message="删除这条行程？">
-            删除
-          </ConfirmButton>
-        </form>
+        <>
+          <Link
+            href={`/dashboard/trips?edit=${row.original.id}${returnTo ? `&${returnTo}` : ""}`}
+          >
+            编辑
+          </Link>
+          <form action={deleteTrip}>
+            <input type="hidden" name="id" value={row.original.id} />
+            <input type="hidden" name="return_to" value={returnTo} />
+            <ConfirmButton type="submit" className="linklike danger" message="删除这条行程？">
+              删除
+            </ConfirmButton>
+          </form>
+        </>
       )
     }
   ];

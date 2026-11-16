@@ -13,9 +13,10 @@ import { requireUser } from "@/lib/auth";
 import { allValues, firstValue, type SearchParams } from "@/lib/search-params";
 import { type OperationType } from "@/lib/labels";
 import { listOperationTypes } from "@/lib/queries/operations";
-import { listTrips } from "@/lib/queries/trips";
+import { getTripById, listTrips } from "@/lib/queries/trips";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { TripsTable } from "./trips-table";
+import { TripEditDialog } from "./trip-edit-dialog";
 
 export const metadata: Metadata = { title: "行程台账 · G&G PayOps" };
 
@@ -67,6 +68,8 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
   const dateFrom = dateParam(firstValue(sp.from));
   const dateTo = dateParam(firstValue(sp.to));
   const page = intFromParam(firstValue(sp.page));
+  // ?edit=<tripId> opens the edit dialog on top of the current list view
+  const editId = (firstValue(sp.edit) ?? "").trim();
 
   // Sanitize driver ids from the URL (bigint identities are digits only);
   // doing this locally lets all three queries start in parallel
@@ -82,7 +85,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
   const hasFilter =
     selectedIds.length > 0 || Boolean(operation) || Boolean(q) || Boolean(dateFrom) || Boolean(dateTo);
 
-  const [drivers, trips] = await Promise.all([
+  const [drivers, trips, editing] = await Promise.all([
     activeDriverOptions(),
     listTrips({
       ...(selectedIds.length > 0 ? { driverIds: selectedIds } : {}),
@@ -92,7 +95,8 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
       ...(dateTo ? { dateTo } : {}),
       page,
       pageSize: PAGE_SIZE
-    })
+    }),
+    editId ? getTripById(editId) : Promise.resolve(null)
   ]);
   const total = trips[0]?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -230,6 +234,13 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
           )}
         </div>
       </section>
+
+      <TripEditDialog
+        editing={editing}
+        operations={operations}
+        closeHref={`/dashboard/trips${queryWith({ page }).toString() ? `?${queryWith({ page }).toString()}` : ""}`}
+        returnTo={queryWith({ page }).toString()}
+      />
     </>
   );
 }

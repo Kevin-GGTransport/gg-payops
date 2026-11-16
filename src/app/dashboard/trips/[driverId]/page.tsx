@@ -12,14 +12,17 @@ import { fuel as fmtFuel, miles as fmtMiles, money, todayIso } from "@/lib/forma
 import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
 import { STATEMENT_STATUS_FLOW, STATEMENT_STATUS_LABELS } from "@/lib/labels";
 import { getDriverById } from "@/lib/queries/drivers";
+import { listOperationTypes } from "@/lib/queries/operations";
 import {
   driverPeriodTrips,
+  getTripById,
   periodPayTotals,
   type DriverPeriodTripRow
 } from "@/lib/queries/trips";
 import { getStatementByDriverPeriod } from "@/lib/queries/statements";
 import { advanceStatement, revertStatement } from "../../payroll/actions";
 import { PayrollLegsTable } from "../payroll-legs-table";
+import { TripEditDialog } from "../trip-edit-dialog";
 
 export const metadata: Metadata = { title: "周期工资单 · G&G PayOps" };
 
@@ -75,15 +78,19 @@ export default async function DriverPeriodPage({
 
   const sp = await searchParams;
   const period = dateParam(firstValue(sp.period)) ? periodOf(dateParam(firstValue(sp.period))!) : currentPeriod();
+  // ?edit=<tripId> opens the edit dialog on top of this sheet
+  const editId = (firstValue(sp.edit) ?? "").trim();
   const thisWeek = currentPeriod();
   const today = todayIso();
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
 
-  const [legs, periodTotals, statement] = await Promise.all([
+  const [legs, periodTotals, statement, editing, operations] = await Promise.all([
     driverPeriodTrips(period, driver.id),
     periodPayTotals(),
-    getStatementByDriverPeriod(driver.id, period.start)
+    getStatementByDriverPeriod(driver.id, period.start),
+    editId ? getTripById(editId) : Promise.resolve(null),
+    listOperationTypes()
   ]);
   const days = groupByDay(legs);
   const totals = legs.reduce(
@@ -226,6 +233,7 @@ export default async function DriverPeriodPage({
             totalFuel={String(totals.fuel)}
             totalPay={String(totals.pay)}
             returnTo={returnTo}
+            editHrefBase={returnTo}
             storageKey="payops.payroll.detail.cols"
           />
           {legs.length === 0 && (
@@ -235,6 +243,13 @@ export default async function DriverPeriodPage({
           )}
         </LedgerPanel>
       </section>
+
+      <TripEditDialog
+        editing={editing}
+        operations={operations}
+        closeHref={returnTo}
+        returnTo={returnTo}
+      />
     </>
   );
 }

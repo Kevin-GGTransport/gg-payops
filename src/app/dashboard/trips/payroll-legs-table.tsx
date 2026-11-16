@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { type ColumnDef } from "@tanstack/react-table";
 
 import { OperationBadge } from "@/components/badges";
@@ -30,6 +31,8 @@ export function PayrollLegsTable({
   totalPay,
   /** Where the per-row delete redirects back to (query string or full path) */
   returnTo,
+  /** When set (URL with ?period=...), each leg gets an edit link opening the dialog on this page */
+  editHrefBase,
   storageKey = "payops.payroll.legs.cols"
 }: {
   days: DayGroup[];
@@ -37,6 +40,7 @@ export function PayrollLegsTable({
   totalFuel: string;
   totalPay: string;
   returnTo: string;
+  editHrefBase?: string;
   storageKey?: string;
 }) {
   const columns: ColumnDef<DayGroup, unknown>[] = [
@@ -47,7 +51,7 @@ export function PayrollLegsTable({
     { id: "miles", header: "Miles", size: 80, meta: { headerClass: "num" } },
     { id: "fuel", header: "加油(gal)", size: 84, meta: { headerClass: "num" } },
     { id: "pay", header: "本趟工资", size: 104, meta: { headerClass: "num" } },
-    { id: "delete", header: "删除", size: 48, enableResizing: false, meta: { headerClass: "px-1.5" } }
+    { id: "delete", header: "操作", size: editHrefBase ? 76 : 48, enableResizing: false, meta: { headerClass: "px-1.5" } }
   ];
 
   const table = useRosterTable({ data: [], columns, storageKey });
@@ -78,6 +82,9 @@ export function PayrollLegsTable({
               <td className="num">{fmtFuel(leg.fuel_gallons)}</td>
               <td className="num">{money(leg.pay_amount)}</td>
               <td className="actions px-1.5">
+                {editHrefBase && (
+                  <Link href={`${editHrefBase}&edit=${leg.id}`}>编辑</Link>
+                )}
                 <form action={deleteTrip}>
                   <input type="hidden" name="id" value={leg.id} />
                   <input type="hidden" name="return_to" value={returnTo} />

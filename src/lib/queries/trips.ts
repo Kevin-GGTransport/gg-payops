@@ -37,6 +37,38 @@ const TRIP_SELECT = Prisma.sql`
 
 export type TripListRow = TripRow & { total: number };
 
+/** Editable projection of one trip (powers the edit dialog) */
+export type TripEditRow = {
+  id: string;
+  driver_id: string;
+  driver_name: string | null;
+  trip_date: string;
+  operation: string;
+  load_no: string;
+  from_code: string | null;
+  to_code: string | null;
+  miles: string;
+  fuel_gallons: string;
+  pay_amount: string;
+  notes: string | null;
+};
+
+export async function getTripById(id: string): Promise<TripEditRow | null> {
+  if (!/^\d+$/.test(id)) return null;
+  const rows = await prisma.$queryRaw<TripEditRow[]>`
+    SELECT t.id::text, t.driver_id::text, t.driver_name,
+           to_char(t.trip_date, 'YYYY-MM-DD') AS trip_date,
+           t.operation::text AS operation, t.load_no,
+           f.code AS from_code, o.code AS to_code,
+           t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.notes
+    FROM pay.trips t
+    LEFT JOIN ops.locations f ON f.id = t.from_location_id
+    LEFT JOIN ops.locations o ON o.id = t.to_location_id
+    WHERE t.id = ${id}::bigint
+  `;
+  return rows[0] ?? null;
+}
+
 /** Trip ledger: filter by date range, drivers, operation, keyword; paginated, each row carries window total */
 export async function listTrips(filter: {
   driverIds?: string[];
