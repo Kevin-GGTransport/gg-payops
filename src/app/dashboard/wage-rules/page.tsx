@@ -14,15 +14,11 @@ import { firstValue, formField, type SearchParams } from "@/lib/search-params";
 import { todayIso } from "@/lib/format";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeOperationOptions } from "@/lib/queries/operations";
-import {
-  amazonWarehouseRows,
-  wageRuleVersionsList,
-  wageRuleVersionDetail
-} from "@/lib/queries/wage-rules";
+import { activeLocationOptions } from "@/lib/queries/locations";
+import { wageRuleVersionsList, wageRuleVersionDetail } from "@/lib/queries/wage-rules";
 import { createVersion, deleteVersion } from "./actions";
 import { WageRulesTable } from "./wage-rules-table";
 import { RulesEditor } from "./rules-editor";
-import { WarehouseEditor } from "./warehouse-editor";
 
 export const metadata: Metadata = { title: "工资规则 · G&G PayOps" };
 
@@ -38,11 +34,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   tiers_not_50_step: "首档之后档位必须是 50 的倍数且递增（50、100、150…）。",
   bad_tier_miles: "档位起算里程必须是 ≥ 1 的整数。",
   bad_tier_amount: "档位金额必须 ≥ 0。",
-  bad_postal: "特例邮编必须是 5 位数字，且两端不能相同。",
-  bad_special_amount: "特例单程价必须 ≥ 0。",
-  bad_price_unit: "价格规则的计价单位无效。",
+  bad_price_unit: "价格规则的计价类型无效。",
   bad_price_driver: "价格规则的适用司机无效。",
-  bad_price_class: "价格规则的起点/终点类别无效。",
+  bad_price_location: "价格规则的起点/终点无效。",
   bad_price_amount: "价格规则金额必须 ≥ 0。",
   locked: "该版本已生效，不可删除。",
   bad_source: "复制源版本不存在。"
@@ -62,11 +56,11 @@ export default async function WageRulesPage({
   const saved = firstValue(sp.saved) === "1";
   const today = todayIso();
 
-  const [versions, drivers, operations, warehouses] = await Promise.all([
+  const [versions, drivers, operations, locations] = await Promise.all([
     wageRuleVersionsList(),
     activeDriverOptions(),
     activeOperationOptions(),
-    amazonWarehouseRows()
+    activeLocationOptions()
   ]);
   // Default open: the version governing today (latest effective), else newest —
   // the editor always lands on the rules currently in force
@@ -89,7 +83,7 @@ export default async function WageRulesPage({
     <>
       <PageHeader
         title="工资规则"
-        description="工资计算管理：价格规则（按趟/按往返/按天，可指定司机）、里程档位、特例邮编对、仓库标准价。改价保存即从今天生效，历史版本只读留档。"
+        description="定价就一张规则表：适用司机 × 起点 → 终点 × 操作 × 类型（按趟/按往返/按天）× 司机价 × 车主价。改价保存即从今天生效，无命中的行程按里程档兜底。"
         actions={
           createSourceId ? (
             <Link
@@ -147,18 +141,13 @@ export default async function WageRulesPage({
               version={detail}
               drivers={drivers}
               operations={operations}
+              locations={locations}
               locked={locked}
               today={today}
             />
           </LedgerPanel>
         </section>
       )}
-
-      <section aria-label="仓库标准价" className="mb-4">
-        <LedgerPanel label={<b className="text-[15px] font-bold tracking-normal">仓库标准价 · Amazon</b>}>
-          <WarehouseEditor warehouses={warehouses} />
-        </LedgerPanel>
-      </section>
 
       <section aria-label="版本历史">
         <LedgerPanel label={<b className="text-[15px] font-bold tracking-normal">版本历史（只读留档）</b>}>
@@ -176,7 +165,7 @@ export default async function WageRulesPage({
           <div className="grid gap-4 px-5 py-4">
             <FormError message={errorMessage} />
             <p className="text-xs text-muted-foreground">
-              复制当前生效版本的规则（价格规则、档位、乘数、特例），到指定日期自动接替生效。临时调价直接在上面的编辑器里改并保存即可。
+              复制当前生效版本的规则（价格规则与里程档），到指定日期自动接替生效。临时调价直接在上面的编辑器里改并保存即可。
             </p>
             <FormGrid>
               <TextField

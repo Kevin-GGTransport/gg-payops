@@ -12,7 +12,6 @@ export type WageRuleVersionSummary = {
   tier_count: number;
   min_amount: string;
   max_amount: string;
-  special_count: number;
   price_rule_count: number;
   status: string;
   notes: string | null;
@@ -26,8 +25,6 @@ export async function wageRuleVersionsList() {
            count(t.id)::int AS tier_count,
            coalesce(min(t.amount), 0)::text AS min_amount,
            coalesce(max(t.amount), 0)::text AS max_amount,
-           (SELECT count(*)::int FROM pay.wage_rule_special_routes r
-             WHERE r.version_id = v.id) AS special_count,
            (SELECT count(*)::int FROM pay.wage_rule_prices p
              WHERE p.version_id = v.id) AS price_rule_count,
            v.status, v.notes
@@ -38,57 +35,60 @@ export async function wageRuleVersionsList() {
   `;
 }
 
-/** Flexible price rules of one version, insertion order */
-export async function wageVersionPriceRules(versionId: string): Promise<WagePriceRule[]> {
-  const rows = await prisma.$queryRaw<
-    Array<{
-      id: string;
-      driver_id: string | null;
-      unit: string;
-      from_class: string | null;
-      to_class: string | null;
-      operation: string | null;
-      label: string | null;
-      driver_amount: string;
-      owner_amount: string | null;
-    }>
-  >`
-    SELECT id::text, driver_id::text AS driver_id, unit, from_class, to_class,
-           operation, label, driver_amount::text, owner_amount::text
-    FROM pay.wage_rule_prices WHERE version_id = ${versionId}::bigint ORDER BY id
-  `;
-  return rows.map(row => ({
+/** Shape of one price rule row with endpoint codes for display */
+export type WagePriceRuleRow = WagePriceRule & {
+  from_code: string | null;
+  to_code: string | null;
+};
+
+type PriceRuleRaw = {
+  version_id: string;
+  id: string;
+  driver_id: string | null;
+  unit: string;
+  from_location_id: string | null;
+  to_location_id: string | null;
+  from_code: string | null;
+  to_code: string | null;
+  operation: string | null;
+  label: string | null;
+  driver_amount: string;
+  owner_amount: string | null;
+};
+
+function mapPriceRule(row: PriceRuleRaw): WagePriceRuleRow {
+  return {
     id: row.id,
     driver_id: row.driver_id,
     unit: row.unit as WagePriceRule["unit"],
-    from_class: row.from_class,
-    to_class: row.to_class,
+    from_location_id: row.from_location_id,
+    to_location_id: row.to_location_id,
+    from_code: row.from_code,
+    to_code: row.to_code,
     operation: row.operation,
     label: row.label,
     driver_amount: Number(row.driver_amount),
     owner_amount: row.owner_amount === null ? null : Number(row.owner_amount)
-  }));
+  };
 }
 
-/** Amazon warehouse dictionary rows for the wage console (prices + A/B class) */
-export async function amazonWarehouseRows() {
-  return prisma.$queryRaw<
-    Array<{
-      id: string;
-      code: string;
-      amazon_class: "A" | "B" | null;
-      standard_pay_amount: string;
-    }>
-  >`
-    SELECT id::text, code, amazon_class::text AS amazon_class,
-           standard_pay_amount::text
-    FROM ops.locations
-    WHERE location_type = 'AMAZON' AND status = 'ACTIVE'
-    ORDER BY code
+/** Flexible price rules of one version, insertion order */
+export async function wageVersionPriceRules(versionId: string): Promise<WagePriceRuleRow[]> {
+  const rows = await prisma.$queryRaw<PriceRuleRaw[]>`
+    SELECT p.id::text, p.driver_id::text AS driver_id, p.unit,
+           p.from_location_id::text AS from_location_id,
+           p.to_location_id::text AS to_location_id,
+           f.code AS from_code, t.code AS to_code,
+           p.operation, p.label, p.driver_amount::text, p.owner_amount::text
+    FROM pay.wage_rule_prices p
+    LEFT JOIN ops.locations f ON f.id = p.from_location_id
+    LEFT JOIN ops.locations t ON t.id = p.to_location_id
+    WHERE p.version_id = ${versionId}::bigint ORDER BY p.id
   `;
+  return rows.map(mapPriceRule);
 }
 
-/** One version's full data (params + tiers + specials + price rules), for detail/edit views */
+/** One version's full data (params + tiers + price rules), for detail/edit views */
 export async function wageRuleVersionDetail(id: string) {
   const versions = await prisma.$queryRaw<
     Array<{
@@ -109,20 +109,14 @@ export async function wageRuleVersionDetail(id: string) {
   `;
   const version = versions[0];
   if (!version) return null;
-  const [tiers, special_routes, price_rules] = await Promise.all([
+  const [tiers, price_rules] = await Promise.all([
     prisma.$queryRaw<Array<{ miles_from: number; amount: string }>>`
       SELECT miles_from, amount::text FROM pay.wage_rule_tiers
       WHERE version_id = ${id}::bigint ORDER BY miles_from
     `,
-    prisma.$queryRaw<
-      Array<{ from_postal: string; to_postal: string; one_way_amount: string; note: string | null }>
-    >`
-      SELECT from_postal, to_postal, one_way_amount::text, note
-      FROM pay.wage_rule_special_routes WHERE version_id = ${id}::bigint ORDER BY id
-    `,
     wageVersionPriceRules(id)
   ]);
-  return { ...version, tiers, special_routes, price_rules };
+  return { ...version, tiers, price_rules };
 }
 
 export type WageRuleVersionDetail = NonNullable<Awaited<ReturnType<typeof wageRuleVersionDetail>>>;
@@ -145,35 +139,21 @@ export async function activeWageRuleVersions(): Promise<WageRuleData[]> {
     ORDER BY effective_from
   `;
   if (versions.length === 0) return [];
-  const [tiers, specials, priceRules] = await Promise.all([
+  const [tiers, priceRules] = await Promise.all([
     prisma.$queryRaw<Array<{ version_id: string; miles_from: number; amount: string }>>`
       SELECT version_id::text, miles_from, amount::text
       FROM pay.wage_rule_tiers ORDER BY miles_from
     `,
-    prisma.$queryRaw<
-      Array<{ version_id: string; from_postal: string; to_postal: string; one_way_amount: string }>
-    >`
-      SELECT version_id::text, from_postal, to_postal, one_way_amount::text
-      FROM pay.wage_rule_special_routes ORDER BY id
-    `,
-    prisma.$queryRaw<
-      Array<{
-        version_id: string;
-        id: string;
-        driver_id: string | null;
-        unit: string;
-        from_class: string | null;
-        to_class: string | null;
-        operation: string | null;
-        label: string | null;
-        driver_amount: string;
-        owner_amount: string | null;
-      }>
-    >`
-      SELECT version_id::text, id::text, driver_id::text AS driver_id, unit,
-             from_class, to_class, operation, label,
-             driver_amount::text, owner_amount::text
-      FROM pay.wage_rule_prices ORDER BY id
+    prisma.$queryRaw<PriceRuleRaw[]>`
+      SELECT p.version_id::text, p.id::text, p.driver_id::text AS driver_id, p.unit,
+             p.from_location_id::text AS from_location_id,
+             p.to_location_id::text AS to_location_id,
+             f.code AS from_code, t.code AS to_code,
+             p.operation, p.label, p.driver_amount::text, p.owner_amount::text
+      FROM pay.wage_rule_prices p
+      LEFT JOIN ops.locations f ON f.id = p.from_location_id
+      LEFT JOIN ops.locations t ON t.id = p.to_location_id
+      ORDER BY p.id
     `
   ]);
   return versions.map(version => ({
@@ -186,21 +166,14 @@ export async function activeWageRuleVersions(): Promise<WageRuleData[]> {
     tiers: tiers
       .filter(tier => tier.version_id === version.id)
       .map(tier => ({ miles_from: tier.miles_from, amount: Number(tier.amount) })),
-    special_routes: specials
-      .filter(special => special.version_id === version.id)
-      .map(special => ({
-        from_postal: special.from_postal,
-        to_postal: special.to_postal,
-        one_way_amount: Number(special.one_way_amount)
-      })),
     price_rules: priceRules
       .filter(rule => rule.version_id === version.id)
       .map(rule => ({
         id: rule.id,
         driver_id: rule.driver_id,
         unit: rule.unit as WagePriceRule["unit"],
-        from_class: rule.from_class,
-        to_class: rule.to_class,
+        from_location_id: rule.from_location_id,
+        to_location_id: rule.to_location_id,
         operation: rule.operation,
         label: rule.label,
         driver_amount: Number(rule.driver_amount),

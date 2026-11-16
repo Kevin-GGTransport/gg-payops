@@ -14,8 +14,6 @@ export type LocationRow = {
   postal_code: string | null;
   latitude: string | null;
   longitude: string | null;
-  standard_pay_amount: string;
-  amazon_class: "A" | "B" | null;
   status: RecordStatus;
 };
 
@@ -32,7 +30,6 @@ export async function listLocations(filter: { type: LocationType | "all"; q: str
     SELECT l.id::text, l.code, l.name, l.location_type::text AS location_type,
            l.address_line, l.city, l.state_code, l.postal_code,
            l.latitude::text AS latitude, l.longitude::text AS longitude,
-           l.standard_pay_amount::text, l.amazon_class::text AS amazon_class,
            l.status::text AS status
     FROM ops.locations l
     WHERE 1 = 1 ${typeClause} ${qClause}
@@ -45,7 +42,6 @@ export async function getLocationById(id: string) {
     SELECT l.id::text, l.code, l.name, l.location_type::text AS location_type,
            l.address_line, l.city, l.state_code, l.postal_code,
            l.latitude::text AS latitude, l.longitude::text AS longitude,
-           l.standard_pay_amount::text, l.amazon_class::text AS amazon_class,
            l.status::text AS status
     FROM ops.locations l WHERE l.id = ${id}::bigint LIMIT 1
   `;
@@ -81,23 +77,18 @@ export async function activeLocationOptions() {
       city: string | null;
       state_code: string | null;
       postal_code: string | null;
-      standard_pay_amount: string;
-      amazon_class: "A" | "B" | null;
     }>
   >`
     SELECT id::text, code, name, location_type::text AS location_type,
-           address_line, city, state_code, postal_code, standard_pay_amount::text,
-           amazon_class::text AS amazon_class
+           address_line, city, state_code, postal_code
     FROM ops.locations
     WHERE status = 'ACTIVE'
     ORDER BY CASE location_type WHEN 'BASE' THEN 1 WHEN 'AMAZON' THEN 2 ELSE 3 END, code
   `;
-  return rows.map(({ location_type, address_line, city, state_code, postal_code, standard_pay_amount, amazon_class, ...rest }) => ({
+  return rows.map(({ location_type, address_line, city, state_code, postal_code, ...rest }) => ({
     ...rest,
     postal_code,
     location_type: location_type as LocationType,
-    standard_pay_amount: Number(standard_pay_amount),
-    amazon_class,
     address: fullAddress({ address_line, city, state_code, postal_code }) || null
   }));
 }

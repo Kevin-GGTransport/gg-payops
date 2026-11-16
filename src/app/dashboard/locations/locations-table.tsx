@@ -40,27 +40,8 @@ export function LocationsTable({
     {
       id: "type",
       header: "类型",
-      size: 110,
-      cell: ({ row }) => (
-        <>
-          <LocationTypeBadge type={row.original.location_type} />
-          {row.original.location_type === "AMAZON" && row.original.amazon_class && (
-            <>
-              {" "}
-              <span className="inline-flex items-center rounded-[3px] border border-route/30 bg-route/10 px-1.5 py-px text-[11px] font-semibold leading-4 text-route">
-                {row.original.amazon_class}类
-              </span>
-            </>
-          )}
-        </>
-      )
-    },
-    {
-      id: "pay",
-      header: "基准金额",
-      size: 110,
-      meta: { headerClass: "num", cellClass: "num" },
-      cell: ({ row }) => `$${Number(row.original.standard_pay_amount).toFixed(2)}`
+      size: 96,
+      cell: ({ row }) => <LocationTypeBadge type={row.original.location_type} />
     },
     {
       id: "status",

@@ -3,14 +3,14 @@ import Link from "next/link";
 import { ModalShell } from "@/components/modal-shell";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel } from "@/components/ledger";
-import { SubmitButton, FormError } from "@/components/form-fields";
+import { FormGrid, TextField, SubmitButton, FormError } from "@/components/form-fields";
+import { ComboboxField } from "@/components/combobox-field";
 import { MapPicker } from "@/components/map-picker";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
 import { LOCATION_TYPE_LABELS, type LocationType } from "@/lib/labels";
 import { listLocations, getLocationById, locationTypeCounts } from "@/lib/queries/locations";
 import { saveLocation } from "./actions";
-import { LocationFormFields } from "./location-form-fields";
 import { LocationsTable } from "./locations-table";
 
 export const metadata: Metadata = { title: "位置管理 · G&G PayOps" };
@@ -21,7 +21,6 @@ const ERROR_MESSAGES: Record<string, string> = {
   missing_code: "请填写位置代码。",
   missing_name: "请填写位置名称。",
   missing_type: "请选择位置类型。",
-  bad_pay: "基准金额必须是大于等于 0 的数字。",
   bad_coords: "地图坐标无效，请重新选点或清空坐标。",
   bad_state: "州代码不在系统州表中，请检查州一栏。",
   dup_code: "这个位置代码已存在。"
@@ -55,8 +54,6 @@ export default async function LocationsPage({
     code: formField(sp, "code", editing?.code),
     name: formField(sp, "name", editing?.name),
     type: VALID_TYPES.includes(typeValue as LocationType) ? typeValue : "AMAZON",
-    pay: formField(sp, "standard_pay_amount", editing?.standard_pay_amount ?? "0"),
-    amazonClass: formField(sp, "amazon_class", editing?.amazon_class ?? ""),
     addressLine: formField(sp, "address_line", editing?.address_line),
     city: formField(sp, "city", editing?.city),
     stateCode: formField(sp, "state_code", editing?.state_code),
@@ -118,7 +115,23 @@ export default async function LocationsPage({
         <form action={saveLocation} aria-label="位置登记卡">
           <input type="hidden" name="id" value={editing?.id ?? ""} />
           <FormError message={errorCode ? ERROR_MESSAGES[errorCode] : undefined} />
-          <LocationFormFields values={values} />
+          <FormGrid>
+            <TextField label="代码" name="code" required placeholder="如 ONT8" defaultValue={values.code} maxLength={16} />
+            <TextField label="名称" name="name" required placeholder="如 Ontario 亚马逊仓" defaultValue={values.name} maxLength={120} />
+            <ComboboxField
+              label="类型"
+              name="location_type"
+              defaultValue={values.type}
+              placeholder="请选择类型"
+              clearable={false}
+              searchable={false}
+              options={VALID_TYPES.map(t => ({ value: t, label: LOCATION_TYPE_LABELS[t] }))}
+            />
+            <TextField label="街道地址" name="address_line" placeholder="如 25503 Industrial Blvd" defaultValue={values.addressLine} maxLength={255} />
+            <TextField label="城市" name="city" placeholder="如 Hayward" defaultValue={values.city} maxLength={80} />
+            <TextField label="州" name="state_code" placeholder="如 CA" defaultValue={values.stateCode} maxLength={2} />
+            <TextField label="邮编" name="postal_code" placeholder="如 94545" defaultValue={values.postalCode} maxLength={16} />
+          </FormGrid>
           {/* Map picker: search or click to pin, fills the address fields above */}
           <MapPicker
             initialLat={editing?.latitude != null ? Number(editing.latitude) : null}

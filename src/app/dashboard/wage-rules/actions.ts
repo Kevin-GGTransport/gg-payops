@@ -11,17 +11,11 @@ function str(formData: FormData, key: string) {
 }
 
 type TierInput = { miles_from: number; amount: number };
-type SpecialInput = {
-  from_postal: string;
-  to_postal: string;
-  one_way_amount: number;
-  note: string | null;
-};
 type PriceRuleInput = {
   driver_id: string | null;
   unit: string;
-  from_class: string | null;
-  to_class: string | null;
+  from_location_id: string | null;
+  to_location_id: string | null;
   operation: string | null;
   label: string | null;
   driver_amount: number;
@@ -29,7 +23,6 @@ type PriceRuleInput = {
 };
 
 const PRICE_UNITS = new Set(["LEG", "ROUND_TRIP", "DAY"]);
-const PRICE_CLASSES = new Set(["STK", "HW", "SHIPPER", "AMAZON_A", "AMAZON_B"]);
 
 /** Positional tier rows; fully blank rows are skipped (mirrors entry sheet) */
 function parseTiers(formData: FormData): TierInput[] {
@@ -44,24 +37,7 @@ function parseTiers(formData: FormData): TierInput[] {
   return tiers;
 }
 
-function parseSpecials(formData: FormData): SpecialInput[] {
-  const count = Number(str(formData, "special_count") || "0");
-  const specials: SpecialInput[] = [];
-  for (let i = 0; i < count; i++) {
-    const fromPostal = str(formData, `special_${i}_from_postal`);
-    const toPostal = str(formData, `special_${i}_to_postal`);
-    if (!fromPostal && !toPostal) continue;
-    specials.push({
-      from_postal: fromPostal,
-      to_postal: toPostal,
-      one_way_amount: Number(str(formData, `special_${i}_amount`)),
-      note: str(formData, `special_${i}_note`) || null
-    });
-  }
-  return specials;
-}
-
-/** Flexible price-rule rows; fully blank rows are skipped */
+/** Price-rule rows; fully blank rows are skipped */
 function parsePriceRules(formData: FormData): PriceRuleInput[] {
   const count = Number(str(formData, "price_count") || "0");
   const rules: PriceRuleInput[] = [];
@@ -75,8 +51,8 @@ function parsePriceRules(formData: FormData): PriceRuleInput[] {
     rules.push({
       driver_id: driverId || null,
       unit,
-      from_class: str(formData, `${p}from_class`) || null,
-      to_class: str(formData, `${p}to_class`) || null,
+      from_location_id: str(formData, `${p}from_location_id`) || null,
+      to_location_id: str(formData, `${p}to_location_id`) || null,
       operation: str(formData, `${p}operation`) || null,
       label: str(formData, `${p}label`) || null,
       driver_amount: Number(amountRaw),
@@ -94,7 +70,6 @@ function validateVersion(input: {
   bobtailMultiplier: number;
   overageIncrement: number;
   tiers: TierInput[];
-  specials: SpecialInput[];
   prices: PriceRuleInput[];
 }): string | null {
   if (!input.name) return "missing_name";
@@ -114,21 +89,14 @@ function validateVersion(input: {
     const from = sorted[i].miles_from;
     if (from % 50 !== 0 || from <= sorted[i - 1].miles_from) return "tiers_not_50_step";
   }
-  for (const special of input.specials) {
-    if (!/^\d{5}$/.test(special.from_postal) || !/^\d{5}$/.test(special.to_postal)) {
-      return "bad_postal";
-    }
-    if (special.from_postal === special.to_postal) return "bad_postal";
-    if (!(special.one_way_amount >= 0)) return "bad_special_amount";
-  }
   for (const rule of input.prices) {
     if (!PRICE_UNITS.has(rule.unit)) return "bad_price_unit";
     if (rule.driver_id !== null && !/^\d+$/.test(rule.driver_id)) return "bad_price_driver";
     if (
-      (rule.from_class !== null && !PRICE_CLASSES.has(rule.from_class)) ||
-      (rule.to_class !== null && !PRICE_CLASSES.has(rule.to_class))
+      (rule.from_location_id !== null && !/^\d+$/.test(rule.from_location_id)) ||
+      (rule.to_location_id !== null && !/^\d+$/.test(rule.to_location_id))
     ) {
-      return "bad_price_class";
+      return "bad_price_location";
     }
     if (!(rule.driver_amount >= 0)) return "bad_price_amount";
     if (rule.owner_amount !== null && !(rule.owner_amount >= 0)) return "bad_price_amount";
@@ -144,7 +112,7 @@ async function effectiveDateTaken(effectiveFrom: string, exceptId: string) {
   return rows.length > 0;
 }
 
-/** Replace a version's whole child payload (params + tiers + specials + prices) */
+/** Replace a version's whole child payload (params + tiers + price rules) */
 async function writeVersionChildren(
   id: string,
   input: {
@@ -154,7 +122,6 @@ async function writeVersionChildren(
     bobtailMultiplier: number;
     overageIncrement: number;
     tiers: TierInput[];
-    specials: SpecialInput[];
     prices: PriceRuleInput[];
   }
 ) {
@@ -173,20 +140,13 @@ async function writeVersionChildren(
         VALUES (${id}::bigint, ${tier.miles_from}, ${tier.amount})
       `
     ),
-    prisma.$executeRaw`DELETE FROM pay.wage_rule_special_routes WHERE version_id = ${id}::bigint`,
-    ...input.specials.map(special =>
-      prisma.$executeRaw`
-        INSERT INTO pay.wage_rule_special_routes(version_id, from_postal, to_postal, one_way_amount, note)
-        VALUES (${id}::bigint, ${special.from_postal}, ${special.to_postal}, ${special.one_way_amount}, ${special.note})
-      `
-    ),
     prisma.$executeRaw`DELETE FROM pay.wage_rule_prices WHERE version_id = ${id}::bigint`,
     ...input.prices.map(rule =>
       prisma.$executeRaw`
-        INSERT INTO pay.wage_rule_prices(version_id, driver_id, unit, from_class, to_class,
+        INSERT INTO pay.wage_rule_prices(version_id, driver_id, unit, from_location_id, to_location_id,
                                          operation, label, driver_amount, owner_amount)
-        VALUES (${id}::bigint, ${rule.driver_id}::bigint, ${rule.unit}, ${rule.from_class},
-                ${rule.to_class}, ${rule.operation}, ${rule.label}, ${rule.driver_amount},
+        VALUES (${id}::bigint, ${rule.driver_id}::bigint, ${rule.unit}, ${rule.from_location_id}::bigint,
+                ${rule.to_location_id}::bigint, ${rule.operation}, ${rule.label}, ${rule.driver_amount},
                 ${rule.owner_amount})
       `
     )
@@ -233,14 +193,9 @@ export async function saveVersion(formData: FormData) {
       WHERE version_id = ${id}::bigint
     `;
     await prisma.$executeRaw`
-      INSERT INTO pay.wage_rule_special_routes(version_id, from_postal, to_postal, one_way_amount, note)
-      SELECT ${targetId}::bigint, from_postal, to_postal, one_way_amount, note
-      FROM pay.wage_rule_special_routes WHERE version_id = ${id}::bigint
-    `;
-    await prisma.$executeRaw`
-      INSERT INTO pay.wage_rule_prices(version_id, driver_id, unit, from_class, to_class,
+      INSERT INTO pay.wage_rule_prices(version_id, driver_id, unit, from_location_id, to_location_id,
                                        operation, label, driver_amount, owner_amount)
-      SELECT ${targetId}::bigint, driver_id, unit, from_class, to_class, operation, label,
+      SELECT ${targetId}::bigint, driver_id, unit, from_location_id, to_location_id, operation, label,
              driver_amount, owner_amount
       FROM pay.wage_rule_prices WHERE version_id = ${id}::bigint
     `;
@@ -252,11 +207,10 @@ export async function saveVersion(formData: FormData) {
   const bobtailMultiplier = Number(str(formData, "bobtail_multiplier"));
   const overageIncrement = Number(str(formData, "overage_increment"));
   const tiers = parseTiers(formData);
-  const specials = parseSpecials(formData);
   const prices = parsePriceRules(formData);
 
   const error = validateVersion({
-    name, effectiveFrom, ownerMultiplier, bobtailMultiplier, overageIncrement, tiers, specials, prices
+    name, effectiveFrom, ownerMultiplier, bobtailMultiplier, overageIncrement, tiers, prices
   });
   if (error) redirect(back(error));
   // The cloned target is born today; hand-edited dates may not slip into the past
@@ -264,7 +218,7 @@ export async function saveVersion(formData: FormData) {
   if (await effectiveDateTaken(effectiveFrom, targetId)) redirect(back("dup_date"));
 
   await writeVersionChildren(targetId, {
-    name, effectiveFrom, ownerMultiplier, bobtailMultiplier, overageIncrement, tiers, specials, prices
+    name, effectiveFrom, ownerMultiplier, bobtailMultiplier, overageIncrement, tiers, prices
   });
 
   revalidatePath("/dashboard/wage-rules");
@@ -309,14 +263,9 @@ export async function createVersion(formData: FormData) {
     WHERE version_id = ${sourceId}::bigint
   `;
   await prisma.$executeRaw`
-    INSERT INTO pay.wage_rule_special_routes(version_id, from_postal, to_postal, one_way_amount, note)
-    SELECT ${newId}::bigint, from_postal, to_postal, one_way_amount, note
-    FROM pay.wage_rule_special_routes WHERE version_id = ${sourceId}::bigint
-  `;
-  await prisma.$executeRaw`
-    INSERT INTO pay.wage_rule_prices(version_id, driver_id, unit, from_class, to_class,
+    INSERT INTO pay.wage_rule_prices(version_id, driver_id, unit, from_location_id, to_location_id,
                                      operation, label, driver_amount, owner_amount)
-    SELECT ${newId}::bigint, driver_id, unit, from_class, to_class, operation, label,
+    SELECT ${newId}::bigint, driver_id, unit, from_location_id, to_location_id, operation, label,
            driver_amount, owner_amount
     FROM pay.wage_rule_prices WHERE version_id = ${sourceId}::bigint
   `;
@@ -324,35 +273,6 @@ export async function createVersion(formData: FormData) {
   revalidatePath("/dashboard/wage-rules");
   revalidatePath("/dashboard");
   redirect(`/dashboard/wage-rules?v=${newId}`);
-}
-
-/**
- * Amazon warehouse dictionary prices (round-trip standard pay + A/B class).
- * These are dictionary values, not versioned pricing - they write straight
- * to ops.locations.
- */
-export async function saveWarehousePrices(formData: FormData) {
-  await requireUser();
-
-  const count = Number(str(formData, "warehouse_count") || "0");
-  for (let i = 0; i < count; i++) {
-    const id = str(formData, `warehouse_${i}_id`);
-    if (!id || !/^\d+$/.test(id)) continue;
-    const amazonClass = str(formData, `warehouse_${i}_amazon_class`);
-    const payRaw = str(formData, `warehouse_${i}_standard_pay`);
-    const pay = Number(payRaw);
-    await prisma.$executeRaw`
-      UPDATE ops.locations SET
-        amazon_class = ${amazonClass === "A" || amazonClass === "B" ? amazonClass : null},
-        standard_pay_amount = ${Number.isFinite(pay) && pay >= 0 ? pay : 0},
-        updated_at = now()
-      WHERE id = ${id}::bigint AND location_type = 'AMAZON'
-    `;
-  }
-
-  revalidatePath("/dashboard/wage-rules");
-  revalidatePath("/dashboard");
-  redirect("/dashboard/wage-rules?warehouses=1");
 }
 
 /** Pending versions only; effective versions are locked forever */

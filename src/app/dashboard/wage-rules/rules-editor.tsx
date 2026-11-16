@@ -4,18 +4,19 @@ import * as React from "react";
 import { PlusIcon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { ComboboxField } from "@/components/combobox-field";
 import { DateField } from "@/components/date-field";
 import { FormGrid, NumberField, TextField } from "@/components/form-fields";
+import type { LocationOption } from "@/components/location-picker";
 import type { WageRuleVersionDetail } from "@/lib/queries/wage-rules";
 import { saveVersion } from "./actions";
 
 type TierRow = { miles_from: string; amount: string };
-type SpecialRow = { from_postal: string; to_postal: string; amount: string; note: string };
 type PriceRow = {
   driver_id: string;
   unit: string;
-  from_class: string;
-  to_class: string;
+  from_location_id: string;
+  to_location_id: string;
   operation: string;
   label: string;
   driver_amount: string;
@@ -24,15 +25,6 @@ type PriceRow = {
 
 type DriverOption = { id: string; full_name: string };
 type OperationOption = { code: string; label: string };
-
-/** Matcher classes a price rule can pin (empty = any side) */
-export const PRICE_CLASSES = [
-  { value: "STK", label: "STK" },
-  { value: "HW", label: "HW" },
-  { value: "SHIPPER", label: "SHIPPER" },
-  { value: "AMAZON_A", label: "A类仓" },
-  { value: "AMAZON_B", label: "B类仓" }
-] as const;
 
 const PRICE_UNITS = [
   { value: "LEG", label: "按趟" },
@@ -45,7 +37,7 @@ const cellInput =
 const cellSelect =
   "h-8 border-0 bg-transparent px-1.5 shadow-none rounded-none text-[13px] focus-visible:ring-1 cursor-pointer";
 
-/** Compact styled native select: five dropdowns per rule row stay light */
+/** Compact styled native select: the per-row dropdowns stay light */
 function CellSelect({
   name,
   value,
@@ -77,9 +69,9 @@ function CellSelect({
 }
 
 /**
- * Whole-ruleset editor for one wage-rule version: params, mileage tiers,
- * special postal pairs and the flexible price-rule table (per-driver or
- * global; per-leg / per-round-trip / per-day). Positional FormData, same
+ * Whole-ruleset editor for one wage-rule version: the price-rule table is the
+ * ONLY pricing primitive (适用司机 x 起点/终点位置 x 操作 x 计价单位 x 两档价),
+ * with the mileage tiers as the no-match fallback. Positional FormData, same
  * convention as the entry sheet. Saving a version effective before today
  * auto-clones it to a today-effective version server-side (saveVersion).
  */
@@ -87,12 +79,14 @@ export function RulesEditor({
   version,
   drivers,
   operations,
+  locations,
   locked,
   today
 }: {
   version: WageRuleVersionDetail;
   drivers: DriverOption[];
   operations: OperationOption[];
+  locations: LocationOption[];
   /** Version already effective before today: saving creates today's clone */
   locked: boolean;
   today: string;
@@ -103,20 +97,12 @@ export function RulesEditor({
       amount: Number(t.amount).toFixed(2)
     }))
   );
-  const [specials, setSpecials] = React.useState<SpecialRow[]>(
-    version.special_routes.map(s => ({
-      from_postal: s.from_postal,
-      to_postal: s.to_postal,
-      amount: Number(s.one_way_amount).toFixed(2),
-      note: s.note ?? ""
-    }))
-  );
   const [prices, setPrices] = React.useState<PriceRow[]>(
     version.price_rules.map(rule => ({
       driver_id: rule.driver_id ?? "",
       unit: rule.unit,
-      from_class: rule.from_class ?? "",
-      to_class: rule.to_class ?? "",
+      from_location_id: rule.from_location_id ?? "",
+      to_location_id: rule.to_location_id ?? "",
       operation: rule.operation ?? "",
       label: rule.label ?? "",
       driver_amount: rule.driver_amount.toFixed(2),
@@ -129,9 +115,6 @@ export function RulesEditor({
   const driverOptions = React.useMemo(
     () => [{ value: "", label: "所有人" }, ...drivers.map(d => ({ value: d.id, label: d.full_name }))],
     [drivers]
-  );
-  const visiblePrices = prices.map((row, i) => ({ row, i })).filter(
-    ({ row }) => !driverFilter || row.driver_id === driverFilter || row.driver_id === ""
   );
 
   const updatePrice = (i: number, patch: Partial<PriceRow>) =>
@@ -153,16 +136,14 @@ export function RulesEditor({
         }
       ];
     });
-  const addSpecial = () =>
-    setSpecials(current => [...current, { from_postal: "", to_postal: "", amount: "", note: "" }]);
   const addPrice = () =>
     setPrices(current => [
       ...current,
       {
         driver_id: driverFilter,
         unit: "LEG",
-        from_class: "",
-        to_class: "",
+        from_location_id: "",
+        to_location_id: "",
         operation: "",
         label: "",
         driver_amount: "",
@@ -174,7 +155,6 @@ export function RulesEditor({
     <form id="wage-rules-edit" action={saveVersion} aria-label="工资规则编辑">
       <input type="hidden" name="id" value={version.id} />
       <input type="hidden" name="tier_count" value={tiers.length} />
-      <input type="hidden" name="special_count" value={specials.length} />
       <input type="hidden" name="price_count" value={prices.length} />
 
       <div className="grid gap-5 px-4 py-4">
@@ -229,7 +209,7 @@ export function RulesEditor({
         <div>
           <div className="mb-1.5 flex items-center justify-between">
             <p className="text-xs font-medium text-muted-foreground">
-              价格规则（按趟=终价不叠乘数；按往返/按天=录入打包建议价）
+              价格规则（按趟=终价不叠乘数；按往返/按天=录入打包建议价；都没命中走里程档）
             </p>
             <Button type="button" variant="ghost" className="h-7 px-2 text-xs" onClick={addPrice}>
               <PlusIcon className="mr-0.5 size-3.5" /> 添加价格规则
@@ -254,10 +234,10 @@ export function RulesEditor({
             <thead>
               <tr>
                 <th>适用司机</th>
-                <th>计价单位</th>
                 <th>起点</th>
                 <th>终点</th>
                 <th>操作</th>
+                <th>类型</th>
                 <th>规则名</th>
                 <th className="num">司机价 ($)</th>
                 <th className="num">车主价 ($)</th>
@@ -286,30 +266,31 @@ export function RulesEditor({
                     />
                   </td>
                   <td>
-                    <CellSelect
-                      name={`price_${i}_unit`}
-                      value={price.unit}
-                      onChange={value => updatePrice(i, { unit: value })}
-                      options={PRICE_UNITS}
-                      ariaLabel={`价格规则 ${i + 1} 计价单位`}
+                    <ComboboxField
+                      name={`price_${i}_from_location_id`}
+                      value={price.from_location_id}
+                      placeholder="任意"
+                      searchPlaceholder="搜索位置代码"
+                      mono
+                      clearable
+                      triggerClassName="h-8 w-28 text-[13px]"
+                      onValueChange={value => updatePrice(i, { from_location_id: value })}
+                      aria-label={`价格规则 ${i + 1} 起点`}
+                      options={locations.map(l => ({ value: l.id, label: l.code }))}
                     />
                   </td>
                   <td>
-                    <CellSelect
-                      name={`price_${i}_from_class`}
-                      value={price.from_class}
-                      onChange={value => updatePrice(i, { from_class: value })}
-                      options={[{ value: "", label: "任意" }, ...PRICE_CLASSES]}
-                      ariaLabel={`价格规则 ${i + 1} 起点`}
-                    />
-                  </td>
-                  <td>
-                    <CellSelect
-                      name={`price_${i}_to_class`}
-                      value={price.to_class}
-                      onChange={value => updatePrice(i, { to_class: value })}
-                      options={[{ value: "", label: "任意" }, ...PRICE_CLASSES]}
-                      ariaLabel={`价格规则 ${i + 1} 终点`}
+                    <ComboboxField
+                      name={`price_${i}_to_location_id`}
+                      value={price.to_location_id}
+                      placeholder="任意"
+                      searchPlaceholder="搜索位置代码"
+                      mono
+                      clearable
+                      triggerClassName="h-8 w-28 text-[13px]"
+                      onValueChange={value => updatePrice(i, { to_location_id: value })}
+                      aria-label={`价格规则 ${i + 1} 终点`}
+                      options={locations.map(l => ({ value: l.id, label: l.code }))}
                     />
                   </td>
                   <td>
@@ -322,6 +303,15 @@ export function RulesEditor({
                         ...operations.map(op => ({ value: op.code, label: op.code }))
                       ]}
                       ariaLabel={`价格规则 ${i + 1} 操作限定`}
+                    />
+                  </td>
+                  <td>
+                    <CellSelect
+                      name={`price_${i}_unit`}
+                      value={price.unit}
+                      onChange={value => updatePrice(i, { unit: value })}
+                      options={PRICE_UNITS}
+                      ariaLabel={`价格规则 ${i + 1} 计价类型`}
                     />
                   </td>
                   <td>
@@ -376,14 +366,7 @@ export function RulesEditor({
               {prices.length === 0 && (
                 <tr>
                   <td colSpan={9} className="empty">
-                    无价格规则；固定路线价与打包价都在这里添加
-                  </td>
-                </tr>
-              )}
-              {visiblePrices.length === 0 && prices.length > 0 && (
-                <tr>
-                  <td colSpan={9} className="empty">
-                    该司机暂无专属价格规则（只显示「所有人」与该司机名下的规则）
+                    无价格规则；所有定价都在这里添加
                   </td>
                 </tr>
               )}
@@ -394,7 +377,7 @@ export function RulesEditor({
         <div>
           <div className="mb-1.5 flex items-center justify-between">
             <p className="text-xs font-medium text-muted-foreground">
-              里程档位（司机价；首档 1、按 50 递进）
+              里程档位（兜底：无规则命中的行程按此计价；首档 1、按 50 递进）
             </p>
             <Button type="button" variant="ghost" className="h-7 px-2 text-xs" onClick={addTier}>
               <PlusIcon className="mr-0.5 size-3.5" /> 添加档位
@@ -455,108 +438,6 @@ export function RulesEditor({
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div>
-          <div className="mb-1.5 flex items-center justify-between">
-            <p className="text-xs font-medium text-muted-foreground">
-              特例路线（5 位邮编对，双向单程同价）
-            </p>
-            <Button type="button" variant="ghost" className="h-7 px-2 text-xs" onClick={addSpecial}>
-              <PlusIcon className="mr-0.5 size-3.5" /> 添加特例
-            </Button>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>邮编 A</th>
-                <th>邮编 B</th>
-                <th className="num">单程价 ($)</th>
-                <th>备注</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {specials.map((special, i) => (
-                <tr key={i}>
-                  <td>
-                    <Input
-                      name={`special_${i}_from_postal`}
-                      value={special.from_postal}
-                      onChange={e =>
-                        setSpecials(current =>
-                          current.map((s, j) => (j === i ? { ...s, from_postal: e.target.value } : s))
-                        )
-                      }
-                      maxLength={10}
-                      aria-label={`特例 ${i + 1} 邮编 A`}
-                      className={`${cellInput} w-24 font-mono`}
-                    />
-                  </td>
-                  <td>
-                    <Input
-                      name={`special_${i}_to_postal`}
-                      value={special.to_postal}
-                      onChange={e =>
-                        setSpecials(current =>
-                          current.map((s, j) => (j === i ? { ...s, to_postal: e.target.value } : s))
-                        )
-                      }
-                      maxLength={10}
-                      aria-label={`特例 ${i + 1} 邮编 B`}
-                      className={`${cellInput} w-24 font-mono`}
-                    />
-                  </td>
-                  <td>
-                    <Input
-                      type="number"
-                      name={`special_${i}_amount`}
-                      min={0}
-                      step={0.01}
-                      value={special.amount}
-                      onChange={e =>
-                        setSpecials(current =>
-                          current.map((s, j) => (j === i ? { ...s, amount: e.target.value } : s))
-                        )
-                      }
-                      aria-label={`特例 ${i + 1} 单程价`}
-                      className={`${cellInput} w-28 text-right font-mono`}
-                    />
-                  </td>
-                  <td>
-                    <Input
-                      name={`special_${i}_note`}
-                      value={special.note}
-                      onChange={e =>
-                        setSpecials(current =>
-                          current.map((s, j) => (j === i ? { ...s, note: e.target.value } : s))
-                        )
-                      }
-                      maxLength={255}
-                      aria-label={`特例 ${i + 1} 备注`}
-                      className={`${cellInput} w-52`}
-                    />
-                  </td>
-                  <td className="actions">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="h-7 px-2 text-xs text-destructive"
-                      onClick={() => setSpecials(current => current.filter((_, j) => j !== i))}
-                      aria-label={`删除特例 ${i + 1}`}
-                    >
-                      <XIcon className="size-3.5" />
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-              {specials.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="empty">无特例路线</td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
