@@ -219,7 +219,7 @@ export type DriverPeriodTripRow = {
   notes: string | null;
 };
 
-/** Payroll drill-down: every leg of one driver inside the period, by date then origin -> destination */
+/** Payroll drill-down: every leg of one driver inside the period, by date then entry order (round trips are entered consecutively) */
 export async function driverPeriodTrips(period: Period, driverId: string) {
   return prisma.$queryRaw<DriverPeriodTripRow[]>`
     SELECT t.id::text, t.driver_id::text, t.driver_name,
@@ -237,7 +237,7 @@ export async function driverPeriodTrips(period: Period, driverId: string) {
     WHERE t.driver_id = ${driverId}::bigint
       AND t.trip_date >= ${period.start}::date
       AND t.trip_date <= ${period.end}::date
-    ORDER BY t.trip_date, f.code, o.code, t.created_at
+    ORDER BY t.trip_date, t.created_at
   `;
 }
 
