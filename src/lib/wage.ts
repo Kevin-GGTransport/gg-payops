@@ -1,20 +1,23 @@
 import type { DriverType, OperationType } from "@/lib/labels";
 
 /**
- * One trip endpoint for pricing: the picked dictionary location. Free-text
- * ends resolve to null - they match no rule and fall to the mileage tiers.
+ * One trip endpoint for pricing: the picked dictionary location with its
+ * class tag. Free-text ends resolve to null - they match no rule and fall to
+ * the mileage tiers.
  */
-export type WageEndpoint = { id: string } | null;
+export type WageEndpoint = { id: string; class_tag: string | null } | null;
 
 /** Billing unit of a price rule (pay.wage_rule_prices.unit) */
 export type WagePriceUnit = "LEG" | "ROUND_TRIP" | "DAY";
 
 /**
  * One price rule (pay.wage_rule_prices) - the ONLY pricing primitive:
- * 适用司机 (NULL = everyone) x 起点/终点 (dictionary locations, unordered
- * pair, NULL side = any) x 操作 (NULL = any) x unit x driver price x owner
- * price (NULL = driver price x owner multiplier). LEG prices one leg as a
- * final price; ROUND_TRIP / DAY suggest package prices in the entry sheet.
+ * 适用司机 (NULL = everyone) x 起点/终点 (each side: a dictionary location,
+ * a class tag, or NULL = any; matched as an unordered pair) x 操作 (NULL =
+ * any) x unit x driver price x owner price (NULL = driver price x owner
+ * multiplier). LEG prices one leg as a final price; ROUND_TRIP / DAY suggest
+ * package prices in the entry sheet. Tag sides make rules follow locations:
+ * re-tag a location and every tag-keyed rule re-prices instantly.
  */
 export type WagePriceRule = {
   id: string;
@@ -22,6 +25,8 @@ export type WagePriceRule = {
   unit: WagePriceUnit;
   from_location_id: string | null;
   to_location_id: string | null;
+  from_tag: string | null;
+  to_tag: string | null;
   operation: string | null;
   label: string | null;
   driver_amount: number;
@@ -76,35 +81,42 @@ export function mileageTierWage(
 
 /**
  * Specificity score for rule ranking: driver-scoped beats global,
- * operation-constrained beats open, more pinned endpoints beat wider. Ties
- * keep insertion order (stable sort).
+ * operation-constrained beats open, a pinned location beats a tag beat any.
+ * Ties keep insertion order (stable sort).
  */
 function ruleSpecificity(rule: WagePriceRule): number {
+  const sideScore = (locationId: string | null, tag: string | null) =>
+    locationId !== null ? 2 : tag !== null ? 1 : 0;
   return (
-    (rule.driver_id !== null ? 4 : 0) +
-    (rule.operation !== null ? 2 : 0) +
-    (rule.from_location_id !== null ? 1 : 0) +
-    (rule.to_location_id !== null ? 1 : 0)
+    (rule.driver_id !== null ? 8 : 0) +
+    (rule.operation !== null ? 4 : 0) +
+    sideScore(rule.from_location_id, rule.from_tag) +
+    sideScore(rule.to_location_id, rule.to_tag)
   );
 }
 
-/** Does one endpoint pair satisfy a rule's from/to locations (unordered)? */
+/** Does one side of a rule (location id or tag, null = any) match an endpoint? */
+function sideMatches(
+  locationId: string | null,
+  tag: string | null,
+  endpoint: WageEndpoint
+): boolean {
+  if (locationId === null && tag === null) return true;
+  if (locationId !== null) return endpoint !== null && locationId === endpoint.id;
+  return endpoint !== null && tag === endpoint.class_tag;
+}
+
+/** Does one endpoint pair satisfy a rule's from/to sides (unordered)? */
 function locationsMatch(
   from: WageEndpoint,
   to: WageEndpoint,
   rule: WagePriceRule
 ): boolean {
-  if (!rule.from_location_id && !rule.to_location_id) return true;
-  const fromId = from?.id ?? null;
-  const toId = to?.id ?? null;
-  const direct = rule.from_location_id === fromId && rule.to_location_id === toId;
-  const reverse = rule.from_location_id === toId && rule.to_location_id === fromId;
-  // Single-sided rules (e.g. any -> SHIPPER) match when that side matches
-  const fromOnly =
-    rule.from_location_id !== null && rule.to_location_id === null && rule.from_location_id === fromId;
-  const toOnly =
-    rule.to_location_id !== null && rule.from_location_id === null && rule.to_location_id === toId;
-  return direct || reverse || fromOnly || toOnly;
+  const fromSide = (endpoint: WageEndpoint) =>
+    sideMatches(rule.from_location_id, rule.from_tag, endpoint);
+  const toSide = (endpoint: WageEndpoint) =>
+    sideMatches(rule.to_location_id, rule.to_tag, endpoint);
+  return (fromSide(from) && toSide(to)) || (fromSide(to) && toSide(from));
 }
 
 /**
@@ -177,27 +189,30 @@ export function pickVersion<T extends { effective_from: string }>(
  *    owner multiplier); neither multiplier stacks on a rule price;
  * 2. otherwise the mileage tier table x (OWNER ? owner_multiplier : 1) x
  *    (BOBTAIL ? bobtail_multiplier : 1), rounded to cents.
- * An unpicked driverType/operation counts as DRIVER / full price.
+ * priceAsDriver overrides the pricing identity: an owner-type driver flagged
+ * as such bills at driver prices everywhere (rule driver column, no owner
+ * multiplier). An unpicked driverType/operation counts as DRIVER / full price.
  */
 export function calcTripWage(input: {
   driverId?: string | null;
   driverType?: DriverType;
+  priceAsDriver?: boolean;
   operation?: OperationType;
   miles: number;
   from?: WageEndpoint;
   to?: WageEndpoint;
   rule: WageRuleData;
 }): number {
+  const billsAsOwner = input.driverType === "OWNER" && !input.priceAsDriver;
   const legRule = matchingLegRules({ ...input, rules: input.rule.price_rules })[0];
   if (legRule) {
-    const amount =
-      input.driverType === "OWNER"
-        ? (legRule.owner_amount ?? legRule.driver_amount * input.rule.owner_multiplier)
-        : legRule.driver_amount;
+    const amount = billsAsOwner
+      ? (legRule.owner_amount ?? legRule.driver_amount * input.rule.owner_multiplier)
+      : legRule.driver_amount;
     return roundCents(amount);
   }
   const tier = mileageTierWage(input.miles, input.rule.tiers, input.rule.overage_increment);
-  const ownerX = input.driverType === "OWNER" ? input.rule.owner_multiplier : 1;
+  const ownerX = billsAsOwner ? input.rule.owner_multiplier : 1;
   const bobtailX = input.operation === "BOBTAIL" ? input.rule.bobtail_multiplier : 1;
   return roundCents(tier * ownerX * bobtailX);
 }

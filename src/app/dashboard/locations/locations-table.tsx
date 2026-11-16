@@ -40,8 +40,20 @@ export function LocationsTable({
     {
       id: "type",
       header: "类型",
-      size: 96,
-      cell: ({ row }) => <LocationTypeBadge type={row.original.location_type} />
+      size: 110,
+      cell: ({ row }) => (
+        <>
+          <LocationTypeBadge type={row.original.location_type} />
+          {row.original.class_tag && (
+            <>
+              {" "}
+              <span className="inline-flex items-center rounded-[3px] border border-route/30 bg-route/10 px-1.5 py-px text-[11px] font-semibold leading-4 text-route">
+                #{row.original.class_tag}
+              </span>
+            </>
+          )}
+        </>
+      )
     },
     {
       id: "status",

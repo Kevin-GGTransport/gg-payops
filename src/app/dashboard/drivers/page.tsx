@@ -4,7 +4,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel } from "@/components/ledger";
 import { DriverTypeCards } from "@/components/choice-cards";
-import { FormGrid, TextField, DateField, TextareaField, SubmitButton, FormError } from "@/components/form-fields";
+import { FormGrid, TextField, DateField, TextareaField, CheckboxField, SubmitButton, FormError } from "@/components/form-fields";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
 import type { DriverType } from "@/lib/labels";
@@ -51,6 +51,10 @@ export default async function DriversPage({
   const values = {
     name: formField(sp, "full_name", editing?.full_name),
     type: formField(sp, "driver_type", editing?.driver_type) as DriverType,
+    priceAsDriver:
+      firstValue(sp.price_as_driver) !== undefined
+        ? firstValue(sp.price_as_driver) === "1"
+        : (editing?.price_as_driver ?? false),
     phone: formField(sp, "phone", editing?.phone),
     licenseNo: formField(sp, "license_no", editing?.license_no),
     licenseClass: formField(sp, "license_class", editing?.license_class),
@@ -133,6 +137,12 @@ export default async function DriversPage({
             <TextField label="驾照类型" name="license_class" placeholder="如 A" defaultValue={values.licenseClass} maxLength={32} />
             <DateField label="驾照到期日" name="license_expires_on" defaultValue={values.licenseExpiresOn} />
             <DateField label="入职日期" name="hire_date" defaultValue={values.hireDate} />
+            <CheckboxField
+              label="计价身份"
+              name="price_as_driver"
+              defaultChecked={values.priceAsDriver}
+              hint="车主按司机价计价（规则用司机价列，不乘车主系数）"
+            />
             <TextareaField label="备注" name="notes" placeholder="结算方式、车辆信息等" defaultValue={values.notes} />
           </FormGrid>
           <SubmitButton>{editing ? "保存修改" : "登记入册"}</SubmitButton>

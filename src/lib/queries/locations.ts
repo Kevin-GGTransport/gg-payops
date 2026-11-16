@@ -14,6 +14,7 @@ export type LocationRow = {
   postal_code: string | null;
   latitude: string | null;
   longitude: string | null;
+  class_tag: string | null;
   status: RecordStatus;
 };
 
@@ -30,7 +31,7 @@ export async function listLocations(filter: { type: LocationType | "all"; q: str
     SELECT l.id::text, l.code, l.name, l.location_type::text AS location_type,
            l.address_line, l.city, l.state_code, l.postal_code,
            l.latitude::text AS latitude, l.longitude::text AS longitude,
-           l.status::text AS status
+           l.class_tag, l.status::text AS status
     FROM ops.locations l
     WHERE 1 = 1 ${typeClause} ${qClause}
     ORDER BY l.status = 'ACTIVE' DESC, l.location_type, l.code
@@ -42,7 +43,7 @@ export async function getLocationById(id: string) {
     SELECT l.id::text, l.code, l.name, l.location_type::text AS location_type,
            l.address_line, l.city, l.state_code, l.postal_code,
            l.latitude::text AS latitude, l.longitude::text AS longitude,
-           l.status::text AS status
+           l.class_tag, l.status::text AS status
     FROM ops.locations l WHERE l.id = ${id}::bigint LIMIT 1
   `;
   return rows[0] ?? null;
@@ -77,18 +78,30 @@ export async function activeLocationOptions() {
       city: string | null;
       state_code: string | null;
       postal_code: string | null;
+      class_tag: string | null;
     }>
   >`
     SELECT id::text, code, name, location_type::text AS location_type,
-           address_line, city, state_code, postal_code
+           address_line, city, state_code, postal_code, class_tag
     FROM ops.locations
     WHERE status = 'ACTIVE'
     ORDER BY CASE location_type WHEN 'BASE' THEN 1 WHEN 'AMAZON' THEN 2 ELSE 3 END, code
   `;
-  return rows.map(({ location_type, address_line, city, state_code, postal_code, ...rest }) => ({
+  return rows.map(({ location_type, address_line, city, state_code, postal_code, class_tag, ...rest }) => ({
     ...rest,
     postal_code,
+    class_tag,
     location_type: location_type as LocationType,
     address: fullAddress({ address_line, city, state_code, postal_code }) || null
   }));
+}
+
+/** Distinct class tags currently in use (form suggestions) */
+export async function locationTagSuggestions() {
+  const rows = await prisma.$queryRaw<Array<{ class_tag: string }>>`
+    SELECT DISTINCT class_tag FROM ops.locations
+    WHERE class_tag IS NOT NULL AND class_tag <> ''
+    ORDER BY class_tag
+  `;
+  return rows.map(r => r.class_tag);
 }

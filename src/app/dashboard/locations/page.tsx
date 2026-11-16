@@ -9,7 +9,7 @@ import { MapPicker } from "@/components/map-picker";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
 import { LOCATION_TYPE_LABELS, type LocationType } from "@/lib/labels";
-import { listLocations, getLocationById, locationTypeCounts } from "@/lib/queries/locations";
+import { listLocations, getLocationById, locationTagSuggestions, locationTypeCounts } from "@/lib/queries/locations";
 import { saveLocation } from "./actions";
 import { LocationsTable } from "./locations-table";
 
@@ -43,10 +43,11 @@ export default async function LocationsPage({
   const errorCode = firstValue(sp.error);
   const isNew = firstValue(sp.new) === "1";
 
-  const [locations, counts, editing] = await Promise.all([
+  const [locations, counts, editing, tagSuggestions] = await Promise.all([
     listLocations({ type: typeFilter, q }),
     locationTypeCounts(),
-    editId ? getLocationById(editId) : Promise.resolve(null)
+    editId ? getLocationById(editId) : Promise.resolve(null),
+    locationTagSuggestions()
   ]);
 
   const typeValue = formField(sp, "location_type", editing?.location_type);
@@ -54,6 +55,7 @@ export default async function LocationsPage({
     code: formField(sp, "code", editing?.code),
     name: formField(sp, "name", editing?.name),
     type: VALID_TYPES.includes(typeValue as LocationType) ? typeValue : "AMAZON",
+    tag: formField(sp, "class_tag", editing?.class_tag ?? ""),
     addressLine: formField(sp, "address_line", editing?.address_line),
     city: formField(sp, "city", editing?.city),
     stateCode: formField(sp, "state_code", editing?.state_code),
@@ -131,6 +133,27 @@ export default async function LocationsPage({
             <TextField label="城市" name="city" placeholder="如 Hayward" defaultValue={values.city} maxLength={80} />
             <TextField label="州" name="state_code" placeholder="如 CA" defaultValue={values.stateCode} maxLength={2} />
             <TextField label="邮编" name="postal_code" placeholder="如 94545" defaultValue={values.postalCode} maxLength={16} />
+            <div className="grid content-start gap-1.5 text-[13px] font-medium">
+              <label htmlFor="location-class-tag">类标签</label>
+              <input
+                id="location-class-tag"
+                name="class_tag"
+                list="location-tag-suggestions"
+                defaultValue={values.tag}
+                maxLength={40}
+                placeholder="如 A类 / 东湾"
+                aria-label="位置类标签"
+                className="h-9 rounded-md border border-line bg-transparent px-3 text-[13px] font-normal focus-visible:ring-1"
+              />
+              <datalist id="location-tag-suggestions">
+                {tagSuggestions.map(tag => (
+                  <option key={tag} value={tag} />
+                ))}
+              </datalist>
+              <span className="text-[11px] font-normal text-muted-foreground">
+                工资规则可按标签匹配；改标签，规则计价即时跟着变
+              </span>
+            </div>
           </FormGrid>
           {/* Map picker: search or click to pin, fills the address fields above */}
           <MapPicker

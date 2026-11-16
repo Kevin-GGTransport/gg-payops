@@ -8,6 +8,7 @@ import { requireUser } from "@/lib/auth";
 const FIELDS = [
   "full_name",
   "driver_type",
+  "price_as_driver",
   "phone",
   "license_no",
   "license_class",
@@ -38,6 +39,7 @@ export async function saveDriver(formData: FormData) {
   const id = str(formData, "id");
   const fullName = str(formData, "full_name");
   const driverType = str(formData, "driver_type");
+  const priceAsDriver = str(formData, "price_as_driver") === "1";
   const phone = str(formData, "phone") || null;
   const licenseNo = str(formData, "license_no") || null;
   const licenseClass = str(formData, "license_class") || null;
@@ -56,6 +58,7 @@ export async function saveDriver(formData: FormData) {
       UPDATE ops.drivers SET
         full_name = ${fullName},
         driver_type = ${driverType}::ops.driver_type,
+        price_as_driver = ${priceAsDriver},
         phone = ${phone},
         license_no = ${licenseNo},
         license_class = ${licenseClass},
@@ -68,11 +71,11 @@ export async function saveDriver(formData: FormData) {
   } else {
     await prisma.$executeRaw`
       INSERT INTO ops.drivers(
-        full_name, driver_type,
+        full_name, driver_type, price_as_driver,
         phone, license_no, license_class, license_expires_on, hire_date, notes
       )
       VALUES (
-        ${fullName}, ${driverType}::ops.driver_type,
+        ${fullName}, ${driverType}::ops.driver_type, ${priceAsDriver},
         ${phone}, ${licenseNo}, ${licenseClass}, ${licenseExpiresOn}::date, ${hireDate}::date, ${notes}
       )
     `;

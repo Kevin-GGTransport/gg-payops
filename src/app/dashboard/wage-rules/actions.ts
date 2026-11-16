@@ -16,6 +16,8 @@ type PriceRuleInput = {
   unit: string;
   from_location_id: string | null;
   to_location_id: string | null;
+  from_tag: string | null;
+  to_tag: string | null;
   operation: string | null;
   label: string | null;
   driver_amount: number;
@@ -23,6 +25,24 @@ type PriceRuleInput = {
 };
 
 const PRICE_UNITS = new Set(["LEG", "ROUND_TRIP", "DAY"]);
+
+/**
+ * One endpoint side as submitted by the rule editor: "loc:<id>" pins a
+ * dictionary location, "tag:<name>" matches every location carrying the tag,
+ * "" = any side.
+ */
+function parseSide(value: string): { locationId: string | null; tag: string | null } | "bad" {
+  if (value === "") return { locationId: null, tag: null };
+  if (value.startsWith("loc:")) {
+    const id = value.slice(4);
+    return /^\d+$/.test(id) ? { locationId: id, tag: null } : "bad";
+  }
+  if (value.startsWith("tag:")) {
+    const tag = value.slice(4).trim().slice(0, 40);
+    return tag ? { locationId: null, tag } : "bad";
+  }
+  return "bad";
+}
 
 /** Positional tier rows; fully blank rows are skipped (mirrors entry sheet) */
 function parseTiers(formData: FormData): TierInput[] {
@@ -38,7 +58,7 @@ function parseTiers(formData: FormData): TierInput[] {
 }
 
 /** Price-rule rows; fully blank rows are skipped */
-function parsePriceRules(formData: FormData): PriceRuleInput[] {
+function parsePriceRules(formData: FormData): PriceRuleInput[] | "bad_side" {
   const count = Number(str(formData, "price_count") || "0");
   const rules: PriceRuleInput[] = [];
   for (let i = 0; i < count; i++) {
@@ -47,12 +67,17 @@ function parsePriceRules(formData: FormData): PriceRuleInput[] {
     const driverId = str(formData, `${p}driver_id`);
     const amountRaw = str(formData, `${p}driver_amount`);
     if (!unit && !driverId && !amountRaw) continue;
+    const from = parseSide(str(formData, `${p}from`));
+    const to = parseSide(str(formData, `${p}to`));
+    if (from === "bad" || to === "bad") return "bad_side";
     const ownerRaw = str(formData, `${p}owner_amount`);
     rules.push({
       driver_id: driverId || null,
       unit,
-      from_location_id: str(formData, `${p}from_location_id`) || null,
-      to_location_id: str(formData, `${p}to_location_id`) || null,
+      from_location_id: from.locationId,
+      to_location_id: to.locationId,
+      from_tag: from.tag,
+      to_tag: to.tag,
       operation: str(formData, `${p}operation`) || null,
       label: str(formData, `${p}label`) || null,
       driver_amount: Number(amountRaw),
@@ -92,12 +117,6 @@ function validateVersion(input: {
   for (const rule of input.prices) {
     if (!PRICE_UNITS.has(rule.unit)) return "bad_price_unit";
     if (rule.driver_id !== null && !/^\d+$/.test(rule.driver_id)) return "bad_price_driver";
-    if (
-      (rule.from_location_id !== null && !/^\d+$/.test(rule.from_location_id)) ||
-      (rule.to_location_id !== null && !/^\d+$/.test(rule.to_location_id))
-    ) {
-      return "bad_price_location";
-    }
     if (!(rule.driver_amount >= 0)) return "bad_price_amount";
     if (rule.owner_amount !== null && !(rule.owner_amount >= 0)) return "bad_price_amount";
   }
@@ -144,10 +163,10 @@ async function writeVersionChildren(
     ...input.prices.map(rule =>
       prisma.$executeRaw`
         INSERT INTO pay.wage_rule_prices(version_id, driver_id, unit, from_location_id, to_location_id,
-                                         operation, label, driver_amount, owner_amount)
+                                         from_tag, to_tag, operation, label, driver_amount, owner_amount)
         VALUES (${id}::bigint, ${rule.driver_id}::bigint, ${rule.unit}, ${rule.from_location_id}::bigint,
-                ${rule.to_location_id}::bigint, ${rule.operation}, ${rule.label}, ${rule.driver_amount},
-                ${rule.owner_amount})
+                ${rule.to_location_id}::bigint, ${rule.from_tag}, ${rule.to_tag}, ${rule.operation},
+                ${rule.label}, ${rule.driver_amount}, ${rule.owner_amount})
       `
     )
   ]);
@@ -194,8 +213,8 @@ export async function saveVersion(formData: FormData) {
     `;
     await prisma.$executeRaw`
       INSERT INTO pay.wage_rule_prices(version_id, driver_id, unit, from_location_id, to_location_id,
-                                       operation, label, driver_amount, owner_amount)
-      SELECT ${targetId}::bigint, driver_id, unit, from_location_id, to_location_id, operation, label,
+                                       from_tag, to_tag, operation, label, driver_amount, owner_amount)
+      SELECT ${targetId}::bigint, driver_id, unit, from_location_id, to_location_id, from_tag, to_tag, operation, label,
              driver_amount, owner_amount
       FROM pay.wage_rule_prices WHERE version_id = ${id}::bigint
     `;
@@ -208,6 +227,7 @@ export async function saveVersion(formData: FormData) {
   const overageIncrement = Number(str(formData, "overage_increment"));
   const tiers = parseTiers(formData);
   const prices = parsePriceRules(formData);
+  if (prices === "bad_side") redirect(back("bad_price_side"));
 
   const error = validateVersion({
     name, effectiveFrom, ownerMultiplier, bobtailMultiplier, overageIncrement, tiers, prices
@@ -264,8 +284,8 @@ export async function createVersion(formData: FormData) {
   `;
   await prisma.$executeRaw`
     INSERT INTO pay.wage_rule_prices(version_id, driver_id, unit, from_location_id, to_location_id,
-                                     operation, label, driver_amount, owner_amount)
-    SELECT ${newId}::bigint, driver_id, unit, from_location_id, to_location_id, operation, label,
+                                     from_tag, to_tag, operation, label, driver_amount, owner_amount)
+    SELECT ${newId}::bigint, driver_id, unit, from_location_id, to_location_id, from_tag, to_tag, operation, label,
            driver_amount, owner_amount
     FROM pay.wage_rule_prices WHERE version_id = ${sourceId}::bigint
   `;

@@ -15,15 +15,16 @@ type TierRow = { miles_from: string; amount: string };
 type PriceRow = {
   driver_id: string;
   unit: string;
-  from_location_id: string;
-  to_location_id: string;
+  /** Endpoint side as "loc:<id>" / "tag:<name>" / "" = any */
+  from: string;
+  to: string;
   operation: string;
   label: string;
   driver_amount: string;
   owner_amount: string;
 };
 
-type DriverOption = { id: string; full_name: string };
+type DriverOption = { id: string; full_name: string; driver_type: string; price_as_driver: boolean };
 type OperationOption = { code: string; label: string };
 
 const PRICE_UNITS = [
@@ -101,8 +102,16 @@ export function RulesEditor({
     version.price_rules.map(rule => ({
       driver_id: rule.driver_id ?? "",
       unit: rule.unit,
-      from_location_id: rule.from_location_id ?? "",
-      to_location_id: rule.to_location_id ?? "",
+      from: rule.from_location_id
+        ? `loc:${rule.from_location_id}`
+        : rule.from_tag
+          ? `tag:${rule.from_tag}`
+          : "",
+      to: rule.to_location_id
+        ? `loc:${rule.to_location_id}`
+        : rule.to_tag
+          ? `tag:${rule.to_tag}`
+          : "",
       operation: rule.operation ?? "",
       label: rule.label ?? "",
       driver_amount: rule.driver_amount.toFixed(2),
@@ -115,6 +124,36 @@ export function RulesEditor({
   const driverOptions = React.useMemo(
     () => [{ value: "", label: "所有人" }, ...drivers.map(d => ({ value: d.id, label: d.full_name }))],
     [drivers]
+  );
+  // Driver picker options: searchable, grouped 司机/车主, pricing identity hint
+  const driverPickOptions = React.useMemo(
+    () =>
+      drivers.map(d => ({
+        value: d.id,
+        label: d.full_name,
+        group: d.driver_type === "OWNER" ? "车主" : "司机",
+        description: d.price_as_driver ? "按司机价计价" : undefined
+      })),
+    [drivers]
+  );
+  // Endpoint picker options: every tag in use + every location, tag creatable
+  const sideOptions = React.useMemo(() => {
+    const tags = [...new Set(locations.map(l => l.class_tag).filter(Boolean))] as string[];
+    return [
+      ...tags.map(tag => ({ value: `tag:${tag}`, label: `#${tag}`, group: "类标签" })),
+      ...locations.map(l => ({ value: `loc:${l.id}`, label: l.code, group: "位置" }))
+    ];
+  }, [locations]);
+  const sideLabelFor = React.useCallback(
+    (value: string) => {
+      if (value.startsWith("tag:")) return `#${value.slice(4)}`;
+      if (value.startsWith("loc:")) {
+        const loc = locations.find(l => l.id === value.slice(4));
+        return loc ? loc.code : undefined;
+      }
+      return undefined;
+    },
+    [locations]
   );
 
   const updatePrice = (i: number, patch: Partial<PriceRow>) =>
@@ -142,8 +181,8 @@ export function RulesEditor({
       {
         driver_id: driverFilter,
         unit: "LEG",
-        from_location_id: "",
-        to_location_id: "",
+        from: "",
+        to: "",
         operation: "",
         label: "",
         driver_amount: "",
@@ -257,40 +296,54 @@ export function RulesEditor({
                   }
                 >
                   <td>
-                    <CellSelect
+                    <ComboboxField
                       name={`price_${i}_driver_id`}
                       value={price.driver_id}
-                      onChange={value => updatePrice(i, { driver_id: value })}
-                      options={driverOptions}
-                      ariaLabel={`价格规则 ${i + 1} 适用司机`}
+                      placeholder="所有人"
+                      searchPlaceholder="搜索姓名"
+                      clearable
+                      triggerClassName="h-8 w-32 text-[13px]"
+                      onValueChange={value => updatePrice(i, { driver_id: value })}
+                      aria-label={`价格规则 ${i + 1} 适用司机`}
+                      options={driverPickOptions}
                     />
                   </td>
                   <td>
                     <ComboboxField
-                      name={`price_${i}_from_location_id`}
-                      value={price.from_location_id}
+                      name={`price_${i}_from`}
+                      value={price.from}
                       placeholder="任意"
-                      searchPlaceholder="搜索位置代码"
-                      mono
+                      searchPlaceholder="标签或位置代码"
                       clearable
                       triggerClassName="h-8 w-28 text-[13px]"
-                      onValueChange={value => updatePrice(i, { from_location_id: value })}
+                      onValueChange={value => updatePrice(i, { from: value })}
                       aria-label={`价格规则 ${i + 1} 起点`}
-                      options={locations.map(l => ({ value: l.id, label: l.code }))}
+                      labelForValue={sideLabelFor}
+                      options={sideOptions}
+                      customOption={text => ({
+                        value: `tag:${text.slice(0, 40)}`,
+                        label: `新建类标签 #${text.slice(0, 40)}`,
+                        description: "在位置管理里给位置打这个标签后生效"
+                      })}
                     />
                   </td>
                   <td>
                     <ComboboxField
-                      name={`price_${i}_to_location_id`}
-                      value={price.to_location_id}
+                      name={`price_${i}_to`}
+                      value={price.to}
                       placeholder="任意"
-                      searchPlaceholder="搜索位置代码"
-                      mono
+                      searchPlaceholder="标签或位置代码"
                       clearable
                       triggerClassName="h-8 w-28 text-[13px]"
-                      onValueChange={value => updatePrice(i, { to_location_id: value })}
+                      onValueChange={value => updatePrice(i, { to: value })}
                       aria-label={`价格规则 ${i + 1} 终点`}
-                      options={locations.map(l => ({ value: l.id, label: l.code }))}
+                      labelForValue={sideLabelFor}
+                      options={sideOptions}
+                      customOption={text => ({
+                        value: `tag:${text.slice(0, 40)}`,
+                        label: `新建类标签 #${text.slice(0, 40)}`,
+                        description: "在位置管理里给位置打这个标签后生效"
+                      })}
                     />
                   </td>
                   <td>

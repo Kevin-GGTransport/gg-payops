@@ -48,6 +48,8 @@ type PriceRuleRaw = {
   unit: string;
   from_location_id: string | null;
   to_location_id: string | null;
+  from_tag: string | null;
+  to_tag: string | null;
   from_code: string | null;
   to_code: string | null;
   operation: string | null;
@@ -63,6 +65,8 @@ function mapPriceRule(row: PriceRuleRaw): WagePriceRuleRow {
     unit: row.unit as WagePriceRule["unit"],
     from_location_id: row.from_location_id,
     to_location_id: row.to_location_id,
+    from_tag: row.from_tag,
+    to_tag: row.to_tag,
     from_code: row.from_code,
     to_code: row.to_code,
     operation: row.operation,
@@ -78,6 +82,7 @@ export async function wageVersionPriceRules(versionId: string): Promise<WagePric
     SELECT p.id::text, p.driver_id::text AS driver_id, p.unit,
            p.from_location_id::text AS from_location_id,
            p.to_location_id::text AS to_location_id,
+           p.from_tag, p.to_tag,
            f.code AS from_code, t.code AS to_code,
            p.operation, p.label, p.driver_amount::text, p.owner_amount::text
     FROM pay.wage_rule_prices p
@@ -148,6 +153,7 @@ export async function activeWageRuleVersions(): Promise<WageRuleData[]> {
       SELECT p.version_id::text, p.id::text, p.driver_id::text AS driver_id, p.unit,
              p.from_location_id::text AS from_location_id,
              p.to_location_id::text AS to_location_id,
+             p.from_tag, p.to_tag,
              f.code AS from_code, t.code AS to_code,
              p.operation, p.label, p.driver_amount::text, p.owner_amount::text
       FROM pay.wage_rule_prices p
@@ -174,6 +180,8 @@ export async function activeWageRuleVersions(): Promise<WageRuleData[]> {
         unit: rule.unit as WagePriceRule["unit"],
         from_location_id: rule.from_location_id,
         to_location_id: rule.to_location_id,
+        from_tag: rule.from_tag,
+        to_tag: rule.to_tag,
         operation: rule.operation,
         label: rule.label,
         driver_amount: Number(rule.driver_amount),

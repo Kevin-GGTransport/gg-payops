@@ -37,6 +37,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   bad_price_unit: "价格规则的计价类型无效。",
   bad_price_driver: "价格规则的适用司机无效。",
   bad_price_location: "价格规则的起点/终点无效。",
+  bad_price_side: "价格规则的起点/终点无效。",
   bad_price_amount: "价格规则金额必须 ≥ 0。",
   locked: "该版本已生效，不可删除。",
   bad_source: "复制源版本不存在。"

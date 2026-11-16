@@ -16,7 +16,7 @@ function backWithError(error: string, formData: FormData): never {
   const id = str(formData, "id");
   if (id) params.set("edit", id);
   params.set("error", error);
-  for (const field of ["code", "name", "location_type", "address_line", "city", "state_code", "postal_code"]) {
+  for (const field of ["code", "name", "location_type", "class_tag", "address_line", "city", "state_code", "postal_code"]) {
     const value = str(formData, field);
     if (value) params.set(`f_${field}`, value);
   }
@@ -34,6 +34,7 @@ export async function saveLocation(formData: FormData) {
   const city = str(formData, "city") || null;
   const stateCode = str(formData, "state_code").toUpperCase() || null;
   const postalCode = str(formData, "postal_code") || null;
+  const classTag = str(formData, "class_tag") || null;
   // Map picker coordinates (optional; both or neither)
   const latitudeRaw = str(formData, "latitude");
   const longitudeRaw = str(formData, "longitude");
@@ -79,7 +80,7 @@ export async function saveLocation(formData: FormData) {
     await prisma.$executeRaw`
       UPDATE ops.locations SET
         code = ${code}, name = ${name}, location_type = ${locationType}::ops.location_type,
-        is_base = ${locationType === "BASE"},
+        is_base = ${locationType === "BASE"}, class_tag = ${classTag},
         address_line = ${addressLine}, city = ${city}, state_code = ${stateCode}, postal_code = ${postalCode},
         latitude = ${lat}::decimal(9,6), longitude = ${lng}::decimal(9,6),
         updated_at = now()
@@ -87,10 +88,10 @@ export async function saveLocation(formData: FormData) {
     `;
   } else {
     await prisma.$executeRaw`
-      INSERT INTO ops.locations(code, name, location_type, is_base, address_line, city, state_code, postal_code, latitude, longitude)
+      INSERT INTO ops.locations(code, name, location_type, is_base, class_tag, address_line, city, state_code, postal_code, latitude, longitude)
       VALUES (
         ${code}, ${name},
-        ${locationType}::ops.location_type, ${locationType === "BASE"},
+        ${locationType}::ops.location_type, ${locationType === "BASE"}, ${classTag},
         ${addressLine}, ${city}, ${stateCode}, ${postalCode},
         ${lat}::decimal(9,6), ${lng}::decimal(9,6)
       )

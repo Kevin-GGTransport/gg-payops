@@ -11,6 +11,8 @@ export type TripRow = {
   /** Truck code from the submit-time truck_snapshot */
   truck_code: string | null;
   driver_type: DriverType;
+  /** Owner flagged to bill at driver prices (pricing identity override) */
+  price_as_driver: boolean;
   trip_date: string;
   operation: OperationType;
   load_no: string;
@@ -31,7 +33,7 @@ export type TripRow = {
 const TRIP_SELECT = Prisma.sql`
   SELECT t.id::text, t.driver_id::text, t.driver_name,
          t.truck_snapshot->>'truck_code' AS truck_code,
-         d.driver_type::text AS driver_type,
+         d.driver_type::text AS driver_type, d.price_as_driver,
          to_char(t.trip_date, 'YYYY-MM-DD') AS trip_date,
          t.operation::text AS operation, t.load_no,
          t.from_location_id::text AS from_location_id,
@@ -54,6 +56,8 @@ export type TripEditRow = {
   driver_name: string | null;
   /** Driver type at edit time; wages reprice against it like entry rows */
   driver_type: DriverType | null;
+  /** Owner flagged to bill at driver prices (pricing identity override) */
+  price_as_driver: boolean;
   trip_date: string;
   operation: string;
   load_no: string;
@@ -73,7 +77,7 @@ export async function getTripById(id: string): Promise<TripEditRow | null> {
   if (!/^\d+$/.test(id)) return null;
   const rows = await prisma.$queryRaw<TripEditRow[]>`
     SELECT t.id::text, t.driver_id::text, t.driver_name,
-           d.driver_type::text AS driver_type,
+           d.driver_type::text AS driver_type, d.price_as_driver,
            to_char(t.trip_date, 'YYYY-MM-DD') AS trip_date,
            t.operation::text AS operation, t.load_no,
            t.from_location_id::text AS from_location_id,
@@ -214,6 +218,7 @@ export type DriverPeriodTripRow = {
   driver_id: string;
   driver_name: string | null;
   driver_type: DriverType;
+  price_as_driver: boolean;
   trip_date: string;
   operation: OperationType;
   load_no: string;
@@ -233,7 +238,7 @@ export type DriverPeriodTripRow = {
 export async function driverPeriodTrips(period: Period, driverId: string) {
   return prisma.$queryRaw<DriverPeriodTripRow[]>`
     SELECT t.id::text, t.driver_id::text, t.driver_name,
-           d.driver_type::text AS driver_type,
+           d.driver_type::text AS driver_type, d.price_as_driver,
            to_char(t.trip_date, 'YYYY-MM-DD') AS trip_date,
            t.operation::text AS operation, t.load_no,
            t.from_location_id::text AS from_location_id,

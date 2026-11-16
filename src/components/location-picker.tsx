@@ -16,6 +16,8 @@ export type LocationOption = {
   address: string | null;
   /** USPS zip; display context only */
   postal_code: string | null;
+  /** Free-form class tag; wage price rules can match endpoints by tag */
+  class_tag: string | null;
 };
 
 /** Max length of a hand-typed location text (kept short so it fits locations.code) */

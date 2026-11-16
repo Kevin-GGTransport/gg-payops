@@ -195,6 +195,7 @@ function EditForm({
         ? calcTripWage({
             driverId: trip.driver_id,
             driverType: (trip.driver_type ?? undefined) as DriverType | undefined,
+            priceAsDriver: trip.price_as_driver,
             operation: (operation || undefined) as OperationType | undefined,
             miles: Number(milesValue) || 0,
             from: wageEndpoint(fromValue),

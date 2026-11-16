@@ -32,6 +32,8 @@ type DriverOption = {
   id: string;
   full_name: string;
   driver_type: DriverType;
+  /** Owner-type driver billed at driver prices (pricing identity override) */
+  price_as_driver: boolean;
 };
 
 type TruckOption = {
@@ -208,6 +210,7 @@ const EntryRow = React.memo(function EntryRow({
   rowIndex,
   driverId,
   driverType,
+  priceAsDriver,
   locations,
   operations,
   wageRules,
@@ -244,6 +247,8 @@ const EntryRow = React.memo(function EntryRow({
   /** Picked driver id; feeds driver-scoped price rules */
   driverId: string;
   driverType: DriverType | undefined;
+  /** Owner flagged to bill at driver prices */
+  priceAsDriver?: boolean;
   locations: LocationOption[];
   /** Operation dictionary; drives the dropdown and the Load# lock */
   operations: OperationOption[];
@@ -412,6 +417,7 @@ const EntryRow = React.memo(function EntryRow({
         ? calcTripWage({
             driverId,
             driverType,
+            priceAsDriver,
             operation: operation as OperationType | undefined,
             miles: Number(milesValue) || 0,
             from: wageEndpoint(fromValue),
@@ -420,7 +426,7 @@ const EntryRow = React.memo(function EntryRow({
           })
         : 0,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [driverId, driverType, operation, milesValue, fromValue, toValue, locations, rule]
+    [driverId, driverType, priceAsDriver, operation, milesValue, fromValue, toValue, locations, rule]
   );
 
   // Package override wins over auto/manual: the strip above the sheet is the
@@ -726,7 +732,10 @@ const GroupSection = React.memo(function GroupSection({
   // Insertion point while a same-group drag hovers this sheet
   const [dropAt, setDropAt] = React.useState<{ id: number; before: boolean } | null>(null);
   const dragActive = dragging?.groupId === group.id;
-  const driverType = drivers.find(d => d.id === driverId)?.driver_type;
+  const driverRecord = drivers.find(d => d.id === driverId);
+  const driverType = driverRecord?.driver_type;
+  // Pricing identity: an owner flagged price_as_driver bills as a driver
+  const priceAsDriver = driverRecord?.price_as_driver ?? false;
 
   // Planned packages follow the sheet live (endpoints/dates/rows/mode)
   const plans = React.useMemo(
@@ -750,13 +759,13 @@ const GroupSection = React.memo(function GroupSection({
         continue;
       }
       const amount =
-        driverType === "OWNER"
+        driverType === "OWNER" && !priceAsDriver
           ? (match.owner_amount ?? match.driver_amount * rule.owner_multiplier)
           : match.driver_amount;
       map[plan.id] = { amount: amount.toFixed(2), label: match.label ?? "" };
     }
     return map;
-  }, [plans, wageRules, driverId, driverType]);
+  }, [plans, wageRules, driverId, driverType, priceAsDriver]);
 
   /** Effective amount of a package: manual override, else rule suggestion */
   const amountOf = React.useCallback(
@@ -1113,6 +1122,7 @@ const GroupSection = React.memo(function GroupSection({
                 rowIndex={i}
                 driverId={driverId}
                 driverType={driverType}
+                priceAsDriver={priceAsDriver}
                 locations={locations}
                 operations={operations}
                 wageRules={wageRules}
