@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import * as React from "react";
 import { type ColumnDef } from "@tanstack/react-table";
 
 import { DriverTypeBadge, OperationBadge } from "@/components/badges";
@@ -10,6 +10,7 @@ import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { miles as fmtMiles, money } from "@/lib/format";
 import type { TripRow } from "@/lib/queries/trips";
 import { deleteTrip } from "./actions";
+import { TripEditDialog, type TripEditDictionaries } from "./trip-edit-dialog";
 
 const lgHidden = "hidden lg:table-cell";
 
@@ -17,14 +18,22 @@ const lgHidden = "hidden lg:table-cell";
 export function TripsTable({
   trips,
   returnTo,
+  /** When set, each row gets an edit button opening the local dialog */
+  edit,
   empty
 }: {
   trips: TripRow[];
   /** Serialized filter + page params for post-action redirects */
   returnTo: string;
+  edit?: TripEditDictionaries;
   empty: string;
 }) {
-  const columns: ColumnDef<TripRow, unknown>[] = [
+  // Local open state: clicking 编辑 opens instantly with the row's own data,
+  // no navigation and no URL change
+  const [editing, setEditing] = React.useState<TripRow | null>(null);
+
+  // Stable identities: a fresh array per render churns TanStack's sizing sync
+  const columns = React.useMemo<ColumnDef<TripRow, unknown>[]>(() => [
     {
       id: "select",
       header: () => (trips.length > 0 ? <SelectAll /> : null),
@@ -120,11 +129,11 @@ export function TripsTable({
       meta: { cellClass: "actions" },
       cell: ({ row }) => (
         <>
-          <Link
-            href={`/dashboard/trips?edit=${row.original.id}${returnTo ? `&${returnTo}` : ""}`}
-          >
-            编辑
-          </Link>
+          {edit && (
+            <button type="button" className="linklike" onClick={() => setEditing(row.original)}>
+              编辑
+            </button>
+          )}
           <form action={deleteTrip}>
             <input type="hidden" name="id" value={row.original.id} />
             <input type="hidden" name="return_to" value={returnTo} />
@@ -135,7 +144,7 @@ export function TripsTable({
         </>
       )
     }
-  ];
+  ], [edit, returnTo, trips]); // identities stable across client re-renders (server payload)
 
   const table = useRosterTable({
     data: trips,
@@ -143,5 +152,17 @@ export function TripsTable({
     storageKey: "payops.trips.cols"
   });
 
-  return <RosterTable table={table} empty={empty} />;
+  return (
+    <>
+      <RosterTable table={table} empty={empty} />
+      {edit && (
+        <TripEditDialog
+          trip={editing}
+          dictionaries={edit}
+          onClose={() => setEditing(null)}
+          returnTo={returnTo}
+        />
+      )}
+    </>
+  );
 }

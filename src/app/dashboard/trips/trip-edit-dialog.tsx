@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { ModalShell } from "@/components/modal-shell";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FormGrid, SubmitButton, TextareaField } from "@/components/form-fields";
 import { ComboboxField } from "@/components/combobox-field";
 import { DateField } from "@/components/date-field";
@@ -43,33 +43,36 @@ function DialogField({
   );
 }
 
+/** Dictionaries the edit form prices with; the host page passes them down once */
+export type TripEditDictionaries = {
+  locations: LocationOption[];
+  operations: OperationOption[];
+  wageRules: WageRuleData[];
+};
+
 /**
- * URL-driven edit dialog: one trip edited with the exact same field set and
- * behavior as a home-sheet entry row - location pickers (creatable + map),
- * Google-measured miles on every endpoint change, rule-priced wage with a
- * sticky manual override. The page fetches the trip when ?edit=<id> is
- * present; saving goes through the updateTrip server action.
+ * Pure client-side edit dialog: no navigation, no URL state - the row's data
+ * is already in memory, opening/closing is a local boolean. Field set and
+ * behavior mirror a home-sheet entry row exactly: location pickers
+ * (creatable + map), Google-measured miles on every endpoint change,
+ * rule-priced wage with a sticky manual override. Saving goes through the
+ * updateTrip server action, which redirects back to the list.
  */
 export function TripEditDialog({
-  editing,
-  locations,
-  operations,
-  wageRules,
-  closeHref,
+  trip,
+  dictionaries,
+  onClose,
   returnTo
 }: {
-  editing: TripEditRow | null;
-  /** Location dictionary; stored endpoints map back to loc:<id> picks */
-  locations: LocationOption[];
-  /** Operation dictionary (ACTIVE rows); drives the dropdown and Load# lock */
-  operations: OperationOption[];
-  /** Wage-rule versions (current + scheduled); the trip's date picks one */
-  wageRules: WageRuleData[];
-  /** URL that drops the ?edit param */
-  closeHref: string;
+  /** Null = closed; a change of id remounts the form with fresh state */
+  trip: TripEditRow | null;
+  dictionaries: TripEditDictionaries;
+  onClose: () => void;
   /** Serialized filters the save redirects back to */
   returnTo: string;
 }) {
+  const { locations, operations, wageRules } = dictionaries;
+
   // Stored endpoint -> picker value: the loc: pick when the row is in the
   // dictionary, else txt:<code> (an INACTIVE location still resolves by code
   // server-side), else empty
@@ -79,62 +82,67 @@ export function TripEditDialog({
   };
 
   return (
-    <ModalShell
-      open={Boolean(editing)}
-      closeHref={closeHref}
-      title={
-        editing
-          ? `编辑行程 · ${editing.driver_name ?? ""}（${editing.trip_date}）`
-          : "编辑行程"
-      }
-    >
-      {editing && (
-        <EditForm
-          editing={editing}
-          locations={locations}
-          operations={operations}
-          wageRules={wageRules}
-          returnTo={returnTo}
-          endpointInitial={endpointInitial}
-        />
-      )}
-    </ModalShell>
+    <Dialog open={trip !== null} onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent
+        aria-label="编辑行程"
+        className="flex max-h-[90vh] flex-col overflow-hidden"
+      >
+        <DialogHeader className="mb-0 shrink-0 border-b border-dashed border-line px-5 pt-4 pb-3">
+          <DialogTitle>
+            {trip ? `编辑行程 · ${trip.driver_name ?? ""}（${trip.trip_date}）` : "编辑行程"}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {trip && (
+            <EditForm
+              key={trip.id}
+              trip={trip}
+              locations={locations}
+              operations={operations}
+              wageRules={wageRules}
+              returnTo={returnTo}
+              endpointInitial={endpointInitial}
+            />
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 type CalcStatus = "loading" | "auto" | "failed";
 
 function EditForm({
-  editing,
+  trip,
   locations,
   operations,
   wageRules,
   returnTo,
   endpointInitial
 }: {
-  editing: TripEditRow;
+  trip: TripEditRow;
   locations: LocationOption[];
   operations: OperationOption[];
   wageRules: WageRuleData[];
   returnTo: string;
   endpointInitial: (locationId: string | null, code: string | null) => string;
 }) {
-  const [dateValue, setDateValue] = React.useState(editing.trip_date);
-  const [operation, setOperation] = React.useState(editing.operation);
+  const [dateValue, setDateValue] = React.useState(trip.trip_date);
+  const [operation, setOperation] = React.useState(trip.operation);
   const operationRequiresLoad = (code: string) =>
     operations.find(o => o.code === code)?.requires_load ?? true;
   const [loadNoValue, setLoadNoValue] = React.useState(
-    !operationRequiresLoad(editing.operation) ? "" : editing.load_no ?? ""
+    !operationRequiresLoad(trip.operation) ? "" : trip.load_no ?? ""
   );
   const [fromValue, setFromValue] = React.useState(() =>
-    endpointInitial(editing.from_location_id, editing.from_code)
+    endpointInitial(trip.from_location_id, trip.from_code)
   );
   const [toValue, setToValue] = React.useState(() =>
-    endpointInitial(editing.to_location_id, editing.to_code)
+    endpointInitial(trip.to_location_id, trip.to_code)
   );
-  const [milesValue, setMilesValue] = React.useState(editing.miles || "0");
+  const [milesValue, setMilesValue] = React.useState(trip.miles || "0");
   // Fuel-up log (US gallons): optional ledger field, never priced - same as entry
-  const [fuelValue, setFuelValue] = React.useState(editing.fuel_gallons ?? "");
+  const [fuelValue, setFuelValue] = React.useState(trip.fuel_gallons ?? "");
   const [status, setStatus] = React.useState<CalcStatus>("loading");
   const [manual, setManual] = React.useState(false);
   // Ignore stale responses after a quick endpoint re-pick
@@ -143,7 +151,7 @@ function EditForm({
   // Sticky manual wage: the stored amount opens as the manual value (it was
   // priced at entry time and must not silently drift on open); hand edits
   // keep it, only 重算 drops back to following the rule
-  const [manualPay, setManualPay] = React.useState<string | null>(editing.pay_amount || null);
+  const [manualPay, setManualPay] = React.useState<string | null>(trip.pay_amount || null);
 
   // Google-measured miles: every endpoint (re-)pick re-measures, exactly like
   // an entry row; a failed measurement keeps the stored value for hand edits
@@ -202,7 +210,7 @@ function EditForm({
     () =>
       rule
         ? calcTripWage({
-            driverType: (editing.driver_type ?? undefined) as DriverType | undefined,
+            driverType: (trip.driver_type ?? undefined) as DriverType | undefined,
             operation: (operation || undefined) as OperationType | undefined,
             miles: Number(milesValue) || 0,
             from: wageEndpoint(fromValue),
@@ -230,7 +238,7 @@ function EditForm({
 
   return (
     <form action={updateTrip} aria-label="行程编辑卡">
-      <input type="hidden" name="id" value={editing.id} />
+      <input type="hidden" name="id" value={trip.id} />
       <input type="hidden" name="return_to" value={returnTo} />
       <FormGrid>
         <DialogField label="日期">
@@ -354,7 +362,7 @@ function EditForm({
         <TextareaField
           label="备注"
           name="notes"
-          defaultValue={editing.notes ?? ""}
+          defaultValue={trip.notes ?? ""}
           className="col-span-2 max-md:col-span-1"
         />
       </FormGrid>

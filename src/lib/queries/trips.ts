@@ -14,9 +14,12 @@ export type TripRow = {
   trip_date: string;
   operation: OperationType;
   load_no: string;
+  from_location_id: string | null;
+  to_location_id: string | null;
   from_code: string | null;
   to_code: string | null;
   miles: string;
+  fuel_gallons: string;
   pay_amount: string;
   notes: string | null;
 };
@@ -27,8 +30,10 @@ const TRIP_SELECT = Prisma.sql`
          d.driver_type::text AS driver_type,
          to_char(t.trip_date, 'YYYY-MM-DD') AS trip_date,
          t.operation::text AS operation, t.load_no,
+         t.from_location_id::text AS from_location_id,
+         t.to_location_id::text AS to_location_id,
          f.code AS from_code, o.code AS to_code,
-         t.miles::text, t.pay_amount::text, t.notes, t.created_at
+         t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.notes, t.created_at
   FROM pay.trips t
   JOIN ops.drivers d ON d.id = t.driver_id
   LEFT JOIN ops.locations f ON f.id = t.from_location_id
@@ -198,25 +203,35 @@ export async function payrollMatrix(period: Period) {
 
 export type DriverPeriodTripRow = {
   id: string;
+  driver_id: string;
+  driver_name: string | null;
+  driver_type: DriverType;
   trip_date: string;
   operation: OperationType;
   load_no: string;
+  from_location_id: string | null;
+  to_location_id: string | null;
   from_code: string | null;
   to_code: string | null;
   miles: string;
   fuel_gallons: string;
   pay_amount: string;
+  notes: string | null;
 };
 
 /** Payroll drill-down: every leg of one driver inside the period, by date then origin -> destination */
 export async function driverPeriodTrips(period: Period, driverId: string) {
   return prisma.$queryRaw<DriverPeriodTripRow[]>`
-    SELECT t.id::text,
+    SELECT t.id::text, t.driver_id::text, t.driver_name,
+           d.driver_type::text AS driver_type,
            to_char(t.trip_date, 'YYYY-MM-DD') AS trip_date,
            t.operation::text AS operation, t.load_no,
+           t.from_location_id::text AS from_location_id,
+           t.to_location_id::text AS to_location_id,
            f.code AS from_code, o.code AS to_code,
-           t.miles::text, t.fuel_gallons::text, t.pay_amount::text
+           t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.notes
     FROM pay.trips t
+    JOIN ops.drivers d ON d.id = t.driver_id
     LEFT JOIN ops.locations f ON f.id = t.from_location_id
     LEFT JOIN ops.locations o ON o.id = t.to_location_id
     WHERE t.driver_id = ${driverId}::bigint

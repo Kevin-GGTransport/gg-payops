@@ -13,12 +13,11 @@ import { requireUser } from "@/lib/auth";
 import { allValues, firstValue, type SearchParams } from "@/lib/search-params";
 import { type OperationType } from "@/lib/labels";
 import { listOperationTypes, activeOperationOptions } from "@/lib/queries/operations";
-import { getTripById, listTrips } from "@/lib/queries/trips";
+import { listTrips } from "@/lib/queries/trips";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeLocationOptions } from "@/lib/queries/locations";
 import { activeWageRuleVersions } from "@/lib/queries/wage-rules";
 import { TripsTable } from "./trips-table";
-import { TripEditDialog } from "./trip-edit-dialog";
 
 export const metadata: Metadata = { title: "行程台账 · G&G PayOps" };
 
@@ -70,8 +69,6 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
   const dateFrom = dateParam(firstValue(sp.from));
   const dateTo = dateParam(firstValue(sp.to));
   const page = intFromParam(firstValue(sp.page));
-  // ?edit=<tripId> opens the edit dialog on top of the current list view
-  const editId = (firstValue(sp.edit) ?? "").trim();
 
   // Sanitize driver ids from the URL (bigint identities are digits only);
   // doing this locally lets all three queries start in parallel
@@ -87,7 +84,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
   const hasFilter =
     selectedIds.length > 0 || Boolean(operation) || Boolean(q) || Boolean(dateFrom) || Boolean(dateTo);
 
-  const [drivers, trips, editing, locations, wageRules, operationOptions] = await Promise.all([
+  const [drivers, trips, locations, wageRules, operationOptions] = await Promise.all([
     activeDriverOptions(),
     listTrips({
       ...(selectedIds.length > 0 ? { driverIds: selectedIds } : {}),
@@ -98,11 +95,10 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
       page,
       pageSize: PAGE_SIZE
     }),
-    editId ? getTripById(editId) : Promise.resolve(null),
-    // Edit-dialog dictionaries, fetched only when a dialog actually opens
-    editId ? activeLocationOptions() : Promise.resolve([]),
-    editId ? activeWageRuleVersions() : Promise.resolve([]),
-    editId ? activeOperationOptions() : Promise.resolve([])
+    // Edit-dialog dictionaries (in-page client dialog, always mounted)
+    activeLocationOptions(),
+    activeWageRuleVersions(),
+    activeOperationOptions()
   ]);
   const total = trips[0]?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -205,6 +201,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
           <TripsTable
             trips={trips}
             returnTo={queryWith({ page }).toString()}
+            edit={{ locations, operations: operationOptions, wageRules }}
             empty={
               hasFilter
                 ? "没有符合条件的行程。调整筛选条件，或点右上角「录入行程」前往首页录入。"
@@ -240,15 +237,6 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
           )}
         </div>
       </section>
-
-      <TripEditDialog
-        editing={editing}
-        locations={locations}
-        operations={operationOptions}
-        wageRules={wageRules}
-        closeHref={`/dashboard/trips${queryWith({ page }).toString() ? `?${queryWith({ page }).toString()}` : ""}`}
-        returnTo={queryWith({ page }).toString()}
-      />
     </>
   );
 }

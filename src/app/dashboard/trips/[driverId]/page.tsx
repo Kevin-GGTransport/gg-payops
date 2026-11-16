@@ -15,16 +15,10 @@ import { getDriverById } from "@/lib/queries/drivers";
 import { activeOperationOptions } from "@/lib/queries/operations";
 import { activeLocationOptions } from "@/lib/queries/locations";
 import { activeWageRuleVersions } from "@/lib/queries/wage-rules";
-import {
-  driverPeriodTrips,
-  getTripById,
-  periodPayTotals,
-  type DriverPeriodTripRow
-} from "@/lib/queries/trips";
+import { driverPeriodTrips, periodPayTotals, type DriverPeriodTripRow } from "@/lib/queries/trips";
 import { getStatementByDriverPeriod } from "@/lib/queries/statements";
 import { advanceStatement, revertStatement } from "../../payroll/actions";
 import { PayrollLegsTable } from "../payroll-legs-table";
-import { TripEditDialog } from "../trip-edit-dialog";
 
 export const metadata: Metadata = { title: "周期工资单 · G&G PayOps" };
 
@@ -80,23 +74,20 @@ export default async function DriverPeriodPage({
 
   const sp = await searchParams;
   const period = dateParam(firstValue(sp.period)) ? periodOf(dateParam(firstValue(sp.period))!) : currentPeriod();
-  // ?edit=<tripId> opens the edit dialog on top of this sheet
-  const editId = (firstValue(sp.edit) ?? "").trim();
   const thisWeek = currentPeriod();
   const today = todayIso();
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
 
-  const [legs, periodTotals, statement, editing, locations, wageRules, operationOptions] =
+  const [legs, periodTotals, statement, locations, wageRules, operationOptions] =
     await Promise.all([
       driverPeriodTrips(period, driver.id),
       periodPayTotals(),
       getStatementByDriverPeriod(driver.id, period.start),
-      editId ? getTripById(editId) : Promise.resolve(null),
-      // Edit-dialog dictionaries, fetched only when a dialog actually opens
-      editId ? activeLocationOptions() : Promise.resolve([]),
-      editId ? activeWageRuleVersions() : Promise.resolve([]),
-      editId ? activeOperationOptions() : Promise.resolve([])
+      // Edit-dialog dictionaries (in-page client dialog, always mounted)
+      activeLocationOptions(),
+      activeWageRuleVersions(),
+      activeOperationOptions()
     ]);
   const days = groupByDay(legs);
   const totals = legs.reduce(
@@ -239,7 +230,7 @@ export default async function DriverPeriodPage({
             totalFuel={String(totals.fuel)}
             totalPay={String(totals.pay)}
             returnTo={returnTo}
-            editHrefBase={returnTo}
+            edit={{ locations, operations: operationOptions, wageRules }}
             storageKey="payops.payroll.detail.cols"
           />
           {legs.length === 0 && (
@@ -249,15 +240,6 @@ export default async function DriverPeriodPage({
           )}
         </LedgerPanel>
       </section>
-
-      <TripEditDialog
-        editing={editing}
-        locations={locations}
-        operations={operationOptions}
-        wageRules={wageRules}
-        closeHref={returnTo}
-        returnTo={returnTo}
-      />
     </>
   );
 }
