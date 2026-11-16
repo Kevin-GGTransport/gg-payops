@@ -15,6 +15,7 @@ export type LocationRow = {
   latitude: string | null;
   longitude: string | null;
   standard_pay_amount: string;
+  amazon_class: "A" | "B" | null;
   status: RecordStatus;
 };
 
@@ -31,7 +32,8 @@ export async function listLocations(filter: { type: LocationType | "all"; q: str
     SELECT l.id::text, l.code, l.name, l.location_type::text AS location_type,
            l.address_line, l.city, l.state_code, l.postal_code,
            l.latitude::text AS latitude, l.longitude::text AS longitude,
-           l.standard_pay_amount::text, l.status::text AS status
+           l.standard_pay_amount::text, l.amazon_class::text AS amazon_class,
+           l.status::text AS status
     FROM ops.locations l
     WHERE 1 = 1 ${typeClause} ${qClause}
     ORDER BY l.status = 'ACTIVE' DESC, l.location_type, l.code
@@ -43,7 +45,8 @@ export async function getLocationById(id: string) {
     SELECT l.id::text, l.code, l.name, l.location_type::text AS location_type,
            l.address_line, l.city, l.state_code, l.postal_code,
            l.latitude::text AS latitude, l.longitude::text AS longitude,
-           l.standard_pay_amount::text, l.status::text AS status
+           l.standard_pay_amount::text, l.amazon_class::text AS amazon_class,
+           l.status::text AS status
     FROM ops.locations l WHERE l.id = ${id}::bigint LIMIT 1
   `;
   return rows[0] ?? null;

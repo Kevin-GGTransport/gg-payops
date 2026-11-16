@@ -16,7 +16,7 @@ function backWithError(error: string, formData: FormData): never {
   const id = str(formData, "id");
   if (id) params.set("edit", id);
   params.set("error", error);
-  for (const field of ["code", "name", "location_type", "standard_pay_amount", "address_line", "city", "state_code", "postal_code"]) {
+  for (const field of ["code", "name", "location_type", "standard_pay_amount", "amazon_class", "address_line", "city", "state_code", "postal_code"]) {
     const value = str(formData, field);
     if (value) params.set(`f_${field}`, value);
   }
@@ -30,7 +30,12 @@ export async function saveLocation(formData: FormData) {
   const code = str(formData, "code").toUpperCase();
   const name = str(formData, "name");
   const locationType = str(formData, "location_type");
-  const standardPay = str(formData, "standard_pay_amount") || "0";
+  // Amazon warehouses price on /dashboard/wage-rules (standard pay + A/B
+  // class); their pay field never submits from this form, so updates keep
+  // the stored value and inserts start at 0
+  const isAmazon = locationType === "AMAZON";
+  const standardPay = isAmazon ? null : str(formData, "standard_pay_amount") || "0";
+  const amazonClass = isAmazon ? str(formData, "amazon_class") : "";
   const addressLine = str(formData, "address_line") || null;
   const city = str(formData, "city") || null;
   const stateCode = str(formData, "state_code").toUpperCase() || null;
@@ -44,7 +49,7 @@ export async function saveLocation(formData: FormData) {
   if (!TYPES.includes(locationType as (typeof TYPES)[number])) {
     backWithError("missing_type", formData);
   }
-  const pay = Number(standardPay);
+  const pay = Number(standardPay ?? "0");
   if (!Number.isFinite(pay) || pay < 0) backWithError("bad_pay", formData);
   const lat = latitudeRaw === "" ? null : Number(latitudeRaw);
   const lng = longitudeRaw === "" ? null : Number(longitudeRaw);
@@ -82,7 +87,11 @@ export async function saveLocation(formData: FormData) {
     await prisma.$executeRaw`
       UPDATE ops.locations SET
         code = ${code}, name = ${name}, location_type = ${locationType}::ops.location_type,
-        is_base = ${locationType === "BASE"}, standard_pay_amount = ${pay},
+        is_base = ${locationType === "BASE"},
+        standard_pay_amount = CASE WHEN ${isAmazon}
+          THEN standard_pay_amount /* owned by the wage console */
+          ELSE ${pay} END,
+        amazon_class = ${amazonClass === "A" || amazonClass === "B" ? amazonClass : null},
         address_line = ${addressLine}, city = ${city}, state_code = ${stateCode}, postal_code = ${postalCode},
         latitude = ${lat}::decimal(9,6), longitude = ${lng}::decimal(9,6),
         updated_at = now()
@@ -90,10 +99,11 @@ export async function saveLocation(formData: FormData) {
     `;
   } else {
     await prisma.$executeRaw`
-      INSERT INTO ops.locations(code, name, location_type, is_base, standard_pay_amount, address_line, city, state_code, postal_code, latitude, longitude)
+      INSERT INTO ops.locations(code, name, location_type, is_base, standard_pay_amount, amazon_class, address_line, city, state_code, postal_code, latitude, longitude)
       VALUES (
         ${code}, ${name},
         ${locationType}::ops.location_type, ${locationType === "BASE"}, ${pay},
+        ${amazonClass === "A" || amazonClass === "B" ? amazonClass : null},
         ${addressLine}, ${city}, ${stateCode}, ${postalCode},
         ${lat}::decimal(9,6), ${lng}::decimal(9,6)
       )
