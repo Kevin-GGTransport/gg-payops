@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { periodOf } from "@/lib/period";
+import { todayIso } from "@/lib/format";
 
 const MAX_GROUPS = 20;
 const MAX_ROWS_PER_GROUP = 50;
@@ -20,9 +21,9 @@ type ParsedRow = {
   loadNo: string;
   from: string;
   to: string;
-  milesValue: string;
-  fuelValue: string;
-  payValue: string;
+  milesNum: number;
+  fuelNum: number;
+  payNum: number;
   notes: string;
 };
 
@@ -45,6 +46,12 @@ function clampCount(value: string, max: number) {
 
 function isIsoDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(value).toString() !== "Invalid Date";
+}
+
+/** Bad or negative numbers fall back to 0 - entry is validation-free, the sheet numeric columns are NOT NULL DEFAULT 0 */
+function num0(value: string) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
 const ROW_FIELDS = [
@@ -90,29 +97,28 @@ function packRefill(
 }
 
 /**
- * Redirect back to the entry page with the error code, the failing group / row
- * number, and every group's input refilled (the failing group's tab opens).
+ * Redirect back to the entry page with the error code, the failing group,
+ * and every group's input refilled (the failing group's tab opens).
  */
 function backWithError(
   error: string,
   formData: FormData,
   groups: ParsedGroup[],
-  grp?: number,
-  leg?: number
+  grp?: number
 ): never {
   const params = new URLSearchParams({ error });
   if (grp !== undefined) {
     params.set("grp", String(grp));
     params.set("tab", String(grp - 1));
   }
-  if (leg !== undefined) params.set("leg", String(leg));
   packRefill(params, formData, groups);
   redirect(`/dashboard?${params.toString()}`);
 }
 
 /**
  * Resolve one submitted endpoint ("loc:<id>" verified against the DB, "txt:<text>"
- * find-or-created as an OTHER location) into a bigint id string. Map-picked
+ * find-or-created as an OTHER location) into a bigint id string; unresolvable
+ * endpoints return "" (stored as NULL - entry no longer blocks on them). Map-picked
  * endpoints carry a "|geo:<lat>,<lng>;<street>;<city>;<state>;<zip>" suffix
  * (see location-picker) which enriches the created location with coordinates
  * and structured address fields.
@@ -193,6 +199,14 @@ async function resolveEndpointId(value: string): Promise<string> {
   return "";
 }
 
+/**
+ * Entry is validation-free by design: every submitted row goes in with
+ * defaults filling the gaps (missing date -> business today, unknown
+ * operation -> the dictionary's first code, bad numbers -> 0, missing
+ * endpoints -> NULL). Only two things still block: no driver on a group
+ * (driver_id is a NOT NULL FK - a trip cannot exist without an owner)
+ * and an empty batch.
+ */
 export async function addTripsBatch(formData: FormData) {
   await requireUser();
 
@@ -207,6 +221,16 @@ export async function addTripsBatch(formData: FormData) {
       ? scopeNum
       : null;
 
+  // Operation dictionary: rows with no/unknown operation fall back to the
+  // dictionary's first ACTIVE code (same default the entry sheet opens with)
+  const operationRows = await prisma.$queryRaw<Array<{ code: string }>>`
+    SELECT code FROM ops.operation_types WHERE status = 'ACTIVE' ORDER BY sort_order, code
+  `;
+  if (operationRows.length === 0) backWithError("missing_operation", formData, []);
+  const fallbackOperation = operationRows[0].code;
+  const validOperations = new Set(operationRows.map(o => o.code));
+
+  const today = todayIso();
   const groups: ParsedGroup[] = [];
   let total = 0;
   for (let g = 0; g < groupCount; g++) {
@@ -216,25 +240,31 @@ export async function addTripsBatch(formData: FormData) {
     );
     const rows: ParsedRow[] = [];
     for (let i = 0; i < rowCount; i++) {
-      const row: ParsedRow = {
-        // Per-row date only (a sheet spans many days) - no group default
-        // anymore; an empty date fails isIsoDate below with the exact leg
-        tripDate: str(formData, `g_${g}_row_${i}_trip_date`),
-        operation: str(formData, `g_${g}_row_${i}_operation`),
-        loadNo: str(formData, `g_${g}_row_${i}_load_no`),
-        from: str(formData, `g_${g}_row_${i}_from_location`),
-        to: str(formData, `g_${g}_row_${i}_to_location`),
-        milesValue: str(formData, `g_${g}_row_${i}_miles`) || "0",
-        fuelValue: str(formData, `g_${g}_row_${i}_fuel_gallons`) || "0",
-        payValue: str(formData, `g_${g}_row_${i}_pay_amount`) || "0",
-        notes: str(formData, `g_${g}_row_${i}_notes`) || ""
-      };
+      const p = `g_${g}_row_${i}_`;
+      const rawDate = str(formData, `${p}trip_date`);
+      const rawOperation = str(formData, `${p}operation`);
       // Reserve rows the clerk never touched are skipped silently (the sheet
       // opens with 10 blank rows). A start alone does NOT count: the sticky
       // carry-over fills the next leg's start automatically - a real row has
       // a destination, a Load# or a note
-      if (!row.to && !row.loadNo && !row.notes) continue;
-      rows.push(row);
+      const loadNo = str(formData, `${p}load_no`);
+      const notes = str(formData, `${p}notes`);
+      const to = str(formData, `${p}to_location`);
+      if (!to && !loadNo && !notes) continue;
+      rows.push({
+        // Missing/invalid date falls back to the business today (US Pacific)
+        tripDate: isIsoDate(rawDate) ? rawDate : today,
+        operation: validOperations.has(rawOperation) ? rawOperation : fallbackOperation,
+        loadNo,
+        from: str(formData, `${p}from_location`),
+        to,
+        milesNum: num0(str(formData, `${p}miles`)),
+        fuelNum: num0(str(formData, `${p}fuel_gallons`)),
+        // Wage snapshot: trust the submitted amount (auto-calculated client-side or
+        // hand-edited); no server-side recompute so manual overrides stick
+        payNum: num0(str(formData, `${p}pay_amount`)),
+        notes
+      });
     }
     total += rows.length;
     groups.push({
@@ -246,75 +276,54 @@ export async function addTripsBatch(formData: FormData) {
 
   if (total === 0) backWithError("no_rows", formData, groups);
 
-  // Single-tab submit: validate, resolve and persist only that group (the
-  // other tabs' half-filled state is intentionally left unvalidated). Groups
-  // whose rows were all blank reserve rows drop out entirely.
+  // Single-tab submit: persist only that group (the other tabs' half-filled
+  // state is intentionally left out). Groups whose rows were all blank
+  // reserve rows drop out entirely.
   const active = (scope === null ? groups.map((_, i) => i) : [scope]).filter(
     g => groups[g].rows.length > 0
   );
   if (active.length === 0) backWithError("no_rows", formData, groups);
 
-  // Operation dictionary: valid codes + whether Load# is required come from
-  // ops.operation_types (managed on /dashboard/operations), not a hard-coded list
-  const operationRows = await prisma.$queryRaw<
-    Array<{ code: string; requires_load: boolean }>
-  >`
-    SELECT code, requires_load FROM ops.operation_types WHERE status = 'ACTIVE'
-  `;
-  const validOperations = new Set(operationRows.map(o => o.code));
-  const loadRequired = new Set(operationRows.filter(o => o.requires_load).map(o => o.code));
-
+  // The one hard requirement left: driver_id is a NOT NULL FK - a trip row
+  // cannot exist without an owner
   for (const g of active) {
-    const group = groups[g];
-    const grp = g + 1;
-    if (!group.driverId) backWithError("missing_driver", formData, groups, grp);
-    if (!group.truckId) backWithError("missing_truck", formData, groups, grp);
-    for (let i = 0; i < group.rows.length; i++) {
-      const row = group.rows[i];
-      const leg = i + 1;
-      if (!isIsoDate(row.tripDate)) backWithError("bad_date", formData, groups, grp, leg);
-      if (!validOperations.has(row.operation)) {
-        backWithError("missing_operation", formData, groups, grp, leg);
-      }
-      if (!row.loadNo && loadRequired.has(row.operation)) {
-        backWithError("missing_load", formData, groups, grp, leg);
-      }
-      const milesNum = Number(row.milesValue);
-      if (!Number.isFinite(milesNum) || milesNum < 0) backWithError("bad_miles", formData, groups, grp, leg);
-      const fuelNum = Number(row.fuelValue);
-      if (!Number.isFinite(fuelNum) || fuelNum < 0) backWithError("bad_fuel", formData, groups, grp, leg);
-      // Wage snapshot: trust the submitted amount (auto-calculated client-side or
-      // hand-edited); no server-side recompute so manual overrides stick
-      const payNum = Number(row.payValue);
-      if (!Number.isFinite(payNum) || payNum < 0) backWithError("bad_pay", formData, groups, grp, leg);
-      if (!row.from && !row.to) backWithError("missing_route", formData, groups, grp, leg);
-    }
+    if (!groups[g].driverId) backWithError("missing_driver", formData, groups, g + 1);
   }
 
   // Submit-time snapshots: the driver's current name and the truck's full
   // record, frozen into every trip row (later archive edits never rewrite
-  // history; driver_id stays for payroll joins)
+  // history; driver_id stays for payroll joins). An unpicked or unknown
+  // truck simply stores no snapshot - it is optional now.
   const snapDriverIds = [...new Set(active.map(g => groups[g].driverId))];
   const driverNameRows = await prisma.$queryRaw<{ id: string; full_name: string }[]>`
     SELECT id::text, full_name FROM ops.drivers
     WHERE id IN (${Prisma.join(snapDriverIds.map(id => Prisma.sql`${id}::bigint`))})
   `;
   const driverNames = new Map(driverNameRows.map(r => [r.id, r.full_name]));
-  const snapTruckIds = [...new Set(active.map(g => groups[g].truckId))];
-  const truckRows = await prisma.$queryRaw<
-    Array<{
-      id: string;
-      truck_code: string;
-      plate_no: string | null;
-      truck_type: string | null;
-      capacity_note: string | null;
-    }>
-  >`
-    SELECT id::text, truck_code, plate_no, truck_type, capacity_note
-    FROM ops.trucks
-    WHERE id IN (${Prisma.join(snapTruckIds.map(id => Prisma.sql`${id}::bigint`))})
-      AND status = 'ACTIVE'
-  `;
+  for (const g of active) {
+    if (!driverNames.has(groups[g].driverId)) {
+      backWithError("missing_driver", formData, groups, g + 1);
+    }
+  }
+  const snapTruckIds = [
+    ...new Set(active.map(g => groups[g].truckId).filter(Boolean))
+  ];
+  const truckRows = snapTruckIds.length
+    ? await prisma.$queryRaw<
+        Array<{
+          id: string;
+          truck_code: string;
+          plate_no: string | null;
+          truck_type: string | null;
+          capacity_note: string | null;
+        }>
+      >`
+        SELECT id::text, truck_code, plate_no, truck_type, capacity_note
+        FROM ops.trucks
+        WHERE id IN (${Prisma.join(snapTruckIds.map(id => Prisma.sql`${id}::bigint`))})
+          AND status = 'ACTIVE'
+      `
+    : [];
   const truckSnapshots = new Map(
     truckRows.map(t => [
       t.id,
@@ -327,75 +336,32 @@ export async function addTripsBatch(formData: FormData) {
       })
     ])
   );
-  for (const g of active) {
-    if (!driverNames.has(groups[g].driverId)) {
-      backWithError("missing_driver", formData, groups, g + 1);
-    }
-    if (!truckSnapshots.has(groups[g].truckId)) {
-      backWithError("bad_truck", formData, groups, g + 1);
-    }
-  }
 
-  // Resolve every distinct endpoint once (free text may create a new location)
+  // Resolve every distinct submitted endpoint once (free text may create a
+  // new location); unresolvable ones simply store NULL
   const endpointIds = new Map<string, string>();
   for (const value of [
     ...new Set(active.flatMap(g => groups[g].rows.flatMap(r => [r.from, r.to])).filter(Boolean))
   ]) {
-    const id = await resolveEndpointId(value);
-    if (!id) backWithError("bad_location", formData, groups);
-    endpointIds.set(value, id);
+    if (endpointIds.has(value)) continue;
+    endpointIds.set(value, await resolveEndpointId(value));
   }
 
-  // Duplicate guard: one DB read covering every driver and every date in this
-  // batch, compared in memory (per row's own driver and date) against both
-  // existing rows and this batch
-  const driverIds = snapDriverIds;
-  const batchDates = [...new Set(active.flatMap(g => groups[g].rows.map(r => r.tripDate)))];
-  const existing = await prisma.$queryRaw<
-    Array<{
-      driver_id: string;
-      trip_date: string;
-      operation: string;
-      from_location_id: string | null;
-      to_location_id: string | null;
-      load_no: string | null;
-    }>
-  >`
-    SELECT driver_id::text AS driver_id, trip_date::text AS trip_date, operation::text AS operation,
-           from_location_id::text AS from_location_id, to_location_id::text AS to_location_id,
-           nullif(load_no, '') AS load_no
-    FROM pay.trips
-    WHERE driver_id IN (${Prisma.join(driverIds.map(id => Prisma.sql`${id}::bigint`))})
-      AND trip_date IN (${Prisma.join(batchDates.map(d => Prisma.sql`${d}::date`))})
-  `;
-  const seen = new Set(
-    existing.map(
-      r =>
-        `${r.driver_id}|${r.trip_date}|${r.operation}|${r.from_location_id ?? ""}|${r.to_location_id ?? ""}|${r.load_no ?? ""}`
-    )
-  );
-
   const insertRows = active.flatMap(gi =>
-    groups[gi].rows.map((row, ri) => {
-      const fromId = endpointIds.get(row.from) ?? "";
-      const toId = endpointIds.get(row.to) ?? "";
-      // Same driver + day + operation + route counts as a duplicate only when
-      // the container matches too - sheets legitimately log two runs per route
-      const key = `${groups[gi].driverId}|${row.tripDate}|${row.operation}|${fromId}|${toId}|${row.loadNo}`;
-      if (seen.has(key)) backWithError("dup_trip", formData, groups, gi + 1, ri + 1);
-      seen.add(key);
+    groups[gi].rows.map(row => {
+      const snapshot = truckSnapshots.get(groups[gi].truckId);
       return {
         driverId: groups[gi].driverId,
         driverName: driverNames.get(groups[gi].driverId) ?? "",
-        truckSnapshot: truckSnapshots.get(groups[gi].truckId) ?? "",
+        truckSnapshot: snapshot,
         tripDate: row.tripDate,
-        fromId,
-        toId,
+        fromId: endpointIds.get(row.from) ?? "",
+        toId: endpointIds.get(row.to) ?? "",
         operation: row.operation,
         loadNo: row.loadNo,
-        milesNum: Number(row.milesValue),
-        fuelNum: Math.round(Number(row.fuelValue) * 100) / 100,
-        payNum: Math.round(Number(row.payValue) * 100) / 100,
+        milesNum: row.milesNum,
+        fuelNum: Math.round(row.fuelNum * 100) / 100,
+        payNum: Math.round(row.payNum * 100) / 100,
         notes: row.notes || null
       };
     })
@@ -405,7 +371,7 @@ export async function addTripsBatch(formData: FormData) {
   const values = insertRows.map(r => Prisma.sql`
     (${r.driverId}::bigint, ${r.tripDate}::date, ${r.operation}, ${r.loadNo},
      ${r.fromId || null}::bigint, ${r.toId || null}::bigint, ${r.milesNum}, ${r.fuelNum}, ${r.payNum},
-     ${r.notes}, ${r.driverName}, ${r.truckSnapshot}::jsonb)
+     ${r.notes}, ${r.driverName}, ${r.truckSnapshot ?? null}::jsonb)
   `);
   await prisma.$executeRaw`
     INSERT INTO pay.trips(driver_id, trip_date, operation, load_no,

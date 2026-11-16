@@ -15,19 +15,9 @@ import { TripEntryForm, type RefillGroup } from "./trip-entry-form";
 export const metadata: Metadata = { title: "录入行程 · G&G PayOps" };
 
 const ERROR_MESSAGES: Record<string, string> = {
-  missing_driver: "请选择司机 / 车主。",
-  missing_truck: "请选择车号（车辆需先在车辆管理登记）。",
-  bad_truck: "所选车辆无效或已停用，请重新选择车号。",
+  missing_driver: "请选择司机 / 车主（行程必须记在一位司机名下）。",
   no_rows: "请至少录入一段行程。",
-  bad_date: "行程日期无效或未填写，请检查该行的日期。",
-  missing_operation: "请选择操作类型。",
-  missing_load: "带柜操作需填写 Load#（可在「操作类型」里调整是否必填）。",
-  missing_route: "请至少选择起点或终点。",
-  bad_miles: "里程必须是不小于 0 的数字。",
-  bad_fuel: "加油量必须是不小于 0 的数字。",
-  bad_pay: "本趟工资必须是不小于 0 的数字。",
-  bad_location: "所选位置无效，请重新选择。",
-  dup_trip: "这一天相同操作、相同起终点、相同柜号的行程已存在，请勿重复录入。"
+  missing_operation: "操作类型字典为空，请先在「操作类型」页登记。"
 };
 
 export default async function EntryPage({
