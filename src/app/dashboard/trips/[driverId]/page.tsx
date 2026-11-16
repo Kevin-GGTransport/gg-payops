@@ -62,7 +62,7 @@ function groupByDay(legs: DriverPeriodTripRow[]) {
 /**
  * One driver's settlement sheet for one period (Sat ~ Fri): identity masthead,
  * the driver's own gauge strip (legs / miles / fuel / pay), then the day-ledger
- * drill-down with delete. Reached from the payroll matrix (name / pay cell).
+ * drill-down with delete. Reached from the payroll matrix's 详情 action.
  */
 export default async function DriverPeriodPage({
   params,

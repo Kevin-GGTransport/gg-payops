@@ -56,14 +56,7 @@ export function StatementsTable({
       id: "driver",
       header: "司机 / 车主",
       size: 140,
-      cell: ({ row }) => (
-        <Link
-          className="cell-link"
-          href={`/dashboard/trips/${row.original.driver_id}?period=${row.original.period_start}`}
-        >
-          {row.original.full_name}
-        </Link>
-      )
+      cell: ({ row }) => row.original.full_name
     },
     {
       id: "type",
@@ -120,18 +113,22 @@ export function StatementsTable({
     {
       id: "actions",
       header: "操作",
-      size: 200,
+      size: 240,
       enableResizing: false,
       meta: { cellClass: "actions" },
       cell: ({ row }) => {
         const s = row.original;
-        // Not generated yet: numbers are live, actions live on the page bar
-        if (!s.status || !s.id) return "—";
+        const detailHref = `/dashboard/trips/${s.driver_id}?period=${s.period_start}`;
+        // Not generated yet: numbers are live, only the detail sheet is reachable
+        if (!s.status || !s.id) {
+          return <Link href={detailHref}>详情</Link>;
+        }
         const next = nextStatus(s.status);
         const prev = prevStatus(s.status);
         const editable = s.status === "DRAFT" || s.status === "VERIFIED";
         return (
           <>
+            <Link href={detailHref}>详情</Link>
             {editable && (
               <Link href={`/dashboard/payroll?edit=${s.id}${returnQuery ? `&${returnQuery}` : ""}`}>
                 编辑
