@@ -12,7 +12,9 @@ import { fuel as fmtFuel, miles as fmtMiles, money, todayIso } from "@/lib/forma
 import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
 import { STATEMENT_STATUS_FLOW, STATEMENT_STATUS_LABELS } from "@/lib/labels";
 import { getDriverById } from "@/lib/queries/drivers";
-import { listOperationTypes } from "@/lib/queries/operations";
+import { activeOperationOptions } from "@/lib/queries/operations";
+import { activeLocationOptions } from "@/lib/queries/locations";
+import { activeWageRuleVersions } from "@/lib/queries/wage-rules";
 import {
   driverPeriodTrips,
   getTripById,
@@ -85,13 +87,17 @@ export default async function DriverPeriodPage({
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
 
-  const [legs, periodTotals, statement, editing, operations] = await Promise.all([
-    driverPeriodTrips(period, driver.id),
-    periodPayTotals(),
-    getStatementByDriverPeriod(driver.id, period.start),
-    editId ? getTripById(editId) : Promise.resolve(null),
-    listOperationTypes()
-  ]);
+  const [legs, periodTotals, statement, editing, locations, wageRules, operationOptions] =
+    await Promise.all([
+      driverPeriodTrips(period, driver.id),
+      periodPayTotals(),
+      getStatementByDriverPeriod(driver.id, period.start),
+      editId ? getTripById(editId) : Promise.resolve(null),
+      // Edit-dialog dictionaries, fetched only when a dialog actually opens
+      editId ? activeLocationOptions() : Promise.resolve([]),
+      editId ? activeWageRuleVersions() : Promise.resolve([]),
+      editId ? activeOperationOptions() : Promise.resolve([])
+    ]);
   const days = groupByDay(legs);
   const totals = legs.reduce(
     (acc, leg) => ({
@@ -246,7 +252,9 @@ export default async function DriverPeriodPage({
 
       <TripEditDialog
         editing={editing}
-        operations={operations}
+        locations={locations}
+        operations={operationOptions}
+        wageRules={wageRules}
         closeHref={returnTo}
         returnTo={returnTo}
       />

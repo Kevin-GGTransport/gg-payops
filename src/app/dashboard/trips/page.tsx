@@ -12,9 +12,11 @@ import { CleanForm } from "@/components/clean-form";
 import { requireUser } from "@/lib/auth";
 import { allValues, firstValue, type SearchParams } from "@/lib/search-params";
 import { type OperationType } from "@/lib/labels";
-import { listOperationTypes } from "@/lib/queries/operations";
+import { listOperationTypes, activeOperationOptions } from "@/lib/queries/operations";
 import { getTripById, listTrips } from "@/lib/queries/trips";
 import { activeDriverOptions } from "@/lib/queries/drivers";
+import { activeLocationOptions } from "@/lib/queries/locations";
+import { activeWageRuleVersions } from "@/lib/queries/wage-rules";
 import { TripsTable } from "./trips-table";
 import { TripEditDialog } from "./trip-edit-dialog";
 
@@ -85,7 +87,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
   const hasFilter =
     selectedIds.length > 0 || Boolean(operation) || Boolean(q) || Boolean(dateFrom) || Boolean(dateTo);
 
-  const [drivers, trips, editing] = await Promise.all([
+  const [drivers, trips, editing, locations, wageRules, operationOptions] = await Promise.all([
     activeDriverOptions(),
     listTrips({
       ...(selectedIds.length > 0 ? { driverIds: selectedIds } : {}),
@@ -96,7 +98,11 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
       page,
       pageSize: PAGE_SIZE
     }),
-    editId ? getTripById(editId) : Promise.resolve(null)
+    editId ? getTripById(editId) : Promise.resolve(null),
+    // Edit-dialog dictionaries, fetched only when a dialog actually opens
+    editId ? activeLocationOptions() : Promise.resolve([]),
+    editId ? activeWageRuleVersions() : Promise.resolve([]),
+    editId ? activeOperationOptions() : Promise.resolve([])
   ]);
   const total = trips[0]?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -237,7 +243,9 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
 
       <TripEditDialog
         editing={editing}
-        operations={operations}
+        locations={locations}
+        operations={operationOptions}
+        wageRules={wageRules}
         closeHref={`/dashboard/trips${queryWith({ page }).toString() ? `?${queryWith({ page }).toString()}` : ""}`}
         returnTo={queryWith({ page }).toString()}
       />

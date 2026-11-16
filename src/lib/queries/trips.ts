@@ -42,9 +42,13 @@ export type TripEditRow = {
   id: string;
   driver_id: string;
   driver_name: string | null;
+  /** Driver type at edit time; wages reprice against it like entry rows */
+  driver_type: DriverType | null;
   trip_date: string;
   operation: string;
   load_no: string;
+  from_location_id: string | null;
+  to_location_id: string | null;
   from_code: string | null;
   to_code: string | null;
   miles: string;
@@ -57,11 +61,15 @@ export async function getTripById(id: string): Promise<TripEditRow | null> {
   if (!/^\d+$/.test(id)) return null;
   const rows = await prisma.$queryRaw<TripEditRow[]>`
     SELECT t.id::text, t.driver_id::text, t.driver_name,
+           d.driver_type::text AS driver_type,
            to_char(t.trip_date, 'YYYY-MM-DD') AS trip_date,
            t.operation::text AS operation, t.load_no,
+           t.from_location_id::text AS from_location_id,
+           t.to_location_id::text AS to_location_id,
            f.code AS from_code, o.code AS to_code,
            t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.notes
     FROM pay.trips t
+    LEFT JOIN ops.drivers d ON d.id = t.driver_id
     LEFT JOIN ops.locations f ON f.id = t.from_location_id
     LEFT JOIN ops.locations o ON o.id = t.to_location_id
     WHERE t.id = ${id}::bigint

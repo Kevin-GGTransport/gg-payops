@@ -1,74 +1,364 @@
+"use client";
+
+import * as React from "react";
+
 import { ModalShell } from "@/components/modal-shell";
-import {
-  DateField,
-  FormGrid,
-  NumberField,
-  SubmitButton,
-  TextField,
-  TextareaField
-} from "@/components/form-fields";
+import { FormGrid, SubmitButton, TextareaField } from "@/components/form-fields";
 import { ComboboxField } from "@/components/combobox-field";
-import type { OperationTypeRow } from "@/lib/queries/operations";
+import { DateField } from "@/components/date-field";
+import { LocationPicker, type LocationOption } from "@/components/location-picker";
+import { Input } from "@/components/ui/input";
+import { calcTripWage, pickVersion, type WageRuleData } from "@/lib/wage";
+import type { DriverType, OperationType } from "@/lib/labels";
+import type { OperationOption } from "../trip-entry-form";
 import type { TripEditRow } from "@/lib/queries/trips";
 import { updateTrip } from "./actions";
 
+/** Label + control + optional hint, the dialog counterpart of a sheet column */
+function DialogField({
+  label,
+  hint,
+  hintDanger = false,
+  children
+}: {
+  label: string;
+  hint?: string;
+  hintDanger?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+      <span>{label}</span>
+      {children}
+      {hint && (
+        <span
+          className={`text-[10px] leading-tight font-normal ${
+            hintDanger ? "text-destructive" : "text-muted-foreground"
+          }`}
+        >
+          {hint}
+        </span>
+      )}
+    </div>
+  );
+}
+
 /**
- * URL-driven edit dialog (same contract as the payroll edit card): the page
- * fetches the trip when ?edit=<id> is present and renders this shell; saving
- * goes through the updateTrip server action.
+ * URL-driven edit dialog: one trip edited with the exact same field set and
+ * behavior as a home-sheet entry row - location pickers (creatable + map),
+ * Google-measured miles on every endpoint change, rule-priced wage with a
+ * sticky manual override. The page fetches the trip when ?edit=<id> is
+ * present; saving goes through the updateTrip server action.
  */
 export function TripEditDialog({
   editing,
+  locations,
   operations,
+  wageRules,
   closeHref,
   returnTo
 }: {
   editing: TripEditRow | null;
-  /** Operation dictionary for the picker (ACTIVE codes) */
-  operations: OperationTypeRow[];
+  /** Location dictionary; stored endpoints map back to loc:<id> picks */
+  locations: LocationOption[];
+  /** Operation dictionary (ACTIVE rows); drives the dropdown and Load# lock */
+  operations: OperationOption[];
+  /** Wage-rule versions (current + scheduled); the trip's date picks one */
+  wageRules: WageRuleData[];
   /** URL that drops the ?edit param */
   closeHref: string;
   /** Serialized filters the save redirects back to */
   returnTo: string;
 }) {
+  // Stored endpoint -> picker value: the loc: pick when the row is in the
+  // dictionary, else txt:<code> (an INACTIVE location still resolves by code
+  // server-side), else empty
+  const endpointInitial = (locationId: string | null, code: string | null) => {
+    if (locationId && locations.some(l => l.id === locationId)) return `loc:${locationId}`;
+    return code ? `txt:${code}` : "";
+  };
+
   return (
     <ModalShell
       open={Boolean(editing)}
       closeHref={closeHref}
-      title={editing ? `编辑行程 · ${editing.driver_name ?? ""}（${editing.trip_date}）` : "编辑行程"}
+      title={
+        editing
+          ? `编辑行程 · ${editing.driver_name ?? ""}（${editing.trip_date}）`
+          : "编辑行程"
+      }
     >
       {editing && (
-        <form action={updateTrip} aria-label="行程编辑卡">
-          <input type="hidden" name="id" value={editing.id} />
-          <input type="hidden" name="return_to" value={returnTo} />
-          <FormGrid>
-            <DateField label="日期" name="trip_date" defaultValue={editing.trip_date} />
-            <ComboboxField
-              label="操作"
-              name="operation"
-              defaultValue={editing.operation}
-              placeholder="选择操作"
-              clearable={false}
-              searchable={false}
-              options={operations
-                .filter(o => o.status === "ACTIVE")
-                .map(o => ({
-                  value: o.code,
-                  label: o.label !== o.code ? `${o.code} · ${o.label}` : o.code,
-                  ...(o.description ? { description: o.description } : {})
-                }))}
-            />
-            <TextField label="Load#" name="load_no" defaultValue={editing.load_no} placeholder="如 12345" />
-            <TextField label="起点代码" name="from_location" defaultValue={editing.from_code ?? ""} placeholder="如 ONT" />
-            <TextField label="终点代码" name="to_location" defaultValue={editing.to_code ?? ""} placeholder="如 LAX" />
-            <NumberField label="Miles" name="miles" required min={0} step={0.01} defaultValue={editing.miles} />
-            <NumberField label="加油 (gal)" name="fuel_gallons" required min={0} step={0.01} defaultValue={editing.fuel_gallons} />
-            <NumberField label="本趟工资 ($)" name="pay_amount" required min={0} step={0.01} defaultValue={editing.pay_amount} />
-            <TextareaField label="备注" name="notes" defaultValue={editing.notes ?? ""} className="col-span-2 max-md:col-span-1" />
-          </FormGrid>
-          <SubmitButton>保存修改</SubmitButton>
-        </form>
+        <EditForm
+          editing={editing}
+          locations={locations}
+          operations={operations}
+          wageRules={wageRules}
+          returnTo={returnTo}
+          endpointInitial={endpointInitial}
+        />
       )}
     </ModalShell>
+  );
+}
+
+type CalcStatus = "loading" | "auto" | "failed";
+
+function EditForm({
+  editing,
+  locations,
+  operations,
+  wageRules,
+  returnTo,
+  endpointInitial
+}: {
+  editing: TripEditRow;
+  locations: LocationOption[];
+  operations: OperationOption[];
+  wageRules: WageRuleData[];
+  returnTo: string;
+  endpointInitial: (locationId: string | null, code: string | null) => string;
+}) {
+  const [dateValue, setDateValue] = React.useState(editing.trip_date);
+  const [operation, setOperation] = React.useState(editing.operation);
+  const operationRequiresLoad = (code: string) =>
+    operations.find(o => o.code === code)?.requires_load ?? true;
+  const [loadNoValue, setLoadNoValue] = React.useState(
+    !operationRequiresLoad(editing.operation) ? "" : editing.load_no ?? ""
+  );
+  const [fromValue, setFromValue] = React.useState(() =>
+    endpointInitial(editing.from_location_id, editing.from_code)
+  );
+  const [toValue, setToValue] = React.useState(() =>
+    endpointInitial(editing.to_location_id, editing.to_code)
+  );
+  const [milesValue, setMilesValue] = React.useState(editing.miles || "0");
+  // Fuel-up log (US gallons): optional ledger field, never priced - same as entry
+  const [fuelValue, setFuelValue] = React.useState(editing.fuel_gallons ?? "");
+  const [status, setStatus] = React.useState<CalcStatus>("loading");
+  const [manual, setManual] = React.useState(false);
+  // Ignore stale responses after a quick endpoint re-pick
+  const requestId = React.useRef(0);
+
+  // Sticky manual wage: the stored amount opens as the manual value (it was
+  // priced at entry time and must not silently drift on open); hand edits
+  // keep it, only 重算 drops back to following the rule
+  const [manualPay, setManualPay] = React.useState<string | null>(editing.pay_amount || null);
+
+  // Google-measured miles: every endpoint (re-)pick re-measures, exactly like
+  // an entry row; a failed measurement keeps the stored value for hand edits
+  React.useEffect(() => {
+    if (!fromValue || !toValue) return;
+    const id = ++requestId.current;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/distance?from=${encodeURIComponent(fromValue)}&to=${encodeURIComponent(toValue)}`
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data: { miles: number | null } = await res.json();
+        if (cancelled || id !== requestId.current) return;
+        if (typeof data.miles === "number" && data.miles > 0) {
+          setStatus("auto");
+          setManual(false);
+          setMilesValue(String(data.miles));
+        } else {
+          setStatus("failed");
+        }
+      } catch {
+        if (!cancelled && id === requestId.current) setStatus("failed");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fromValue, toValue]);
+
+  // Free-text endpoints never carry BASE pricing -> mileage tier, same as a
+  // picked non-BASE location, so they resolve to null endpoints here
+  const wageEndpoint = (value: string) =>
+    locations.find(l => `loc:${l.id}` === value) ?? null;
+
+  const baseFallbackLeg =
+    Boolean(fromValue && toValue) &&
+    ((wageEndpoint(fromValue)?.location_type === "BASE" &&
+      !((wageEndpoint(toValue)?.standard_pay_amount ?? 0) > 0)) ||
+      (wageEndpoint(toValue)?.location_type === "BASE" &&
+        !((wageEndpoint(fromValue)?.standard_pay_amount ?? 0) > 0)));
+
+  // Special-route lookup key: the picked location's zip, or the raw free-text
+  // value when it is itself a 5-digit zip (txt:94545)
+  const postalOf = (value: string): string | null => {
+    const loc = locations.find(l => `loc:${l.id}` === value);
+    if (loc) return loc.postal_code ?? null;
+    const text = value.startsWith("txt:") ? value.slice(4) : value;
+    return /^\d{5}$/.test(text) ? text : null;
+  };
+
+  // Rule price follows the trip's own date (future versions price future dates)
+  const rule = pickVersion(wageRules, dateValue);
+  const autoPay = React.useMemo(
+    () =>
+      rule
+        ? calcTripWage({
+            driverType: (editing.driver_type ?? undefined) as DriverType | undefined,
+            operation: (operation || undefined) as OperationType | undefined,
+            miles: Number(milesValue) || 0,
+            from: wageEndpoint(fromValue),
+            to: wageEndpoint(toValue),
+            fromPostal: postalOf(fromValue),
+            toPostal: postalOf(toValue),
+            rule
+          })
+        : 0,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- wageEndpoint/postalOf close over the stable locations prop
+    [operation, milesValue, fromValue, toValue, rule]
+  );
+
+  const payValue = manualPay ?? autoPay.toFixed(2);
+
+  const phase = !fromValue || !toValue ? "idle" : status;
+  const milesHint =
+    phase === "loading"
+      ? "测算中…"
+      : manual
+        ? "手动输入"
+        : phase === "failed"
+          ? "未能测算，请手填"
+          : "";
+
+  return (
+    <form action={updateTrip} aria-label="行程编辑卡">
+      <input type="hidden" name="id" value={editing.id} />
+      <input type="hidden" name="return_to" value={returnTo} />
+      <FormGrid>
+        <DialogField label="日期">
+          <DateField
+            name="trip_date"
+            value={dateValue}
+            onValueChange={setDateValue}
+            aria-label="行程日期"
+          />
+        </DialogField>
+        <DialogField label="起点">
+          <LocationPicker
+            name="from_location"
+            locations={locations}
+            creatable
+            value={fromValue}
+            placeholder="起点"
+            aria-label="行程起点"
+            onValueChange={setFromValue}
+          />
+        </DialogField>
+        <DialogField label="终点">
+          <LocationPicker
+            name="to_location"
+            locations={locations}
+            creatable
+            value={toValue}
+            placeholder="终点"
+            aria-label="行程终点"
+            onValueChange={setToValue}
+          />
+        </DialogField>
+        <DialogField label="操作">
+          <ComboboxField
+            name="operation"
+            defaultValue={operation}
+            clearable={false}
+            searchable={false}
+            aria-label="行程操作"
+            onValueChange={value => {
+              setOperation(value);
+              if (!operationRequiresLoad(value)) setLoadNoValue("");
+            }}
+            // Code-only labels keep the trigger narrow, same as entry rows
+            options={operations.map(op => ({ value: op.code, label: op.code }))}
+          />
+        </DialogField>
+        <DialogField label="Load#">
+          <Input
+            name="load_no"
+            value={loadNoValue}
+            onChange={e => setLoadNoValue(e.target.value)}
+            disabled={!operationRequiresLoad(operation)}
+            maxLength={64}
+            placeholder={operationRequiresLoad(operation) ? "如 LD101" : "该操作免填"}
+            aria-label="行程 Load#"
+            className="font-mono font-semibold"
+          />
+        </DialogField>
+        <DialogField label="里程 (mi)" hint={milesHint} hintDanger={phase === "failed"}>
+          <Input
+            type="number"
+            name="miles"
+            min={0}
+            step={0.1}
+            value={milesValue}
+            onChange={e => {
+              setMilesValue(e.target.value);
+              setManual(true);
+            }}
+            aria-label="行程里程"
+            className="text-right font-mono"
+          />
+        </DialogField>
+        <DialogField label="加油 (gal)">
+          <Input
+            type="number"
+            name="fuel_gallons"
+            min={0}
+            step={0.1}
+            value={fuelValue}
+            onChange={e => setFuelValue(e.target.value)}
+            placeholder="—"
+            aria-label="行程加油量"
+            className="text-right font-mono"
+          />
+        </DialogField>
+        <DialogField
+          label="本趟工资 ($)"
+          hint={
+            manualPay !== null
+              ? undefined // rendered inline below: the 重算 action lives in the hint slot
+              : dateValue && !rule
+                ? "该日期无生效规则"
+                : rule && baseFallbackLeg
+                  ? "对端未设基准，按里程档"
+                  : undefined
+          }
+        >
+          <>
+            <Input
+              type="number"
+              name="pay_amount"
+              min={0}
+              step={0.01}
+              value={payValue}
+              onChange={e => setManualPay(e.target.value)}
+              aria-label="行程本趟工资"
+              className="text-right font-mono"
+            />
+            {manualPay !== null && (
+              <span className="text-[10px] leading-tight font-normal text-muted-foreground">
+                手动 ·{" "}
+                <button type="button" className="linklike" onClick={() => setManualPay(null)}>
+                  重算
+                </button>
+              </span>
+            )}
+          </>
+        </DialogField>
+        <TextareaField
+          label="备注"
+          name="notes"
+          defaultValue={editing.notes ?? ""}
+          className="col-span-2 max-md:col-span-1"
+        />
+      </FormGrid>
+      <SubmitButton>保存修改</SubmitButton>
+    </form>
   );
 }
