@@ -7,9 +7,13 @@ const nameClass = "text-sm font-bold";
 const descClass = "col-start-2 text-[11px] leading-tight text-muted-foreground";
 const inputClass = "sr-only";
 
+// Selected look keyed off :checked so it follows clicks on the uncontrolled
+// radio - a defaultValue-derived class never updates after server render
 const DRIVER_ON: Record<DriverType, string> = {
-  DRIVER: "border-route bg-route/5 [&_svg]:text-route [&_.name]:text-route",
-  OWNER: "border-amber-400 bg-amber-50 [&_svg]:text-amber-700 [&_.name]:text-amber-800"
+  DRIVER:
+    "has-[:checked]:border-route has-[:checked]:bg-route/5 has-[:checked]:[&_svg]:text-route has-[:checked]:[&_.name]:text-route",
+  OWNER:
+    "has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50 has-[:checked]:[&_svg]:text-amber-700 has-[:checked]:[&_.name]:text-amber-800"
 };
 
 function SteeringIcon() {
@@ -36,7 +40,7 @@ export function DriverTypeCards({ defaultValue }: { defaultValue: DriverType }) 
     <fieldset className="mx-4 mt-3.5 grid grid-cols-2 gap-2 border-0 p-0 max-md:grid-cols-1">
       <legend className="mb-1.5 float-left text-[13px] text-muted-foreground">人员类型</legend>
       {(["DRIVER", "OWNER"] as const).map(type => (
-        <label key={type} className={cn(cardBase, defaultValue === type && DRIVER_ON[type])}>
+        <label key={type} className={cn(cardBase, DRIVER_ON[type])}>
           <input className={inputClass} type="radio" name="driver_type" value={type} defaultChecked={defaultValue === type} />
           {type === "DRIVER" ? <SteeringIcon /> : <TruckIcon />}
           <span className={cn(nameClass, "name")}>{DRIVER_TYPE_LABELS[type]}</span>
@@ -47,10 +51,11 @@ export function DriverTypeCards({ defaultValue }: { defaultValue: DriverType }) 
   );
 }
 
+// Same :checked-driven treatment as DRIVER_ON (uncontrolled radios)
 const STATUS_ON: Partial<Record<StatementStatus, string>> = {
-  DRAFT: "border-line bg-muted/60 [&_.name]:text-foreground",
-  REVIEWED: "border-amber-400 bg-amber-50 [&_.name]:text-amber-800",
-  VERIFIED: "border-route bg-route/5 [&_.name]:text-route"
+  DRAFT: "has-[:checked]:border-line has-[:checked]:bg-muted/60 has-[:checked]:[&_.name]:text-foreground",
+  REVIEWED: "has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50 has-[:checked]:[&_.name]:text-amber-800",
+  VERIFIED: "has-[:checked]:border-route has-[:checked]:bg-route/5 has-[:checked]:[&_.name]:text-route"
 };
 
 const STATUS_DESC: Partial<Record<StatementStatus, string>> = {
@@ -66,7 +71,7 @@ export function StatementStatusCards({ defaultValue }: { defaultValue: Statement
     <fieldset className="mx-4 mt-3.5 grid grid-cols-3 gap-2 border-0 p-0 max-md:grid-cols-1">
       <legend className="mb-1.5 float-left text-[13px] text-muted-foreground">状态</legend>
       {options.map(status => (
-        <label key={status} className={cn(cardBase, defaultValue === status && STATUS_ON[status])}>
+        <label key={status} className={cn(cardBase, STATUS_ON[status])}>
           <input className={inputClass} type="radio" name="status" value={status} defaultChecked={defaultValue === status} />
           <span className={cn(nameClass, "name col-span-2")}>{STATEMENT_STATUS_LABELS[status]}</span>
           <span className={descClass}>{STATUS_DESC[status]}</span>
