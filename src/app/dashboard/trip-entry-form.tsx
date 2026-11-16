@@ -146,6 +146,10 @@ const EntryRow = React.memo(function EntryRow({
   carryFrom,
   carryDate,
   onRemove,
+  /** Marks the sheet dirty + schedules a draft save; picker fields write their
+   *  hidden inputs programmatically (no change event bubbles), so every
+   *  non-typing value change must report through here */
+  onDirty,
   onPayChange,
   onToChange,
   onDateChange,
@@ -175,6 +179,7 @@ const EntryRow = React.memo(function EntryRow({
   /** Current date of the previous leg ("" when none yet) - sticky follow */
   carryDate: string;
   onRemove: (rowId: number) => void;
+  onDirty: () => void;
   onPayChange: (rowId: number, value: string) => void;
   /** Reports every endpoint pick upward (feeds the next leg's carry) */
   onToChange: (rowId: number, value: string) => void;
@@ -292,6 +297,9 @@ const EntryRow = React.memo(function EntryRow({
           setStatus("auto");
           setManual(false);
           setMilesValue(String(data.miles));
+          // Measured miles land after the debounce that saved the pick itself -
+          // persist them so a refresh mid-measure restores the measured value
+          onDirty();
         } else {
           setStatus("failed");
         }
@@ -302,6 +310,7 @@ const EntryRow = React.memo(function EntryRow({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onDirty is a stable parent callback (useCallback)
   }, [fromValue, toValue]);
 
   // Free-text endpoints never carry BASE pricing -> mileage tier, same as a
@@ -397,6 +406,7 @@ const EntryRow = React.memo(function EntryRow({
           onValueChange={value => {
             dateInherited.current = false;
             setDateValue(value);
+            onDirty();
           }}
           aria-label={`${legLabel}日期`}
           size="sm"
@@ -414,6 +424,7 @@ const EntryRow = React.memo(function EntryRow({
           onValueChange={value => {
             fromInherited.current = false;
             setFromValue(value);
+            onDirty();
           }}
         />
       </td>
@@ -429,6 +440,7 @@ const EntryRow = React.memo(function EntryRow({
           onValueChange={value => {
             setToValue(value);
             onToChange(rowId, value);
+            onDirty();
           }}
         />
       </td>
@@ -443,6 +455,7 @@ const EntryRow = React.memo(function EntryRow({
           onValueChange={value => {
             setOperation(value);
             if (!operationRequiresLoad(value)) setLoadNoValue("");
+            onDirty();
           }}
           // Code-only labels keep the trigger narrow in the table row
           options={operations.map(op => ({
@@ -512,7 +525,14 @@ const EntryRow = React.memo(function EntryRow({
           // manual on restore; auto-priced rows restore empty and recalc
           <span data-manual-pay className={`${cellHint} text-right`}>
             手动 ·{" "}
-            <button type="button" className="linklike" onClick={() => setManualPay(null)}>
+            <button
+              type="button"
+              className="linklike"
+              onClick={() => {
+                setManualPay(null);
+                onDirty();
+              }}
+            >
               重算
             </button>
           </span>
@@ -782,7 +802,10 @@ const GroupSection = React.memo(function GroupSection({
           clearable={false}
           className="w-56"
           triggerClassName="h-10"
-          onValueChange={setDriverId}
+          onValueChange={value => {
+            setDriverId(value);
+            onDirty();
+          }}
           options={drivers.map(d => ({
             value: d.id,
             label: d.full_name,
@@ -800,6 +823,7 @@ const GroupSection = React.memo(function GroupSection({
           clearable={false}
           className="w-44"
           triggerClassName="h-10"
+          onValueChange={() => onDirty()}
           options={trucks.map(t => ({
             value: t.id,
             label: t.truck_code,
@@ -849,6 +873,7 @@ const GroupSection = React.memo(function GroupSection({
                 carryFrom={i === 0 ? "" : (toByRow[rows[i - 1].id] ?? "")}
                 carryDate={i === 0 ? "" : (dateByRow[rows[i - 1].id] ?? "")}
                 onRemove={removeRowById}
+                onDirty={onDirty}
                 onPayChange={handleRowPayChange}
                 onToChange={handleToChange}
                 onDateChange={handleDateChange}
@@ -1053,6 +1078,13 @@ export function TripEntryForm({
     window.location.reload();
   }
 
+  /** Period picks are pure button/popover state (no change event) - route them
+   *  through the draft save so the cover restores with the sheet */
+  function changePeriod(next: string) {
+    handleDirty();
+    setPeriodStart(next);
+  }
+
   const removeGroup = React.useCallback((id: number) => {
     dirtyRef.current = true;
     const index = groupsRef.current.findIndex(g => g.id === id);
@@ -1205,7 +1237,7 @@ export function TripEntryForm({
           <button
             type="button"
             aria-label="上一周期"
-            onClick={() => setPeriodStart(shiftPeriod(periodOf(periodStart), -1).start)}
+            onClick={() => changePeriod(shiftPeriod(periodOf(periodStart), -1).start)}
             className="grid h-7 w-7 place-items-center rounded-md border border-line bg-card font-mono text-sm text-route transition-colors hover:border-route"
           >
             ‹
@@ -1215,19 +1247,27 @@ export function TripEntryForm({
             selectedLabel={periodLabel(periodOf(periodStart))}
             todayIso={todayIso()}
             totals={{}}
-            onPick={setPeriodStart}
+            onPick={changePeriod}
           />
           <button
             type="button"
             aria-label="下一周期"
-            onClick={() => setPeriodStart(shiftPeriod(periodOf(periodStart), 1).start)}
+            onClick={() => changePeriod(shiftPeriod(periodOf(periodStart), 1).start)}
             className="grid h-7 w-7 place-items-center rounded-md border border-line bg-card font-mono text-sm text-route transition-colors hover:border-route"
           >
             ›
           </button>
         </div>
 
-        <Tabs value={activeId} onValueChange={setActiveId}>
+        {/* Tab switches ride along: the draft stores the open tab, so switching
+            alone (no other edit) must still reach the debounced save */}
+        <Tabs
+          value={activeId}
+          onValueChange={next => {
+            handleDirty();
+            setActiveId(next);
+          }}
+        >
           {/* Single strip opening the panel: driver tabs, add-group, photo
               import, and the page-wide primary submit (all tabs) */}
           <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
