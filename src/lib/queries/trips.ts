@@ -22,6 +22,10 @@ export type TripRow = {
   fuel_gallons: string;
   pay_amount: string;
   notes: string | null;
+  /** Shared marker when this leg belongs to a priced package */
+  package_id: string | null;
+  /** Carrier-side label, e.g. 往返打包 $200.00 (null on $0 member legs) */
+  package_note: string | null;
 };
 
 const TRIP_SELECT = Prisma.sql`
@@ -33,7 +37,8 @@ const TRIP_SELECT = Prisma.sql`
          t.from_location_id::text AS from_location_id,
          t.to_location_id::text AS to_location_id,
          f.code AS from_code, o.code AS to_code,
-         t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.notes, t.created_at
+         t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.notes, t.created_at,
+         t.package_id, t.package_note
   FROM pay.trips t
   JOIN ops.drivers d ON d.id = t.driver_id
   LEFT JOIN ops.locations f ON f.id = t.from_location_id
@@ -60,6 +65,8 @@ export type TripEditRow = {
   fuel_gallons: string;
   pay_amount: string;
   notes: string | null;
+  package_id: string | null;
+  package_note: string | null;
 };
 
 export async function getTripById(id: string): Promise<TripEditRow | null> {
@@ -72,7 +79,8 @@ export async function getTripById(id: string): Promise<TripEditRow | null> {
            t.from_location_id::text AS from_location_id,
            t.to_location_id::text AS to_location_id,
            f.code AS from_code, o.code AS to_code,
-           t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.notes
+           t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.notes,
+           t.package_id, t.package_note
     FROM pay.trips t
     LEFT JOIN ops.drivers d ON d.id = t.driver_id
     LEFT JOIN ops.locations f ON f.id = t.from_location_id
@@ -217,6 +225,8 @@ export type DriverPeriodTripRow = {
   fuel_gallons: string;
   pay_amount: string;
   notes: string | null;
+  package_id: string | null;
+  package_note: string | null;
 };
 
 /** Payroll drill-down: every leg of one driver inside the period, by date then entry order (round trips are entered consecutively) */
@@ -229,7 +239,8 @@ export async function driverPeriodTrips(period: Period, driverId: string) {
            t.from_location_id::text AS from_location_id,
            t.to_location_id::text AS to_location_id,
            f.code AS from_code, o.code AS to_code,
-           t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.notes
+           t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.notes,
+           t.package_id, t.package_note
     FROM pay.trips t
     JOIN ops.drivers d ON d.id = t.driver_id
     LEFT JOIN ops.locations f ON f.id = t.from_location_id

@@ -49,7 +49,8 @@ export function WageRulesTable({
         return (
           <span>
             {v.tier_count} 档 {money(v.min_amount)}~{money(v.max_amount)} · 车主×
-            {Number(v.owner_multiplier).toFixed(2)} · 特例 {v.special_count} 条
+            {Number(v.owner_multiplier).toFixed(2)} · 特例 {v.special_count} 条 · 价格规则{" "}
+            {v.price_rule_count} 条
           </span>
         );
       }

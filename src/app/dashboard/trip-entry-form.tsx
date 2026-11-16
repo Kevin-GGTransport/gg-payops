@@ -11,7 +11,7 @@ import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { ComboboxField } from "@/components/combobox-field";
 import { DateField } from "@/components/date-field";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
-import { calcTripWage, pickVersion, type WageRuleData } from "@/lib/wage";
+import { calcTripWage, matchPackageRule, pickVersion, type WageRuleData } from "@/lib/wage";
 import { money, todayIso } from "@/lib/format";
 import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
 import {
@@ -122,6 +122,75 @@ const NO_ROWS: unknown[] = [];
 
 type CalcStatus = "loading" | "auto" | "failed";
 
+/** Package pricing mode of one group sheet (per-leg default) */
+type PkgUnit = "LEG" | "DAY" | "ROUND_TRIP";
+
+/** One priced package planned from the sheet: legs share one amount */
+type PkgPlan = { id: string; date: string; rowIds: number[]; unit: Exclude<PkgUnit, "LEG"> };
+
+const PKG_UNIT_OPTIONS: ReadonlyArray<{ value: PkgUnit; label: string }> = [
+  { value: "LEG", label: "按趟计价" },
+  { value: "DAY", label: "按天打包" },
+  { value: "ROUND_TRIP", label: "按往返打包" }
+];
+
+/**
+ * Plan packages over a group's filled legs in sheet order: DAY groups every
+ * leg of a date into one package; ROUND_TRIP splits the day's legs into
+ * circuits that close by returning to the circuit's opening origin (an
+ * unclosed tail stays per-leg). Undated legs never group.
+ */
+function planPackages(
+  unit: Exclude<PkgUnit, "LEG">,
+  slots: { id: number }[],
+  dateByRow: Record<number, string>,
+  fromByRow: Record<number, string>,
+  toByRow: Record<number, string>
+): PkgPlan[] {
+  const byDate = new Map<string, number[]>();
+  for (const slot of slots) {
+    const to = toByRow[slot.id];
+    const date = dateByRow[slot.id];
+    if (!to || !date) continue;
+    const list = byDate.get(date) ?? [];
+    list.push(slot.id);
+    byDate.set(date, list);
+  }
+  const plans: PkgPlan[] = [];
+  for (const [date, ids] of byDate) {
+    if (unit === "DAY") {
+      plans.push({ id: `d-${date}`, date, rowIds: ids, unit });
+      continue;
+    }
+    let i = 0;
+    let seq = 0;
+    while (i < ids.length) {
+      const origin = fromByRow[ids[i]];
+      if (!origin) {
+        // No anchor to close on: this leg stays per-priced
+        i++;
+        continue;
+      }
+      let closedAt = -1;
+      for (let j = i; j < ids.length; j++) {
+        if (toByRow[ids[j]] === origin) {
+          closedAt = j;
+          break;
+        }
+      }
+      if (closedAt < 0) break; // trailing legs never close: all per-priced
+      plans.push({
+        id: `r-${date}-${seq++}`,
+        date,
+        rowIds: ids.slice(i, closedAt + 1),
+        unit
+      });
+      i = closedAt + 1;
+    }
+  }
+  return plans;
+}
+
 /**
  * One entry row: per-row date, from/to pickers (creatable), operation, Load#,
  * auto-measured miles and rule-priced wage (both hand-editable; the wage
@@ -137,6 +206,7 @@ const EntryRow = React.memo(function EntryRow({
   rowId,
   groupIndex,
   rowIndex,
+  driverId,
   driverType,
   locations,
   operations,
@@ -152,6 +222,7 @@ const EntryRow = React.memo(function EntryRow({
   onDirty,
   onPayChange,
   onToChange,
+  onFromChange,
   onDateChange,
   onFillChange,
   onArmDrag,
@@ -160,12 +231,18 @@ const EntryRow = React.memo(function EntryRow({
   onRowDragOver,
   onRowDrop,
   draggable,
-  dropMark
+  dropMark,
+  packagePay,
+  packageId,
+  packageNote,
+  isPackageCarrier
 }: {
   /** Stable slot id (never the positional index) */
   rowId: number;
   groupIndex: number;
   rowIndex: number;
+  /** Picked driver id; feeds driver-scoped price rules */
+  driverId: string;
   driverType: DriverType | undefined;
   locations: LocationOption[];
   /** Operation dictionary; drives the dropdown and the Load# lock */
@@ -183,6 +260,8 @@ const EntryRow = React.memo(function EntryRow({
   onPayChange: (rowId: number, value: string) => void;
   /** Reports every endpoint pick upward (feeds the next leg's carry) */
   onToChange: (rowId: number, value: string) => void;
+  /** Reports every start pick upward (package circuit detection) */
+  onFromChange: (rowId: number, value: string) => void;
   /** Reports every date change upward (feeds the next leg's date carry) */
   onDateChange: (rowId: number, value: string) => void;
   /** Reports whether this row has any endpoint picked (filled-row counting) */
@@ -197,6 +276,14 @@ const EntryRow = React.memo(function EntryRow({
   draggable: boolean;
   /** Insertion indicator while a sibling row hovers this one */
   dropMark: "before" | "after" | null;
+  /** Package override: this row's wage comes from its package (not auto/manual) */
+  packagePay?: string | null;
+  /** Package membership marker stored on the trip */
+  packageId?: string | null;
+  /** Carrier-only display note (e.g. 往返打包 $200.00) */
+  packageNote?: string | null;
+  /** True when this row carries the package amount (others bill $0) */
+  isPackageCarrier?: boolean;
 }) {
   const prefix = `g_${groupIndex}_row_${rowIndex}_`;
   const legLabel = `第 ${groupIndex + 1} 组第 ${rowIndex + 1} 程`;
@@ -343,6 +430,7 @@ const EntryRow = React.memo(function EntryRow({
     () =>
       rule
         ? calcTripWage({
+            driverId,
             driverType,
             operation: operation as OperationType | undefined,
             miles: Number(milesValue) || 0,
@@ -354,10 +442,13 @@ const EntryRow = React.memo(function EntryRow({
           })
         : 0,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [driverType, operation, milesValue, fromValue, toValue, locations, rule]
+    [driverId, driverType, operation, milesValue, fromValue, toValue, locations, rule]
   );
 
-  const payValue = manualPay ?? autoPay.toFixed(2);
+  // Package override wins over auto/manual: the strip above the sheet is the
+  // single source of the package amount; packaged cells are read-only
+  const packaged = packagePay !== undefined && packagePay !== null;
+  const payValue = packaged ? packagePay : (manualPay ?? autoPay.toFixed(2));
 
   React.useEffect(() => {
     onPayChange(rowId, payValue);
@@ -424,6 +515,7 @@ const EntryRow = React.memo(function EntryRow({
           onValueChange={value => {
             fromInherited.current = false;
             setFromValue(value);
+            onFromChange(rowId, value);
             onDirty();
           }}
         />
@@ -510,17 +602,29 @@ const EntryRow = React.memo(function EntryRow({
         />
       </td>
       <td className="px-1.5">
+        {packageId && (
+          <input type="hidden" name={`${prefix}package_id`} value={packageId} />
+        )}
+        {packageId && packageNote && (
+          <input type="hidden" name={`${prefix}package_note`} value={packageNote} />
+        )}
         <Input
           type="number"
           name={`${prefix}pay_amount`}
           min={0}
           step={0.01}
           value={payValue}
+          readOnly={packaged}
           onChange={e => setManualPay(e.target.value)}
           aria-label={`${legLabel}工资`}
           className={`${cellInput} text-right font-mono`}
         />
-        {manualPay !== null && (
+        {packaged && (
+          <span className={`${cellHint} text-right`}>
+            {isPackageCarrier ? "打包价 · 上方计价条改" : "打包内 · $0"}
+          </span>
+        )}
+        {!packaged && manualPay !== null && (
           // data-manual-pay: the draft collector keeps hand-edited wages as
           // manual on restore; auto-priced rows restore empty and recalc
           <span data-manual-pay className={`${cellHint} text-right`}>
@@ -537,10 +641,10 @@ const EntryRow = React.memo(function EntryRow({
             </button>
           </span>
         )}
-        {dateValue && !rule && manualPay === null && (
+        {dateValue && !rule && manualPay === null && !packaged && (
           <span className={`${cellHint} text-right`}>该日期无生效规则</span>
         )}
-        {rule && baseFallbackLeg && manualPay === null && (
+        {rule && baseFallbackLeg && manualPay === null && !packaged && (
           <span className={`${cellHint} text-right`}>对端未设基准，按里程档</span>
         )}
       </td>
@@ -630,8 +734,16 @@ const GroupSection = React.memo(function GroupSection({
   );
   // rowId -> current to-value, feeding the next leg's carry-over start
   const [toByRow, setToByRow] = React.useState<Record<number, string>>({});
+  // rowId -> current from-value, anchoring package circuit detection
+  const [fromByRow, setFromByRow] = React.useState<Record<number, string>>({});
   // rowId -> current date, feeding the next leg's date carry-down
   const [dateByRow, setDateByRow] = React.useState<Record<number, string>>({});
+  // Package pricing mode of this sheet (per-leg default); pkgAmounts holds
+  // only the clerk's manual overrides keyed by package id - a package without
+  // an override prices at its rule suggestion (derived during render, no
+  // effect needed)
+  const [pkgUnit, setPkgUnit] = React.useState<PkgUnit>("LEG");
+  const [pkgAmounts, setPkgAmounts] = React.useState<Record<string, string>>({});
   // Row ids that have at least one endpoint (what the buttons count)
   const [filledIds, setFilledIds] = React.useState<Set<number>>(new Set());
   // Grip pressed but drag not confirmed yet; only that row turns draggable
@@ -640,6 +752,79 @@ const GroupSection = React.memo(function GroupSection({
   const [dropAt, setDropAt] = React.useState<{ id: number; before: boolean } | null>(null);
   const dragActive = dragging?.groupId === group.id;
   const driverType = drivers.find(d => d.id === driverId)?.driver_type;
+
+  // Planned packages follow the sheet live (endpoints/dates/rows/mode)
+  const plans = React.useMemo(
+    () =>
+      pkgUnit === "LEG"
+        ? []
+        : planPackages(pkgUnit, rows, dateByRow, fromByRow, toByRow),
+    [pkgUnit, rows, dateByRow, fromByRow, toByRow]
+  );
+
+  // Rule suggestion per package: driver-scoped beats global, the package's
+  // own date picks the governing version (OWNER: owner column, else driver
+  // price x owner multiplier)
+  const suggestionByPkg = React.useMemo(() => {
+    const map: Record<string, { amount: string; label: string } | null> = {};
+    for (const plan of plans) {
+      const rule = pickVersion(wageRules, plan.date);
+      const match = rule ? matchPackageRule(plan.unit, driverId, rule.price_rules) : null;
+      if (!rule || !match) {
+        map[plan.id] = null;
+        continue;
+      }
+      const amount =
+        driverType === "OWNER"
+          ? (match.owner_amount ?? match.driver_amount * rule.owner_multiplier)
+          : match.driver_amount;
+      map[plan.id] = { amount: amount.toFixed(2), label: match.label ?? "" };
+    }
+    return map;
+  }, [plans, wageRules, driverId, driverType]);
+
+  /** Effective amount of a package: manual override, else rule suggestion */
+  const amountOf = React.useCallback(
+    (planId: string) =>
+      planId in pkgAmounts
+        ? pkgAmounts[planId]
+        : (suggestionByPkg[planId]?.amount ?? ""),
+    [pkgAmounts, suggestionByPkg]
+  );
+
+  /** Apply (or re-apply) the rule suggestion to one package */
+  const applySuggestion = React.useCallback(
+    (planId: string) => {
+      const amount = suggestionByPkg[planId]?.amount;
+      if (amount === undefined) return;
+      setPkgAmounts(current => ({ ...current, [planId]: amount }));
+      onDirty();
+    },
+    [suggestionByPkg, onDirty]
+  );
+
+  // Per-row package view: rowId -> { pay, carrier } for packaged legs
+  const pkgByRow = React.useMemo(() => {
+    const map: Record<
+      number,
+      { pay: string; carrier: boolean; id: string; note: string | null }
+    > = {};
+    for (const plan of plans) {
+      const amount = amountOf(plan.id).trim();
+      const note =
+        plan.unit === "DAY" ? `日打包 $${amount}` : `往返打包 $${amount}`;
+      plan.rowIds.forEach((rowId, i) => {
+        const carrier = i === 0;
+        map[rowId] = {
+          pay: carrier ? amount : "0.00",
+          carrier,
+          id: `g${group.id}-${plan.id}`,
+          note: carrier ? note : null
+        };
+      });
+    }
+    return map;
+  }, [plans, amountOf, group.id]);
 
   // Stable per-group reporters (kept out of render so EntryRow memo holds)
   const reportFilled = React.useCallback(
@@ -729,6 +914,12 @@ const GroupSection = React.memo(function GroupSection({
 
   const handleToChange = React.useCallback((rowId: number, value: string) => {
     setToByRow(current =>
+      current[rowId] === value ? current : { ...current, [rowId]: value }
+    );
+  }, []);
+
+  const handleFromChange = React.useCallback((rowId: number, value: string) => {
+    setFromByRow(current =>
       current[rowId] === value ? current : { ...current, [rowId]: value }
     );
   }, []);
@@ -845,8 +1036,89 @@ const GroupSection = React.memo(function GroupSection({
             )}
           </span>
         </div>
+        <div className="flex items-center gap-2">
+          <label htmlFor={`${prefix}-pkg-unit`} className="text-xs font-medium text-muted-foreground">
+            计价
+          </label>
+          <select
+            id={`${prefix}-pkg-unit`}
+            value={pkgUnit}
+            onChange={e => {
+              setPkgUnit(e.target.value as PkgUnit);
+              onDirty();
+            }}
+            aria-label={`第 ${index + 1} 组计价方式`}
+            className="h-10 rounded-md border border-line bg-transparent px-2.5 text-[13px] focus-visible:ring-1"
+          >
+            {PKG_UNIT_OPTIONS.map(option => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
         <input type="hidden" name={`${prefix}_row_count`} value={rows.length} />
       </div>
+
+      {pkgUnit !== "LEG" && (
+        <div className="pkg-strip">
+          {plans.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              选好日期和起终点后，{pkgUnit === "DAY" ? "同一天" : "每个往返圈"}自动合成一个打包价；未闭合的散腿仍按趟计价。
+            </p>
+          ) : (
+            plans.map(plan => {
+              const amount = amountOf(plan.id);
+              const suggestion = suggestionByPkg[plan.id];
+              return (
+                <div key={plan.id} className="pkg-line">
+                  <span className="mono text-xs">{plan.date.slice(5).replace("-", "/")}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {plan.unit === "DAY" ? "全天" : "往返"} · {plan.rowIds.length} 程
+                  </span>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={amount}
+                    placeholder="金额"
+                    onChange={e => {
+                      setPkgAmounts(current => ({ ...current, [plan.id]: e.target.value }));
+                      onDirty();
+                    }}
+                    aria-label={`${plan.date} 打包金额`}
+                    className="h-8 w-28 text-right font-mono text-[13px]"
+                  />
+                  {amount === "" && (
+                    <span className="text-[11px] font-medium text-destructive">未填金额，提交按 $0</span>
+                  )}
+                  {suggestion && (
+                    <span className="text-[11px] text-muted-foreground">
+                      {suggestion.label ? `${suggestion.label} · ` : ""}规则 $
+                      {suggestion.amount}
+                      {amount !== suggestion.amount && (
+                        <>
+                          {" "}
+                          <button
+                            type="button"
+                            className="linklike"
+                            onClick={() => applySuggestion(plan.id)}
+                          >
+                            套用
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  )}
+                  {!suggestion && (
+                    <span className="text-[11px] text-muted-foreground">无匹配规则，手填</span>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
 
       <RosterTable table={sheetTable}>
         <tbody
@@ -864,6 +1136,7 @@ const GroupSection = React.memo(function GroupSection({
                 rowId={slot.id}
                 groupIndex={index}
                 rowIndex={i}
+                driverId={driverId}
                 driverType={driverType}
                 locations={locations}
                 operations={operations}
@@ -876,10 +1149,15 @@ const GroupSection = React.memo(function GroupSection({
                 onDirty={onDirty}
                 onPayChange={handleRowPayChange}
                 onToChange={handleToChange}
+                onFromChange={handleFromChange}
                 onDateChange={handleDateChange}
                 onFillChange={handleFill}
                 draggable={armedRow === slot.id}
                 dropMark={dropAt?.id === slot.id ? (dropAt.before ? "before" : "after") : null}
+                packagePay={pkgByRow[slot.id]?.pay ?? null}
+                packageId={pkgByRow[slot.id]?.id ?? null}
+                packageNote={pkgByRow[slot.id]?.note ?? null}
+                isPackageCarrier={pkgByRow[slot.id]?.carrier ?? false}
                 onArmDrag={armDrag}
                 onRowDragStart={dragStart}
                 onRowDragEnd={endDrag}

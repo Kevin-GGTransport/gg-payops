@@ -79,19 +79,22 @@ export async function activeLocationOptions() {
       state_code: string | null;
       postal_code: string | null;
       standard_pay_amount: string;
+      amazon_class: "A" | "B" | null;
     }>
   >`
     SELECT id::text, code, name, location_type::text AS location_type,
-           address_line, city, state_code, postal_code, standard_pay_amount::text
+           address_line, city, state_code, postal_code, standard_pay_amount::text,
+           amazon_class::text AS amazon_class
     FROM ops.locations
     WHERE status = 'ACTIVE'
     ORDER BY CASE location_type WHEN 'BASE' THEN 1 WHEN 'AMAZON' THEN 2 ELSE 3 END, code
   `;
-  return rows.map(({ location_type, address_line, city, state_code, postal_code, standard_pay_amount, ...rest }) => ({
+  return rows.map(({ location_type, address_line, city, state_code, postal_code, standard_pay_amount, amazon_class, ...rest }) => ({
     ...rest,
     postal_code,
     location_type: location_type as LocationType,
     standard_pay_amount: Number(standard_pay_amount),
+    amazon_class,
     address: fullAddress({ address_line, city, state_code, postal_code }) || null
   }));
 }

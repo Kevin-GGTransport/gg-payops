@@ -3,7 +3,7 @@
 import * as React from "react";
 import { type ColumnDef } from "@tanstack/react-table";
 
-import { DriverTypeBadge, OperationBadge, RoutePair } from "@/components/badges";
+import { DriverTypeBadge, OperationBadge, PackageBadge, RoutePair } from "@/components/badges";
 import { SelectAll } from "@/components/select-all";
 import { ConfirmButton } from "@/components/confirm-button";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
@@ -109,7 +109,17 @@ export function TripsTable({
       header: "本趟工资",
       size: 104,
       meta: { headerClass: "num", cellClass: "num" },
-      cell: ({ row }) => money(row.original.pay_amount)
+      cell: ({ row }) => (
+        <>
+          {money(row.original.pay_amount)}
+          {row.original.package_id && (
+            <>
+              {" "}
+              <PackageBadge note={row.original.package_note} />
+            </>
+          )}
+        </>
+      )
     },
     {
       id: "notes",

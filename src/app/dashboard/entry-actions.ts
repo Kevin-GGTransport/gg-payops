@@ -23,6 +23,9 @@ type ParsedRow = {
   fuelNum: number;
   payNum: number;
   notes: string;
+  /** Shared marker for legs of one priced package (first leg carries the amount) */
+  packageId: string | null;
+  packageNote: string | null;
 };
 
 type ParsedGroup = {
@@ -177,7 +180,9 @@ export async function addTripsBatch(formData: FormData) {
         // Wage snapshot: trust the submitted amount (auto-calculated client-side or
         // hand-edited); no server-side recompute so manual overrides stick
         payNum: num0(str(formData, `${p}pay_amount`)),
-        notes
+        notes,
+        packageId: str(formData, `${p}package_id`) || null,
+        packageNote: str(formData, `${p}package_note`) || null
       });
     }
     total += rows.length;
@@ -276,7 +281,9 @@ export async function addTripsBatch(formData: FormData) {
         milesNum: row.milesNum,
         fuelNum: Math.round(row.fuelNum * 100) / 100,
         payNum: Math.round(row.payNum * 100) / 100,
-        notes: row.notes || null
+        notes: row.notes || null,
+        packageId: row.packageId,
+        packageNote: row.packageNote
       };
     })
   );
@@ -285,12 +292,13 @@ export async function addTripsBatch(formData: FormData) {
   const values = insertRows.map(r => Prisma.sql`
     (${r.driverId}::bigint, ${r.tripDate}::date, ${r.operation}, ${r.loadNo},
      ${r.fromId || null}::bigint, ${r.toId || null}::bigint, ${r.milesNum}, ${r.fuelNum}, ${r.payNum},
-     ${r.notes}, ${r.driverName}, ${r.truckSnapshot ?? null}::jsonb)
+     ${r.notes}, ${r.driverName}, ${r.truckSnapshot ?? null}::jsonb,
+     ${r.packageId}, ${r.packageNote})
   `);
   await prisma.$executeRaw`
     INSERT INTO pay.trips(driver_id, trip_date, operation, load_no,
       from_location_id, to_location_id, miles, fuel_gallons, pay_amount, notes,
-      driver_name, truck_snapshot)
+      driver_name, truck_snapshot, package_id, package_note)
     VALUES ${Prisma.join(values)}
   `;
 

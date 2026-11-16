@@ -94,3 +94,19 @@ export function RoutePair({ from, to }: { from: string | null; to: string | null
     </>
   );
 }
+
+/** 打包标记：承价腿带金额标签（琥珀），$0 成员腿弱化显示「打包内」 */
+export function PackageBadge({ note }: { note: string | null }) {
+  return (
+    <span
+      className={cn(
+        pillBase,
+        note
+          ? "border-amber-500/40 bg-amber-50 text-amber-800"
+          : "border-line bg-muted text-muted-foreground"
+      )}
+    >
+      {note ?? "打包内"}
+    </span>
+  );
+}

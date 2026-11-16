@@ -3,7 +3,7 @@
 import * as React from "react";
 import { type ColumnDef } from "@tanstack/react-table";
 
-import { OperationBadge, RoutePair } from "@/components/badges";
+import { OperationBadge, PackageBadge, RoutePair } from "@/components/badges";
 import { ConfirmButton } from "@/components/confirm-button";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { fuel as fmtFuel, miles as fmtMiles, money } from "@/lib/format";
@@ -96,7 +96,15 @@ export function PayrollLegsTable({
                 </td>
                 <td className="num">{fmtMiles(leg.miles)}</td>
                 <td className="num">{fmtFuel(leg.fuel_gallons)}</td>
-                <td className="num">{money(leg.pay_amount)}</td>
+                <td className="num">
+                  {money(leg.pay_amount)}
+                  {leg.package_id && (
+                    <>
+                      {" "}
+                      <PackageBadge note={leg.package_note} />
+                    </>
+                  )}
+                </td>
                 <td className="actions px-1.5">
                   {edit && (
                     <button type="button" className="linklike" onClick={() => setEditing(leg)}>

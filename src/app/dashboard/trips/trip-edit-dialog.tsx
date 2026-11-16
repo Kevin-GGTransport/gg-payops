@@ -210,6 +210,7 @@ function EditForm({
     () =>
       rule
         ? calcTripWage({
+            driverId: trip.driver_id,
             driverType: (trip.driver_type ?? undefined) as DriverType | undefined,
             operation: (operation || undefined) as OperationType | undefined,
             miles: Number(milesValue) || 0,
@@ -329,13 +330,15 @@ function EditForm({
         <DialogField
           label="本趟工资 ($)"
           hint={
-            manualPay !== null
-              ? undefined // rendered inline below: the 重算 action lives in the hint slot
-              : dateValue && !rule
-                ? "该日期无生效规则"
-                : rule && baseFallbackLeg
-                  ? "对端未设基准，按里程档"
-                  : undefined
+            trip.package_id
+              ? trip.package_note ?? "打包内 · $0（金额在承价腿上）"
+              : manualPay !== null
+                ? undefined // rendered inline below: the 重算 action lives in the hint slot
+                : dateValue && !rule
+                  ? "该日期无生效规则"
+                  : rule && baseFallbackLeg
+                    ? "对端未设基准，按里程档"
+                    : undefined
           }
         >
           <>

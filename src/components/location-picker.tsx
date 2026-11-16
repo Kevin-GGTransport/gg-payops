@@ -18,6 +18,8 @@ export type LocationOption = {
   postal_code: string | null;
   /** Driver standard pay for this location; prices the trip leg (0 = unset) */
   standard_pay_amount: number;
+  /** Amazon warehouse class (A/B); drives AMAZON_A/AMAZON_B wage matchers */
+  amazon_class: "A" | "B" | null;
 };
 
 /** Max length of a hand-typed location text (kept short so it fits locations.code) */
