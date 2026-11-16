@@ -529,6 +529,11 @@ td.ctr {
 .route-arrow {
   @apply mx-0.5 text-slate-400;
 }
+/* Route pair: both endpoints equally weighted in full route blue —
+   the pair reads as one colored unit, muted arrow keeps it joined */
+.route-code {
+  @apply font-semibold text-route;
+}
 .lic-class {
   @apply ml-1.5 rounded-sm border border-line px-1 text-[11px] text-muted-foreground;
 }

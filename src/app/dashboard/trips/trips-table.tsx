@@ -3,7 +3,7 @@
 import * as React from "react";
 import { type ColumnDef } from "@tanstack/react-table";
 
-import { DriverTypeBadge, OperationBadge } from "@/components/badges";
+import { DriverTypeBadge, OperationBadge, RoutePair } from "@/components/badges";
 import { SelectAll } from "@/components/select-all";
 import { ConfirmButton } from "@/components/confirm-button";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
@@ -94,10 +94,7 @@ export function TripsTable({
       size: 190,
       meta: { cellClass: "mono" },
       cell: ({ row }) => (
-        <>
-          {row.original.from_code ?? "—"} <span className="route-arrow">→</span>{" "}
-          {row.original.to_code ?? "—"}
-        </>
+        <RoutePair from={row.original.from_code} to={row.original.to_code} />
       )
     },
     {

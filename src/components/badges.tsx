@@ -82,3 +82,15 @@ export function OperationBadge({ operation }: { operation: OperationType }) {
     </span>
   );
 }
+
+/** 起终点对：两端同等重要，同一 route 蓝加粗，箭头弱化相连 */
+export function RoutePair({ from, to }: { from: string | null; to: string | null }) {
+  return (
+    <>
+      {from ? <span className="route-code">{from}</span> : "—"}
+      {" "}
+      <span className="route-arrow">→</span>{" "}
+      {to ? <span className="route-code">{to}</span> : "—"}
+    </>
+  );
+}
