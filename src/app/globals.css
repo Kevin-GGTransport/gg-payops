@@ -596,6 +596,16 @@ th.col-th {
 .roster tr.drop-after > td {
   box-shadow: inset 0 -2px 0 var(--color-route);
 }
+/* Entry sheet: day-separator band - a full-width date row opens each new day
+   block (same by-day reading as the payroll ledger's matrix-sub rows) */
+.day-sep > td {
+  @apply border-t border-route/20 bg-route/10 px-2.5 py-1 text-[11px] font-semibold tracking-[0.04em] text-route;
+}
+/* Entry sheet: add-row bar under the sheet - continue typing right after the
+   last row, no scrolling back to the top band */
+.add-row-bar {
+  @apply mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-route/30 bg-route/5 py-1.5 text-[13px] font-medium text-route transition-colors hover:border-route hover:bg-route/15;
+}
 /* 司机分组带：navy 顶线 + 浅底 + 底部细线，与下方表格明确分段 */
 .group-band {
   @apply flex flex-wrap gap-x-4 gap-y-2.5 border-b border-line border-t-[1.5px] border-t-navy bg-muted/50 px-2.5 py-3;

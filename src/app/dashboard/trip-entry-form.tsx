@@ -116,11 +116,18 @@ const SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
   { id: "fuel_gallons", header: "加油 (gal)", size: 78, minSize: 68, meta: { headerClass: "num" } },
   { id: "pay_amount", header: "本趟工资 ($)", size: 100, minSize: 92, meta: { headerClass: "num" } },
   { id: "notes", header: "备注", size: 182, minSize: 100 },
-  { id: "delete", header: "删除", size: 40, enableResizing: false, meta: { headerClass: "px-1.5" } }
+  { id: "delete", header: "操作", size: 40, enableResizing: false, meta: { headerClass: "px-1.5" } }
 ];
 
 /** Columns-only instance has no rows; keep the reference stable across renders */
 const NO_ROWS: unknown[] = [];
+
+/** Weekday suffix of a day-separator band (same rendering as the payroll ledger) */
+const DOW = ["日", "一", "二", "三", "四", "五", "六"];
+
+function dowOf(iso: string) {
+  return DOW[new Date(`${iso}T00:00:00Z`).getUTCDay()];
+}
 
 type CalcStatus = "loading" | "auto" | "failed";
 
@@ -656,11 +663,11 @@ type RowSlot = { id: number; defaults?: RefillRow };
 type GroupSlot = { id: number; driverId: string; truckId: string; rows: RowSlot[] };
 
 /**
- * One driver group as a tab panel: a navy-ruled driver band (driver picker,
- * default date, add/remove actions), the group's own sheet table and a panel
- * footer with this group's submit button (its name/value tells the server
- * action to persist only this group). Row/driver/date state lives here once
- * mounted; the parent only tracks group existence, row counts and pay totals.
+ * One driver group as a tab panel: a navy-ruled driver band (driver/truck
+ * pickers, filled count, group pay, remove-group), the group's own sheet
+ * table (day-separator bands between dates) and an add-row bar under the
+ * sheet. Row/driver/date state lives here once mounted; the parent only
+ * tracks group existence, row counts and pay totals.
  *
  * Memoized: with every tab force-mounted, a keystroke elsewhere (parent pays /
  * activeId update) must not reconcile this group's rows. All prop callbacks
@@ -965,7 +972,8 @@ const GroupSection = React.memo(function GroupSection({
     <div>
       {/* Driver band: navy top rule opens one group. The tab above already
           names the group (车号) - no duplicated ordinal badge here. Rows carry
-          their own dates (no group default), so the band is pickers + actions. */}
+          their own dates (no group default), so the band is pickers + totals;
+          adding rows lives on the bar under the sheet. */}
       <div className="group-band items-start">
         <ComboboxField
           label="司机 / 车主"
@@ -1009,10 +1017,6 @@ const GroupSection = React.memo(function GroupSection({
           <span className="font-medium text-muted-foreground">本组已填 {filledIds.size} 行</span>
           <span className="flex items-center justify-end gap-2.5">
             <span className="font-mono text-[13px] text-foreground">{money(paySum)}</span>
-            <button type="button" className="linklike" onClick={addRow}>
-              <PlusIcon className="mr-0.5 inline size-3.5" />
-              添加行程
-            </button>
             {removable && (
               <button type="button" className="linklike danger" onClick={() => onRemove(group.id)}>
                 删除组
@@ -1114,44 +1118,67 @@ const GroupSection = React.memo(function GroupSection({
             }
           }}
         >
-            {rows.map((slot, i) => (
-              <EntryRow
-                key={slot.id}
-                rowId={slot.id}
-                groupIndex={index}
-                rowIndex={i}
-                driverId={driverId}
-                driverType={driverType}
-                priceAsDriver={priceAsDriver}
-                locations={locations}
-                operations={operations}
-                wageRules={wageRules}
-                defaults={slot.defaults}
-                removable={rows.length > 1}
-                carryFrom={i === 0 ? "" : (toByRow[rows[i - 1].id] ?? "")}
-                carryDate={i === 0 ? "" : (dateByRow[rows[i - 1].id] ?? "")}
-                onRemove={removeRowById}
-                onDirty={onDirty}
-                onPayChange={handleRowPayChange}
-                onToChange={handleToChange}
-                onFromChange={handleFromChange}
-                onDateChange={handleDateChange}
-                onFillChange={handleFill}
-                draggable={armedRow === slot.id}
-                dropMark={dropAt?.id === slot.id ? (dropAt.before ? "before" : "after") : null}
-                packagePay={pkgByRow[slot.id]?.pay ?? null}
-                packageId={pkgByRow[slot.id]?.id ?? null}
-                packageNote={pkgByRow[slot.id]?.note ?? null}
-                isPackageCarrier={pkgByRow[slot.id]?.carrier ?? false}
-                onArmDrag={armDrag}
-                onRowDragStart={dragStart}
-                onRowDragEnd={endDrag}
-                onRowDragOver={dragOver}
-                onRowDrop={drop}
-              />
-            ))}
+            {rows.map((slot, i) => {
+              // Day separator band: whenever this row's date differs from the
+              // row above (a sheet's first dated row included), a full-width
+              // band names the day so multi-day sheets read in blocks
+              const date = dateByRow[slot.id] ?? "";
+              const prevDate = i > 0 ? (dateByRow[rows[i - 1].id] ?? "") : "";
+              const dayStart = date && date !== prevDate ? date : null;
+              return (
+                <React.Fragment key={slot.id}>
+                  {dayStart && (
+                    <tr className="day-sep">
+                      <td colSpan={SHEET_COLUMNS.length}>
+                        {dayStart.slice(5).replace("-", "/")} · 周{dowOf(dayStart)}
+                      </td>
+                    </tr>
+                  )}
+                  <EntryRow
+                    rowId={slot.id}
+                    groupIndex={index}
+                    rowIndex={i}
+                    driverId={driverId}
+                    driverType={driverType}
+                    priceAsDriver={priceAsDriver}
+                    locations={locations}
+                    operations={operations}
+                    wageRules={wageRules}
+                    defaults={slot.defaults}
+                    removable={rows.length > 1}
+                    carryFrom={i === 0 ? "" : (toByRow[rows[i - 1].id] ?? "")}
+                    carryDate={i === 0 ? "" : (dateByRow[rows[i - 1].id] ?? "")}
+                    onRemove={removeRowById}
+                    onDirty={onDirty}
+                    onPayChange={handleRowPayChange}
+                    onToChange={handleToChange}
+                    onFromChange={handleFromChange}
+                    onDateChange={handleDateChange}
+                    onFillChange={handleFill}
+                    draggable={armedRow === slot.id}
+                    dropMark={dropAt?.id === slot.id ? (dropAt.before ? "before" : "after") : null}
+                    packagePay={pkgByRow[slot.id]?.pay ?? null}
+                    packageId={pkgByRow[slot.id]?.id ?? null}
+                    packageNote={pkgByRow[slot.id]?.note ?? null}
+                    isPackageCarrier={pkgByRow[slot.id]?.carrier ?? false}
+                    onArmDrag={armDrag}
+                    onRowDragStart={dragStart}
+                    onRowDragEnd={endDrag}
+                    onRowDragOver={dragOver}
+                    onRowDrop={drop}
+                  />
+                </React.Fragment>
+              );
+            })}
         </tbody>
       </RosterTable>
+
+      {/* Add-row bar sits under the sheet: finishing the last row, the clerk
+          continues right there - no scrolling back to the top band */}
+      <button type="button" className="add-row-bar" onClick={addRow}>
+        <PlusIcon className="size-3.5" />
+        添加行程
+      </button>
     </div>
   );
 });
