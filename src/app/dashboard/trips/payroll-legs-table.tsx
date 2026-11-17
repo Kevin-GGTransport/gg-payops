@@ -17,7 +17,19 @@ function dowOf(iso: string) {
   return DOW[new Date(`${iso}T00:00:00Z`).getUTCDay()];
 }
 
-type DayGroup = { date: string; legs: DriverPeriodTripRow[]; miles: number; fuel: number; pay: number };
+type DayGroup = {
+  date: string;
+  legs: DriverPeriodTripRow[];
+  miles: number;
+  fuel: number;
+  pay: number;
+  subsidy: number;
+};
+
+/** Fuel subsidy cell: $0 (plain drivers, un-subsidized legs) reads as a dash */
+function subsidyCell(value: string | number) {
+  return Number(value) > 0 ? money(value) : "—";
+}
 
 /** Stable empty row set: a fresh [] per render churns TanStack's sizing sync */
 const NO_ROWS: DayGroup[] = [];
@@ -34,6 +46,7 @@ export function PayrollLegsTable({
   totalMiles,
   totalFuel,
   totalPay,
+  totalSubsidy = "0",
   /** Where the per-row delete/edit-save redirects back to (full path with ?period=) */
   returnTo,
   /** When set, each leg gets an edit button opening the local dialog */
@@ -44,6 +57,8 @@ export function PayrollLegsTable({
   totalMiles: string;
   totalFuel: string;
   totalPay: string;
+  /** Owner fuel subsidy of the period (drivers pass nothing / "0") */
+  totalSubsidy?: string;
   returnTo: string;
   edit?: TripEditDictionaries;
   storageKey?: string;
@@ -62,6 +77,7 @@ export function PayrollLegsTable({
       { id: "route", header: "起点 → 终点", size: 220 },
       { id: "miles", header: "Miles", size: 80, meta: { headerClass: "num" } },
       { id: "fuel", header: "加油(gal)", size: 84, meta: { headerClass: "num" } },
+      { id: "subsidy", header: "燃油补助", size: 84, meta: { headerClass: "num" } },
       { id: "pay", header: "本趟工资", size: 104, meta: { headerClass: "num" } },
       { id: "delete", header: "操作", size: edit ? 76 : 48, enableResizing: false, meta: { headerClass: "px-1.5" } }
     ],
@@ -96,6 +112,7 @@ export function PayrollLegsTable({
                 </td>
                 <td className="num">{fmtMiles(leg.miles)}</td>
                 <td className="num">{fmtFuel(leg.fuel_gallons)}</td>
+                <td className="num">{subsidyCell(leg.fuel_subsidy)}</td>
                 <td className="num">
                   {money(leg.pay_amount)}
                   {leg.package_id && (
@@ -127,6 +144,7 @@ export function PayrollLegsTable({
               </td>
               <td className="num">{fmtMiles(day.miles)}</td>
               <td className="num">{fmtFuel(day.fuel)}</td>
+              <td className="num">{subsidyCell(day.subsidy)}</td>
               <td className="num">{money(day.pay)}</td>
               <td />
             </tr>
@@ -136,6 +154,7 @@ export function PayrollLegsTable({
               <td colSpan={4}>周合计 · {days.length} 天</td>
               <td className="num">{fmtMiles(totalMiles)}</td>
               <td className="num">{fmtFuel(totalFuel)}</td>
+              <td className="num">{subsidyCell(totalSubsidy)}</td>
               <td className="num">{money(totalPay)}</td>
               <td />
             </tr>

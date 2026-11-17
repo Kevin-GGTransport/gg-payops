@@ -46,6 +46,8 @@ export type WageRuleData = {
   owner_multiplier: number;
   bobtail_multiplier: number;
   overage_increment: number;
+  /** Owner fuel subsidy per mile; 0 disables the subsidy line everywhere */
+  fuel_subsidy_rate: number;
   tiers: WageTier[];
   price_rules: WagePriceRule[];
 };
@@ -53,6 +55,21 @@ export type WageRuleData = {
 /** Round to cents so the controlled input and numeric(12,2) stay in sync. */
 function roundCents(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+/**
+ * Owner fuel subsidy: miles x the ACTIVE version's rate, for OWNER-type
+ * drivers only (price_as_driver owners included - the fuel cost is theirs
+ * regardless of pricing identity). Independent of rule matching, packages
+ * and multipliers; snapshotted onto the trip at entry/edit time.
+ */
+export function calcFuelSubsidy(input: {
+  driverType?: DriverType | null;
+  miles: number;
+  rate: number;
+}): number {
+  if (input.driverType !== "OWNER" || !(input.rate > 0)) return 0;
+  return roundCents((Number.isFinite(input.miles) ? input.miles : 0) * input.rate);
 }
 
 /**

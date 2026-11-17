@@ -8,7 +8,7 @@ import { ComboboxField } from "@/components/combobox-field";
 import { DateField } from "@/components/date-field";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
 import { Input } from "@/components/ui/input";
-import { calcTripWage, type WageRuleData } from "@/lib/wage";
+import { calcFuelSubsidy, calcTripWage, type WageRuleData } from "@/lib/wage";
 import type { DriverType, OperationType } from "@/lib/labels";
 import type { OperationOption } from "../trip-entry-form";
 import type { TripEditRow } from "@/lib/queries/trips";
@@ -209,6 +209,16 @@ function EditForm({
 
   const payValue = manualPay ?? autoPay.toFixed(2);
 
+  // Owner fuel subsidy: derived from miles, read-only (the server re-snapshots
+  // it on save at the then-current rate - never a submitted field)
+  const subsidyRate = rule?.fuel_subsidy_rate ?? 0;
+  const showSubsidy = trip.driver_type === "OWNER" && subsidyRate > 0;
+  const subsidyValue = calcFuelSubsidy({
+    driverType: trip.driver_type ?? undefined,
+    miles: Number(milesValue) || 0,
+    rate: subsidyRate
+  }).toFixed(2);
+
   const phase = !fromValue || !toValue ? "idle" : status;
   const milesHint =
     phase === "loading"
@@ -309,6 +319,19 @@ function EditForm({
             className="text-right font-mono"
           />
         </DialogField>
+        {showSubsidy && (
+          <DialogField
+            label="燃油补助 ($)"
+            hint={`里程 × $${subsidyRate}/mi · 保存时按当时费率重算`}
+          >
+            <Input
+              readOnly
+              value={subsidyValue}
+              aria-label="行程燃油补助（只读）"
+              className="bg-muted/50 text-right font-mono"
+            />
+          </DialogField>
+        )}
         <DialogField
           label="本趟工资 ($)"
           hint={

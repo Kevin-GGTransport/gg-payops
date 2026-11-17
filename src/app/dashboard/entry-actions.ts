@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
+import { calcFuelSubsidy } from "@/lib/wage";
+import type { DriverType } from "@/lib/labels";
 import { resolveEndpointId } from "@/lib/locations";
 import { periodOf } from "@/lib/period";
 import { todayIso } from "@/lib/format";
@@ -214,16 +216,27 @@ export async function addTripsBatch(formData: FormData) {
   // history; driver_id stays for payroll joins). An unpicked or unknown
   // truck simply stores no snapshot - it is optional now.
   const snapDriverIds = [...new Set(active.map(g => groups[g].driverId))];
-  const driverNameRows = await prisma.$queryRaw<{ id: string; full_name: string }[]>`
-    SELECT id::text, full_name FROM ops.drivers
+  const driverNameRows = await prisma.$queryRaw<
+    Array<{ id: string; full_name: string; driver_type: string }>
+  >`
+    SELECT id::text, full_name, driver_type::text AS driver_type FROM ops.drivers
     WHERE id IN (${Prisma.join(snapDriverIds.map(id => Prisma.sql`${id}::bigint`))})
   `;
   const driverNames = new Map(driverNameRows.map(r => [r.id, r.full_name]));
+  const driverTypes = new Map(driverNameRows.map(r => [r.id, r.driver_type as DriverType]));
   for (const g of active) {
     if (!driverNames.has(groups[g].driverId)) {
       backWithError("missing_driver", formData, groups, g + 1);
     }
   }
+
+  // Owner fuel subsidy rate comes from the ACTIVE rule version server-side
+  // (the client strip is display-only; the stored snapshot is authoritative)
+  const rateRows = await prisma.$queryRaw<Array<{ rate: string }>>`
+    SELECT fuel_subsidy_rate::text AS rate FROM pay.wage_rule_versions
+    WHERE status = 'ACTIVE' ORDER BY id DESC LIMIT 1
+  `;
+  const fuelSubsidyRate = rateRows[0] ? Number(rateRows[0].rate) : 0;
   const snapTruckIds = [
     ...new Set(active.map(g => groups[g].truckId).filter(Boolean))
   ];
@@ -281,6 +294,11 @@ export async function addTripsBatch(formData: FormData) {
         milesNum: row.milesNum,
         fuelNum: Math.round(row.fuelNum * 100) / 100,
         payNum: Math.round(row.payNum * 100) / 100,
+        subsidyNum: calcFuelSubsidy({
+          driverType: driverTypes.get(groups[gi].driverId),
+          miles: row.milesNum,
+          rate: fuelSubsidyRate
+        }),
         notes: row.notes || null,
         packageId: row.packageId,
         packageNote: row.packageNote
@@ -292,12 +310,12 @@ export async function addTripsBatch(formData: FormData) {
   const values = insertRows.map(r => Prisma.sql`
     (${r.driverId}::bigint, ${r.tripDate}::date, ${r.operation}, ${r.loadNo},
      ${r.fromId || null}::bigint, ${r.toId || null}::bigint, ${r.milesNum}, ${r.fuelNum}, ${r.payNum},
-     ${r.notes}, ${r.driverName}, ${r.truckSnapshot ?? null}::jsonb,
+     ${r.subsidyNum}, ${r.notes}, ${r.driverName}, ${r.truckSnapshot ?? null}::jsonb,
      ${r.packageId}, ${r.packageNote})
   `);
   await prisma.$executeRaw`
     INSERT INTO pay.trips(driver_id, trip_date, operation, load_no,
-      from_location_id, to_location_id, miles, fuel_gallons, pay_amount, notes,
+      from_location_id, to_location_id, miles, fuel_gallons, pay_amount, fuel_subsidy, notes,
       driver_name, truck_snapshot, package_id, package_note)
     VALUES ${Prisma.join(values)}
   `;

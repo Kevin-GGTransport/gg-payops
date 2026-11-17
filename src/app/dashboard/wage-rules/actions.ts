@@ -92,12 +92,14 @@ function validateVersion(input: {
   ownerMultiplier: number;
   bobtailMultiplier: number;
   overageIncrement: number;
+  fuelSubsidyRate: number;
   tiers: TierInput[];
   prices: PriceRuleInput[];
 }): string | null {
   if (!input.name) return "missing_name";
   if (!(input.ownerMultiplier > 0) || !(input.bobtailMultiplier > 0)) return "bad_multiplier";
   if (!(input.overageIncrement >= 0)) return "bad_overage";
+  if (!Number.isFinite(input.fuelSubsidyRate) || input.fuelSubsidyRate < 0) return "bad_subsidy_rate";
   if (input.tiers.length === 0) return "no_tiers";
   for (const tier of input.tiers) {
     if (!Number.isInteger(tier.miles_from) || tier.miles_from < 1) return "bad_tier_miles";
@@ -128,6 +130,7 @@ async function writeVersionChildren(
     ownerMultiplier: number;
     bobtailMultiplier: number;
     overageIncrement: number;
+    fuelSubsidyRate: number;
     tiers: TierInput[];
     prices: PriceRuleInput[];
   }
@@ -137,7 +140,8 @@ async function writeVersionChildren(
       UPDATE pay.wage_rule_versions SET
         name = ${input.name},
         owner_multiplier = ${input.ownerMultiplier}, bobtail_multiplier = ${input.bobtailMultiplier},
-        overage_increment = ${input.overageIncrement}, updated_at = now()
+        overage_increment = ${input.overageIncrement},
+        fuel_subsidy_rate = ${input.fuelSubsidyRate}, updated_at = now()
       WHERE id = ${id}::bigint
     `,
     prisma.$executeRaw`DELETE FROM pay.wage_rule_tiers WHERE version_id = ${id}::bigint`,
@@ -180,17 +184,18 @@ export async function saveVersion(formData: FormData) {
   const ownerMultiplier = Number(str(formData, "owner_multiplier"));
   const bobtailMultiplier = Number(str(formData, "bobtail_multiplier"));
   const overageIncrement = Number(str(formData, "overage_increment"));
+  const fuelSubsidyRate = Number(str(formData, "fuel_subsidy_rate"));
   const tiers = parseTiers(formData);
   const prices = parsePriceRules(formData);
   if (prices === "bad_side") redirect(back("bad_price_side"));
 
   const error = validateVersion({
-    name, ownerMultiplier, bobtailMultiplier, overageIncrement, tiers, prices
+    name, ownerMultiplier, bobtailMultiplier, overageIncrement, fuelSubsidyRate, tiers, prices
   });
   if (error) redirect(back(error));
 
   await writeVersionChildren(id, {
-    name, ownerMultiplier, bobtailMultiplier, overageIncrement, tiers, prices
+    name, ownerMultiplier, bobtailMultiplier, overageIncrement, fuelSubsidyRate, tiers, prices
   });
 
   revalidatePath("/dashboard/wage-rules");
@@ -214,9 +219,9 @@ export async function createVersion(formData: FormData) {
   if (!name) redirect(back("missing_name"));
 
   const inserted = await prisma.$queryRaw<{ id: string }[]>`
-    INSERT INTO pay.wage_rule_versions(name, status, owner_multiplier, bobtail_multiplier, overage_increment, notes)
+    INSERT INTO pay.wage_rule_versions(name, status, owner_multiplier, bobtail_multiplier, overage_increment, fuel_subsidy_rate, notes)
     SELECT ${name}, 'INACTIVE', v.owner_multiplier, v.bobtail_multiplier, v.overage_increment,
-           concat('基于版本 #', v.id::text, ' 复制')
+           v.fuel_subsidy_rate, concat('基于版本 #', v.id::text, ' 复制')
     FROM pay.wage_rule_versions v WHERE v.id = ${sourceId}::bigint
     RETURNING id::text
   `;

@@ -11,6 +11,7 @@ export type WageRuleVersionSummary = {
   owner_multiplier: string;
   bobtail_multiplier: string;
   overage_increment: string;
+  fuel_subsidy_rate: string;
   tier_count: number;
   min_amount: string;
   max_amount: string;
@@ -23,6 +24,7 @@ export async function wageRuleVersionsList() {
     SELECT v.id::text, v.name, v.status,
            to_char(v.created_at, 'YYYY-MM-DD') AS created_on,
            v.owner_multiplier::text, v.bobtail_multiplier::text, v.overage_increment::text,
+           v.fuel_subsidy_rate::text,
            count(t.id)::int AS tier_count,
            coalesce(min(t.amount), 0)::text AS min_amount,
            coalesce(max(t.amount), 0)::text AS max_amount,
@@ -105,12 +107,13 @@ export async function wageRuleVersionDetail(id: string) {
       owner_multiplier: string;
       bobtail_multiplier: string;
       overage_increment: string;
+      fuel_subsidy_rate: string;
       notes: string | null;
     }>
   >`
     SELECT id::text, name, status, to_char(created_at, 'YYYY-MM-DD') AS created_on,
            owner_multiplier::text, bobtail_multiplier::text, overage_increment::text,
-           notes
+           fuel_subsidy_rate::text, notes
     FROM pay.wage_rule_versions WHERE id = ${id}::bigint LIMIT 1
   `;
   const version = versions[0];
@@ -136,10 +139,12 @@ export async function currentWageRule(): Promise<WageRuleData | null> {
       owner_multiplier: string;
       bobtail_multiplier: string;
       overage_increment: string;
+      fuel_subsidy_rate: string;
     }>
   >`
     SELECT id::text, name,
-           owner_multiplier::text, bobtail_multiplier::text, overage_increment::text
+           owner_multiplier::text, bobtail_multiplier::text, overage_increment::text,
+           fuel_subsidy_rate::text
     FROM pay.wage_rule_versions WHERE status = 'ACTIVE'
     ORDER BY id DESC LIMIT 1
   `;
@@ -170,6 +175,7 @@ export async function currentWageRule(): Promise<WageRuleData | null> {
     owner_multiplier: Number(version.owner_multiplier),
     bobtail_multiplier: Number(version.bobtail_multiplier),
     overage_increment: Number(version.overage_increment),
+    fuel_subsidy_rate: Number(version.fuel_subsidy_rate),
     tiers: tiers.map(tier => ({ miles_from: tier.miles_from, amount: Number(tier.amount) })),
     price_rules: priceRules.map(rule => ({
       id: rule.id,

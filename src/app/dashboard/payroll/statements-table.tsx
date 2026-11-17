@@ -93,6 +93,14 @@ export function StatementsTable({
       cell: ({ row }) => fmtMiles(row.original.total_miles)
     },
     {
+      id: "subsidy",
+      header: "燃油补助",
+      size: 92,
+      meta: { cellClass: "mono num", headerClass: "num" },
+      cell: ({ row }) =>
+        Number(row.original.total_fuel_subsidy) > 0 ? money(row.original.total_fuel_subsidy) : "—"
+    },
+    {
       id: "pay",
       header: "本周期工资",
       size: 116,

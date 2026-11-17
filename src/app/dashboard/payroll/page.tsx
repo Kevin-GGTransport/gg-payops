@@ -101,6 +101,7 @@ export default async function PayrollPage({
     totalMiles: formField(sp, "total_miles", editing?.total_miles),
     totalFuel: formField(sp, "total_fuel", editing?.total_fuel),
     totalPay: formField(sp, "total_pay", editing?.total_pay),
+    totalSubsidy: formField(sp, "total_fuel_subsidy", editing?.total_fuel_subsidy),
     status: (formField(sp, "status", editing?.status) || "DRAFT") as StatementStatus,
     note: formField(sp, "note", editing?.note)
   };
@@ -123,9 +124,10 @@ export default async function PayrollPage({
       drivers: acc.drivers + (r.leg_count > 0 ? 1 : 0),
       legs: acc.legs + r.leg_count,
       miles: acc.miles + Number(r.total_miles),
-      pay: acc.pay + Number(r.total_pay)
+      pay: acc.pay + Number(r.total_pay),
+      subsidy: acc.subsidy + Number(r.total_fuel_subsidy)
     }),
-    { drivers: 0, legs: 0, miles: 0, pay: 0 }
+    { drivers: 0, legs: 0, miles: 0, pay: 0, subsidy: 0 }
   );
 
   return (
@@ -241,9 +243,13 @@ export default async function PayrollPage({
                 <span className="gauge-sub">周期累计</span>
               </div>
               <div className="gauge-cell gauge-hot">
-                <span className="gauge-label">工资总额</span>
-                <strong className="gauge-value">{money(totals.pay.toString())}</strong>
-                <span className="gauge-sub">本期应付 · 与导出一致</span>
+                <span className="gauge-label">本期应付</span>
+                <strong className="gauge-value">{money((totals.pay + totals.subsidy).toString())}</strong>
+                <span className="gauge-sub">
+                  {totals.subsidy > 0
+                    ? `工资 ${money(totals.pay.toString())} + 燃油补助 ${money(totals.subsidy.toString())}`
+                    : "与导出一致"}
+                </span>
               </div>
             </div>
           </section>
@@ -316,6 +322,7 @@ export default async function PayrollPage({
               <NumberField label="总里程 (mi)" name="total_miles" required min={0} step={0.01} defaultValue={values.totalMiles} />
               <NumberField label="加油 (gal)" name="total_fuel" required min={0} step={0.01} defaultValue={values.totalFuel} />
               <NumberField label="本周期工资 ($)" name="total_pay" required min={0} step={0.01} defaultValue={values.totalPay} />
+              <NumberField label="燃油补助 ($)" name="total_fuel_subsidy" required min={0} step={0.01} defaultValue={values.totalSubsidy} />
               <TextareaField label="备注" name="note" placeholder="如：补 11/13 一段 $85" defaultValue={values.note} />
             </FormGrid>
             <SubmitButton>保存修改</SubmitButton>

@@ -24,6 +24,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   missing_name: "请填写版本名。",
   bad_multiplier: "乘数必须大于 0。",
   bad_overage: "超档递增额必须 ≥ 0。",
+  bad_subsidy_rate: "燃油补助费率必须 ≥ 0。",
   no_tiers: "至少需要一个里程档位。",
   tiers_not_from_1: "首个档位必须从 1 英里开始。",
   tiers_not_50_step: "首档之后档位必须是 50 的倍数且递增（50、100、150…）。",

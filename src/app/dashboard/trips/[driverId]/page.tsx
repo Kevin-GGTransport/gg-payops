@@ -32,7 +32,14 @@ function dateParam(value: string | undefined) {
 
 /** Group one driver's period legs by date; each group carries day subtotals */
 function groupByDay(legs: DriverPeriodTripRow[]) {
-  const days: Array<{ date: string; legs: DriverPeriodTripRow[]; miles: number; fuel: number; pay: number }> = [];
+  const days: Array<{
+    date: string;
+    legs: DriverPeriodTripRow[];
+    miles: number;
+    fuel: number;
+    pay: number;
+    subsidy: number;
+  }> = [];
   for (const leg of legs) {
     const day = days.find(d => d.date === leg.trip_date);
     if (day) {
@@ -40,13 +47,15 @@ function groupByDay(legs: DriverPeriodTripRow[]) {
       day.miles += Number(leg.miles);
       day.fuel += Number(leg.fuel_gallons);
       day.pay += Number(leg.pay_amount);
+      day.subsidy += Number(leg.fuel_subsidy);
     } else {
       days.push({
         date: leg.trip_date,
         legs: [leg],
         miles: Number(leg.miles),
         fuel: Number(leg.fuel_gallons),
-        pay: Number(leg.pay_amount)
+        pay: Number(leg.pay_amount),
+        subsidy: Number(leg.fuel_subsidy)
       });
     }
   }
@@ -94,9 +103,10 @@ export default async function DriverPeriodPage({
     (acc, leg) => ({
       miles: acc.miles + Number(leg.miles),
       fuel: acc.fuel + Number(leg.fuel_gallons),
-      pay: acc.pay + Number(leg.pay_amount)
+      pay: acc.pay + Number(leg.pay_amount),
+      subsidy: acc.subsidy + Number(leg.fuel_subsidy)
     }),
-    { miles: 0, fuel: 0, pay: 0 }
+    { miles: 0, fuel: 0, pay: 0, subsidy: 0 }
   );
 
   // Full-path return so a per-row delete stays on this sheet
@@ -207,8 +217,12 @@ export default async function DriverPeriodPage({
           </div>
           <div className="gauge-cell gauge-hot">
             <span className="gauge-label">本期应付</span>
-            <strong className="gauge-value">{money(totals.pay)}</strong>
-            <span className="gauge-sub">来自行程本趟工资</span>
+            <strong className="gauge-value">{money(totals.pay + totals.subsidy)}</strong>
+            <span className="gauge-sub">
+              {totals.subsidy > 0
+                ? `工资 ${money(totals.pay)} + 燃油补助 ${money(totals.subsidy)}`
+                : "来自行程本趟工资"}
+            </span>
           </div>
         </div>
       </section>
@@ -220,6 +234,7 @@ export default async function DriverPeriodPage({
               按日明细
               <b>
                 {days.length} 天 · {legs.length} 段 · {fmtMiles(totals.miles)} mi · {money(totals.pay)}
+                {totals.subsidy > 0 && ` · 补助 ${money(totals.subsidy)}`}
               </b>
             </>
           }
@@ -229,6 +244,7 @@ export default async function DriverPeriodPage({
             totalMiles={String(totals.miles)}
             totalFuel={String(totals.fuel)}
             totalPay={String(totals.pay)}
+            totalSubsidy={String(totals.subsidy)}
             returnTo={returnTo}
             edit={{ locations, operations: operationOptions, wageRule }}
             storageKey="payops.payroll.detail.cols"

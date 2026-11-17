@@ -38,12 +38,14 @@ export async function generateStatements(formData: FormData) {
     const inserted = await prisma.$queryRaw<{ id: bigint }[]>`
       INSERT INTO pay.payroll_statements(
         driver_id, period_start, period_end,
-        trip_days, leg_count, total_miles, total_fuel, total_pay, op_counts, trucks
+        trip_days, leg_count, total_miles, total_fuel, total_pay, total_fuel_subsidy,
+        op_counts, trucks
       )
       VALUES (
         ${r.driver_id}::bigint, ${period.start}::date, ${period.end}::date,
         ${r.trip_days}, ${r.leg_count},
         ${r.total_miles}::numeric, ${r.total_fuel}::numeric, ${r.total_pay}::numeric,
+        ${r.total_fuel_subsidy}::numeric,
         ${JSON.stringify(r.op_counts)}::jsonb, ${r.trucks}
       )
       ON CONFLICT (driver_id, period_start) DO NOTHING
@@ -152,6 +154,7 @@ const EDIT_FIELDS = [
   "total_miles",
   "total_fuel",
   "total_pay",
+  "total_fuel_subsidy",
   "status",
   "note"
 ] as const;
@@ -185,12 +188,13 @@ export async function saveStatement(formData: FormData) {
   const totalMiles = str(formData, "total_miles") || "0";
   const totalFuel = str(formData, "total_fuel") || "0";
   const totalPay = str(formData, "total_pay") || "0";
+  const totalSubsidy = str(formData, "total_fuel_subsidy") || "0";
   const note = str(formData, "note") || null;
 
   if (
     !Number.isInteger(tripDays) || tripDays < 0 ||
     !Number.isInteger(legCount) || legCount < 0 ||
-    ![totalMiles, totalFuel, totalPay].every(v => /^\d+(\.\d{1,2})?$/.test(v))
+    ![totalMiles, totalFuel, totalPay, totalSubsidy].every(v => /^\d+(\.\d{1,2})?$/.test(v))
   ) {
     backWithError("bad_number", formData);
   }
@@ -203,6 +207,7 @@ export async function saveStatement(formData: FormData) {
       total_miles = ${totalMiles}::numeric,
       total_fuel = ${totalFuel}::numeric,
       total_pay = ${totalPay}::numeric,
+      total_fuel_subsidy = ${totalSubsidy}::numeric,
       status = ${status}::pay.statement_status,
       note = ${note},
       updated_at = now()

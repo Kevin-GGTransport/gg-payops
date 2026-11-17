@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
+import { calcFuelSubsidy } from "@/lib/wage";
 import { resolveEndpointId } from "@/lib/locations";
 import { getTripById } from "@/lib/queries/trips";
 
@@ -61,6 +62,15 @@ export async function updateTrip(formData: FormData) {
     resolveEndpointId(endpoint("to_location"))
   ]);
 
+  // Owner fuel subsidy re-snapshots on every edit (miles x the ACTIVE rate;
+  // plain drivers stay 0 - driver type itself never changes on an edit)
+  const rateRows = await prisma.$queryRaw<Array<{ rate: string }>>`
+    SELECT fuel_subsidy_rate::text AS rate FROM pay.wage_rule_versions
+    WHERE status = 'ACTIVE' ORDER BY id DESC LIMIT 1
+  `;
+  const fuelSubsidyRate = rateRows[0] ? Number(rateRows[0].rate) : 0;
+  const milesNum = num0(str(formData, "miles"));
+
   await prisma.$executeRaw`
     UPDATE pay.trips SET
       trip_date = ${isIsoDate(str(formData, "trip_date")) ? str(formData, "trip_date") : current.trip_date}::date,
@@ -68,9 +78,10 @@ export async function updateTrip(formData: FormData) {
       load_no = ${str(formData, "load_no")},
       from_location_id = ${fromId || null}::bigint,
       to_location_id = ${toId || null}::bigint,
-      miles = ${num0(str(formData, "miles"))},
+      miles = ${milesNum},
       fuel_gallons = ${Math.round(num0(str(formData, "fuel_gallons")) * 100) / 100},
       pay_amount = ${Math.round(num0(str(formData, "pay_amount")) * 100) / 100},
+      fuel_subsidy = ${calcFuelSubsidy({ driverType: current.driver_type ?? undefined, miles: milesNum, rate: fuelSubsidyRate })},
       notes = ${str(formData, "notes") || null}
     WHERE id = ${id}::bigint
   `;

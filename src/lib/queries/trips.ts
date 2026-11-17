@@ -23,6 +23,8 @@ export type TripRow = {
   miles: string;
   fuel_gallons: string;
   pay_amount: string;
+  /** Owner fuel subsidy snapshot (0 for plain drivers) */
+  fuel_subsidy: string;
   notes: string | null;
   /** Shared marker when this leg belongs to a priced package */
   package_id: string | null;
@@ -39,7 +41,8 @@ const TRIP_SELECT = Prisma.sql`
          t.from_location_id::text AS from_location_id,
          t.to_location_id::text AS to_location_id,
          f.code AS from_code, o.code AS to_code,
-         t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.notes, t.created_at,
+         t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.fuel_subsidy::text,
+         t.notes, t.created_at,
          t.package_id, t.package_note
   FROM pay.trips t
   JOIN ops.drivers d ON d.id = t.driver_id
@@ -68,6 +71,8 @@ export type TripEditRow = {
   miles: string;
   fuel_gallons: string;
   pay_amount: string;
+  /** Owner fuel subsidy snapshot (0 for plain drivers) */
+  fuel_subsidy: string;
   notes: string | null;
   package_id: string | null;
   package_note: string | null;
@@ -83,7 +88,8 @@ export async function getTripById(id: string): Promise<TripEditRow | null> {
            t.from_location_id::text AS from_location_id,
            t.to_location_id::text AS to_location_id,
            f.code AS from_code, o.code AS to_code,
-           t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.notes,
+           t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.fuel_subsidy::text,
+           t.notes,
            t.package_id, t.package_note
     FROM pay.trips t
     LEFT JOIN ops.drivers d ON d.id = t.driver_id
@@ -168,6 +174,8 @@ export type PayrollMatrixRow = {
   total_miles: string;
   total_fuel: string;
   total_pay: string;
+  /** Owner fuel subsidy of the period (0 for plain drivers) */
+  total_fuel_subsidy: string;
 };
 
 /** Payroll: driver x operation matrix for the period (includes active drivers without trips) */
@@ -187,7 +195,8 @@ export async function payrollMatrix(period: Period) {
              count(t.id)::int AS leg_count,
              COALESCE(SUM(t.miles), 0)::text AS total_miles,
              COALESCE(SUM(t.fuel_gallons), 0)::text AS total_fuel,
-             COALESCE(SUM(t.pay_amount), 0)::text AS total_pay
+             COALESCE(SUM(t.pay_amount), 0)::text AS total_pay,
+             COALESCE(SUM(t.fuel_subsidy), 0)::text AS total_fuel_subsidy
       FROM ops.drivers d
       LEFT JOIN pay.trips t
         ON t.driver_id = d.id
@@ -229,6 +238,8 @@ export type DriverPeriodTripRow = {
   miles: string;
   fuel_gallons: string;
   pay_amount: string;
+  /** Owner fuel subsidy snapshot (0 for plain drivers) */
+  fuel_subsidy: string;
   notes: string | null;
   package_id: string | null;
   package_note: string | null;
@@ -244,7 +255,8 @@ export async function driverPeriodTrips(period: Period, driverId: string) {
            t.from_location_id::text AS from_location_id,
            t.to_location_id::text AS to_location_id,
            f.code AS from_code, o.code AS to_code,
-           t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.notes,
+           t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.fuel_subsidy::text,
+           t.notes,
            t.package_id, t.package_note
     FROM pay.trips t
     JOIN ops.drivers d ON d.id = t.driver_id

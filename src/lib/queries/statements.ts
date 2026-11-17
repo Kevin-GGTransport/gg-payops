@@ -22,6 +22,8 @@ export type StatementRow = {
   total_miles: string;
   total_fuel: string;
   total_pay: string;
+  /** Owner fuel subsidy of the period (frozen when generated, live otherwise) */
+  total_fuel_subsidy: string;
   /** Leg counts per operation code (frozen when generated, live otherwise) */
   op_counts: Record<string, number>;
   trucks: string;
@@ -48,7 +50,8 @@ const STATEMENT_SELECT = Prisma.sql`
          to_char(s.period_end, 'YYYY-MM-DD') AS period_end,
          s.status::text AS status, s.trip_days, s.leg_count,
          s.total_miles::text AS total_miles, s.total_fuel::text AS total_fuel,
-         s.total_pay::text AS total_pay, s.op_counts, s.trucks, s.note
+         s.total_pay::text AS total_pay, s.total_fuel_subsidy::text AS total_fuel_subsidy,
+         s.op_counts, s.trucks, s.note
   FROM pay.payroll_statements s
   JOIN ops.drivers d ON d.id = s.driver_id
 `;
@@ -149,6 +152,7 @@ export async function mergedPeriodStatements(period: Period): Promise<StatementR
       total_miles: r.total_miles,
       total_fuel: r.total_fuel,
       total_pay: r.total_pay,
+      total_fuel_subsidy: r.total_fuel_subsidy,
       op_counts: r.op_counts,
       trucks: r.trucks,
       note: null

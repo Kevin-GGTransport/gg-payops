@@ -11,7 +11,7 @@ import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { ComboboxField } from "@/components/combobox-field";
 import { DateField } from "@/components/date-field";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
-import { calcTripWage, matchPackageRule, type WageRuleData } from "@/lib/wage";
+import { calcFuelSubsidy, calcTripWage, matchPackageRule, type WageRuleData } from "@/lib/wage";
 import { money, todayIso } from "@/lib/format";
 import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
 import {
@@ -231,6 +231,8 @@ const EntryRow = React.memo(function EntryRow({
    *  non-typing value change must report through here */
   onDirty,
   onPayChange,
+  /** Reports every miles change upward (feeds the owner fuel-subsidy strip) */
+  onMilesChange,
   onToChange,
   onFromChange,
   onDateChange,
@@ -270,6 +272,7 @@ const EntryRow = React.memo(function EntryRow({
   onRemove: (rowId: number) => void;
   onDirty: () => void;
   onPayChange: (rowId: number, value: string) => void;
+  onMilesChange: (rowId: number, value: string) => void;
   /** Reports every endpoint pick upward (feeds the next leg's carry) */
   onToChange: (rowId: number, value: string) => void;
   /** Reports every start pick upward (package circuit detection) */
@@ -445,6 +448,12 @@ const EntryRow = React.memo(function EntryRow({
     onPayChange(rowId, payValue);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payValue]);
+
+  // Miles feed the owner fuel-subsidy strip above the add-row bar
+  React.useEffect(() => {
+    onMilesChange(rowId, milesValue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [milesValue]);
 
   const phase = !fromValue || !toValue ? "idle" : status;
   // Quiet by default: the hint only appears when it carries real state -
@@ -686,12 +695,16 @@ const GroupSection = React.memo(function GroupSection({
   onRemove,
   onDriverChange,
   onPayChange,
+  onMilesChange,
   onForgetRow,
   onFilledChange,
   onDirty,
   dragging,
   onDraggingChange,
-  paySum
+  paySum,
+  subsidyRate,
+  subsidyMiles,
+  subsidyAmount
 }: {
   index: number;
   group: GroupSlot;
@@ -707,6 +720,7 @@ const GroupSection = React.memo(function GroupSection({
   /** Reports the picked driver upward (feeds the tab label) */
   onDriverChange: (groupId: number, driverId: string) => void;
   onPayChange: (groupId: number, rowId: number, value: string) => void;
+  onMilesChange: (groupId: number, rowId: number, value: string) => void;
   onForgetRow: (groupId: number, rowId: number) => void;
   onFilledChange: (groupId: number, count: number) => void;
   onDirty: () => void;
@@ -714,6 +728,10 @@ const GroupSection = React.memo(function GroupSection({
   dragging: { groupId: number; rowId: number } | null;
   onDraggingChange: (source: { groupId: number; rowId: number } | null) => void;
   paySum: number;
+  /** Owner fuel subsidy of this group's current rows (primitives keep the memo) */
+  subsidyRate: number;
+  subsidyMiles: number;
+  subsidyAmount: number;
 }) {
   const [driverId, setDriverId] = React.useState(group.driverId);
   const [rows, setRows] = React.useState<RowSlot[]>(group.rows);
@@ -743,6 +761,8 @@ const GroupSection = React.memo(function GroupSection({
   const driverType = driverRecord?.driver_type;
   // Pricing identity: an owner flagged price_as_driver bills as a driver
   const priceAsDriver = driverRecord?.price_as_driver ?? false;
+  // Fuel subsidy: OWNER drivers only (price_as_driver included), needs a rate
+  const showSubsidy = driverType === "OWNER" && subsidyRate > 0;
 
   // Planned packages follow the sheet live (endpoints/dates/rows/mode)
   const plans = React.useMemo(
@@ -925,6 +945,11 @@ const GroupSection = React.memo(function GroupSection({
     [group.id, onPayChange]
   );
 
+  const handleRowMilesChange = React.useCallback(
+    (rowId: number, value: string) => onMilesChange(group.id, rowId, value),
+    [group.id, onMilesChange]
+  );
+
   const armDrag = React.useCallback((rowId: number, armed: boolean) => {
     setArmedRow(armed ? rowId : null);
   }, []);
@@ -1022,6 +1047,11 @@ const GroupSection = React.memo(function GroupSection({
               </button>
             )}
           </span>
+          {showSubsidy && (
+            <span className="font-mono text-[13px] text-muted-foreground">
+              燃油补助 {money(subsidyAmount)}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <label htmlFor={`${prefix}-pkg-unit`} className="text-xs font-medium text-muted-foreground">
@@ -1150,6 +1180,7 @@ const GroupSection = React.memo(function GroupSection({
                     onRemove={removeRowById}
                     onDirty={onDirty}
                     onPayChange={handleRowPayChange}
+                    onMilesChange={handleRowMilesChange}
                     onToChange={handleToChange}
                     onFromChange={handleFromChange}
                     onDateChange={handleDateChange}
@@ -1171,6 +1202,27 @@ const GroupSection = React.memo(function GroupSection({
             })}
         </tbody>
       </RosterTable>
+
+      {/* Owner fuel-subsidy strip: the per-mile reimbursement line under the
+          sheet, live off the current miles; server snapshots per leg on submit */}
+      {showSubsidy && (
+        <div className="pkg-strip">
+          <div className="pkg-line">
+            <span className="text-xs font-medium text-foreground">燃油补助（车主）</span>
+            <span className="text-xs text-muted-foreground">
+              里程合计{" "}
+              {subsidyMiles.toLocaleString("en-US", { maximumFractionDigits: 1 })} mi × $
+              {subsidyRate.toLocaleString("en-US", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 3
+              })}
+              /mi
+            </span>
+            <b className="font-mono text-[13px]">{money(subsidyAmount)}</b>
+            <span className="text-[11px] text-muted-foreground">按段随行程记入，与工资分列</span>
+          </div>
+        </div>
+      )}
 
       {/* Add-row bar sits under the sheet: finishing the last row, the clerk
           continues right there - no scrolling back to the top band */}
@@ -1250,6 +1302,8 @@ export function TripEntryForm({
   } | null>(null);
   // "<groupId>:<rowId>" -> current pay value, for per-group and grand totals
   const [pays, setPays] = React.useState<Record<string, string>>({});
+  // "<groupId>:<rowId>" -> current miles value, for the owner fuel-subsidy lines
+  const [milesByRow, setMilesByRow] = React.useState<Record<string, string>>({});
   // groupId -> filled-row count (rows with at least one endpoint; reserve
   // rows are skipped by the server and stay out of every count)
   const [filledCounts, setFilledCounts] = React.useState<Record<number, number>>({});
@@ -1260,6 +1314,27 @@ export function TripEntryForm({
 
   const totalRows = Object.values(filledCounts).reduce((acc, n) => acc + n, 0);
   const totalPay = Object.values(pays).reduce((acc, v) => acc + (Number(v) || 0), 0);
+
+  // Owner fuel subsidy: live per-row miles x the ACTIVE version's rate (each
+  // leg rounded to cents, matching the server-side per-trip snapshot)
+  const subsidyRate = wageRule?.fuel_subsidy_rate ?? 0;
+  const subsidyOf = (groupId: number) => {
+    const prefix = `${groupId}:`;
+    let milesSum = 0;
+    let amount = 0;
+    for (const [key, value] of Object.entries(milesByRow)) {
+      if (!key.startsWith(prefix)) continue;
+      const milesNum = Number(value) || 0;
+      milesSum += milesNum;
+      amount += calcFuelSubsidy({ driverType: "OWNER", miles: milesNum, rate: subsidyRate });
+    }
+    return { milesSum, amount };
+  };
+  const isOwnerGroup = (groupId: number) =>
+    drivers.find(d => d.id === driverByGroup[groupId])?.driver_type === "OWNER";
+  const totalSubsidy = subsidyRate > 0
+    ? groups.reduce((acc, g) => acc + (isOwnerGroup(g.id) ? subsidyOf(g.id).amount : 0), 0)
+    : 0;
 
   const handlePayChange = React.useCallback((groupId: number, rowId: number, value: string) => {
     setPays(current => {
@@ -1277,6 +1352,21 @@ export function TripEntryForm({
       const next = { ...current };
       delete next[key];
       return next;
+    });
+    setMilesByRow(current => {
+      const key = `${groupId}:${rowId}`;
+      if (!(key in current)) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
+  const handleMilesChange = React.useCallback((groupId: number, rowId: number, value: string) => {
+    setMilesByRow(current => {
+      const key = `${groupId}:${rowId}`;
+      if (current[key] === value) return current;
+      return { ...current, [key]: value };
     });
   }, []);
 
@@ -1349,6 +1439,7 @@ export function TripEntryForm({
     setDriverByGroup(Object.fromEntries(restored.map(g => [g.id, g.driverId])));
     setFilledCounts({});
     setPays({});
+    setMilesByRow({});
     setActiveId(String(restored[Math.min(draft.activeIndex, restored.length - 1)].id));
     if (/^\d{4}-\d{2}-\d{2}$/.test(draft.periodStart)) setPeriodStart(draft.periodStart);
     dirtyRef.current = true;
@@ -1397,6 +1488,12 @@ export function TripEntryForm({
       return next;
     });
     setPays(current => {
+      const prefix = `${id}:`;
+      const keys = Object.keys(current);
+      if (!keys.some(k => k.startsWith(prefix))) return current;
+      return Object.fromEntries(keys.filter(k => !k.startsWith(prefix)).map(k => [k, current[k]]));
+    });
+    setMilesByRow(current => {
       const prefix = `${id}:`;
       const keys = Object.keys(current);
       if (!keys.some(k => k.startsWith(prefix))) return current;
@@ -1457,6 +1554,7 @@ export function TripEntryForm({
     } else {
       setGroups([group]);
       setPays({});
+      setMilesByRow({});
     }
     setDriverByGroup(current => ({ ...current, [id]: apply.driverId }));
     setActiveId(String(id));
@@ -1595,30 +1693,37 @@ export function TripEntryForm({
           </div>
 
           {/* forceMount keeps every tab's fields in the DOM (and the submit) */}
-          {groups.map((group, gi) => (
-            <TabsContent key={group.id} value={String(group.id)} forceMount>
-              <GroupSection
-                index={gi}
-                group={group}
-                drivers={drivers}
-                trucks={trucks}
-                locations={locations}
-                operations={operations}
-                wageRule={wageRule}
-                sheetTable={sheetTable}
-                removable={groups.length > 1}
-                onRemove={removeGroup}
-                onDriverChange={handleGroupDriverChange}
-                onPayChange={handlePayChange}
-                onForgetRow={handleForgetRow}
-                onFilledChange={handleFilledChange}
-                onDirty={handleDirty}
-                dragging={dragging}
-                onDraggingChange={setDragging}
-                paySum={groupPaySum(group.id)}
-              />
-            </TabsContent>
-          ))}
+          {groups.map((group, gi) => {
+            const subsidy = isOwnerGroup(group.id) && subsidyRate > 0 ? subsidyOf(group.id) : null;
+            return (
+              <TabsContent key={group.id} value={String(group.id)} forceMount>
+                <GroupSection
+                  index={gi}
+                  group={group}
+                  drivers={drivers}
+                  trucks={trucks}
+                  locations={locations}
+                  operations={operations}
+                  wageRule={wageRule}
+                  sheetTable={sheetTable}
+                  removable={groups.length > 1}
+                  onRemove={removeGroup}
+                  onDriverChange={handleGroupDriverChange}
+                  onPayChange={handlePayChange}
+                  onMilesChange={handleMilesChange}
+                  onForgetRow={handleForgetRow}
+                  onFilledChange={handleFilledChange}
+                  onDirty={handleDirty}
+                  dragging={dragging}
+                  onDraggingChange={setDragging}
+                  paySum={groupPaySum(group.id)}
+                  subsidyRate={subsidyRate}
+                  subsidyMiles={subsidy?.milesSum ?? 0}
+                  subsidyAmount={subsidy?.amount ?? 0}
+                />
+              </TabsContent>
+            );
+          })}
         </Tabs>
 
         <input type="hidden" name="group_count" value={groups.length} />
@@ -1629,6 +1734,12 @@ export function TripEntryForm({
             <span>
               共 {groups.length} 组 · {totalRows} 段 · 工资合计{" "}
               <b className="font-mono text-sm text-foreground">{money(totalPay)}</b>
+              {totalSubsidy > 0 && (
+                <>
+                  {" "}· 补助合计{" "}
+                  <b className="font-mono text-sm text-foreground">{money(totalSubsidy)}</b>
+                </>
+              )}
             </span>
             <button
               type="button"

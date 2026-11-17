@@ -209,6 +209,14 @@ export function RulesEditor({
             className="md:col-span-2"
           />
           <NumberField
+            label="燃油补助（$/mi）"
+            name="fuel_subsidy_rate"
+            min={0}
+            step={0.001}
+            defaultValue={String(Number(version.fuel_subsidy_rate))}
+            className="md:col-span-2"
+          />
+          <NumberField
             label="BOBTAIL 乘数（×）"
             name="bobtail_multiplier"
             min={0.01}
