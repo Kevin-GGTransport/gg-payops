@@ -7,11 +7,9 @@ import { LedgerPanel } from "@/components/ledger";
 import { WageRuleStateBadge } from "@/components/badges";
 import { ConfirmButton } from "@/components/confirm-button";
 import { Button } from "@/components/ui/button";
-import { DateField } from "@/components/date-field";
 import { FormError, FormGrid, SubmitButton, TextField } from "@/components/form-fields";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
-import { todayIso } from "@/lib/format";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeOperationOptions } from "@/lib/queries/operations";
 import { activeLocationOptions } from "@/lib/queries/locations";
@@ -24,9 +22,6 @@ export const metadata: Metadata = { title: "工资规则 · G&G PayOps" };
 
 const ERROR_MESSAGES: Record<string, string> = {
   missing_name: "请填写版本名。",
-  bad_date: "生效日期无效。",
-  past_date: "生效日期不能早于今天（更早的价格已是锁定历史，调价从今天起生效）。",
-  dup_date: "这个生效日期已有版本。",
   bad_multiplier: "乘数必须大于 0。",
   bad_overage: "超档递增额必须 ≥ 0。",
   no_tiers: "至少需要一个里程档位。",
@@ -39,7 +34,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   bad_price_location: "价格规则的起点/终点无效。",
   bad_price_side: "价格规则的起点/终点无效。",
   bad_price_amount: "价格规则金额必须 ≥ 0。",
-  locked: "该版本已生效，不可删除。",
+  locked: "该版本生效中，不可删除；请先把其他版本设为生效。",
   bad_source: "复制源版本不存在。"
 };
 
@@ -55,7 +50,7 @@ export default async function WageRulesPage({
   const isNew = firstValue(sp.new) === "1";
   const fromId = (firstValue(sp.from) ?? "").trim();
   const saved = firstValue(sp.saved) === "1";
-  const today = todayIso();
+  const activated = firstValue(sp.activated) === "1";
 
   const [versions, drivers, operations, locations] = await Promise.all([
     wageRuleVersionsList(),
@@ -63,43 +58,40 @@ export default async function WageRulesPage({
     activeOperationOptions(),
     activeLocationOptions()
   ]);
-  // Default open: the version governing today (latest effective), else newest —
-  // the editor always lands on the rules currently in force
-  const openId =
-    viewId || versions.find(v => v.effective_from <= today)?.id || versions[0]?.id || "";
+  // Default open: the ACTIVE version (list puts it first), else newest
+  const openId = viewId || versions[0]?.id || "";
   const detail = openId ? await wageRuleVersionDetail(openId) : null;
 
-  // Default copy source: the version governing today (latest effective), else newest
-  const createSourceId =
-    fromId || versions.find(v => v.effective_from <= today)?.id || versions[0]?.id || "";
+  // Copy source: the ACTIVE version - new versions start as its preset
+  const createSourceId = fromId || versions.find(v => v.status === "ACTIVE")?.id || "";
   const errorMessage = errorCode
     ? ERROR_MESSAGES[errorCode] ?? "操作出错，请检查后重试。"
     : undefined;
-  // Effective before today = locked history; saving clones it into a
-  // today-effective version automatically (see saveVersion)
-  const locked = detail ? detail.effective_from < today : false;
-  const canDelete = detail ? detail.effective_from > today : false;
+  const isActive = detail ? detail.status === "ACTIVE" : false;
+  const canDelete = detail ? !isActive : false;
 
   return (
     <>
       <PageHeader
         title="工资规则"
-        description="定价就一张规则表：适用司机 × 起点 → 终点 × 操作 × 类型（按趟/按往返/按天）× 司机价 × 车主价。改价保存即从今天生效，无命中的行程按里程档兜底。"
+        description="定价就一张规则表：适用司机 × 起点 → 终点 × 操作 × 类型（按趟/按往返/按天）× 司机价 × 车主价。任一时刻只有一个版本生效，切换后新录入的行程即按新版本计价；无命中的行程按里程档兜底。"
         actions={
           createSourceId ? (
             <Link
               className="button button-dark"
               href={`/dashboard/wage-rules?new=1&from=${createSourceId}`}
             >
-              <PlusIcon className="size-4" aria-hidden /> 预排未来版本
+              <PlusIcon className="size-4" aria-hidden /> 新建版本
             </Link>
           ) : undefined
         }
       />
 
       {errorMessage && !isNew && <FormError message={errorMessage} />}
-      {saved && !errorMessage && (
-        <p className="notice" role="status">已保存；改动自生效日期起计入新录入的行程。</p>
+      {(saved || activated) && !errorMessage && (
+        <p className="notice" role="status">
+          {activated ? "已切换生效；新录入的行程即按此版本计价。" : "已保存；生效中版本的改动即刻计入新录入的行程。"}
+        </p>
       )}
 
       {detail && (
@@ -112,11 +104,11 @@ export default async function WageRulesPage({
                     {detail.name}
                   </b>
                   <span className="mono text-xs font-medium tracking-normal">
-                    生效 {detail.effective_from}
+                    建于 {detail.created_on}
                   </span>
                   <WageRuleStateBadge
-                    effective={detail.effective_from <= today}
-                    label={locked ? "历史（保存即建今日版）" : detail.effective_from <= today ? "已生效" : "待生效"}
+                    effective={isActive}
+                    label={isActive ? "生效中" : "未生效"}
                   />
                 </div>
                 <div className="flex shrink-0 items-center gap-2 tracking-normal">
@@ -125,7 +117,7 @@ export default async function WageRulesPage({
                       <input type="hidden" name="id" value={detail.id} />
                       <ConfirmButton
                         className="button button-quiet button-danger h-7! px-2.5! text-xs"
-                        message="确定删除该待生效版本？此操作不可撤销。"
+                        message="确定删除该未生效版本？此操作不可撤销。"
                       >
                         删除
                       </ConfirmButton>
@@ -143,44 +135,36 @@ export default async function WageRulesPage({
               drivers={drivers}
               operations={operations}
               locations={locations}
-              locked={locked}
-              today={today}
             />
           </LedgerPanel>
         </section>
       )}
 
-      <section aria-label="版本历史">
-        <LedgerPanel label={<b className="text-[15px] font-bold tracking-normal">版本历史（只读留档）</b>}>
-          <WageRulesTable versions={versions} today={today} selectedId={detail?.id} />
+      <section aria-label="版本列表">
+        <LedgerPanel label={<b className="text-[15px] font-bold tracking-normal">版本列表（手动切换生效）</b>}>
+          <WageRulesTable versions={versions} selectedId={detail?.id} />
         </LedgerPanel>
       </section>
 
       <ModalShell
         open={isNew && Boolean(createSourceId)}
         closeHref="/dashboard/wage-rules"
-        title="预排未来版本"
+        title="新建版本"
       >
-        <form action={createVersion} aria-label="预排未来版本">
+        <form action={createVersion} aria-label="新建版本">
           <input type="hidden" name="source_id" value={createSourceId} />
           <div className="grid gap-4 px-5 py-4">
             <FormError message={errorMessage} />
             <p className="text-xs text-muted-foreground">
-              复制当前生效版本的规则（价格规则与里程档），到指定日期自动接替生效。临时调价直接在上面的编辑器里改并保存即可。
+              复制当前生效版本的规则（价格规则与里程档），创建后为未生效草稿，可随意修改；调好后到版本列表「设为生效」。
             </p>
             <FormGrid>
               <TextField
                 label="版本名"
                 name="name"
                 required
-                defaultValue={formField(sp, "name", `CA Local ${today.slice(0, 7).replace("-", "年")} 版`)}
+                defaultValue={formField(sp, "name", "CA Local 新版")}
                 maxLength={120}
-              />
-              <DateField
-                label="生效日期（今天或之后）"
-                name="effective_from"
-                defaultValue={formField(sp, "effective_from", today)}
-                required
               />
             </FormGrid>
           </div>

@@ -16,7 +16,7 @@ import { listOperationTypes, activeOperationOptions } from "@/lib/queries/operat
 import { listTrips } from "@/lib/queries/trips";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeLocationOptions } from "@/lib/queries/locations";
-import { activeWageRuleVersions } from "@/lib/queries/wage-rules";
+import { currentWageRule } from "@/lib/queries/wage-rules";
 import { TripsTable } from "./trips-table";
 
 export const metadata: Metadata = { title: "行程台账 · G&G PayOps" };
@@ -84,7 +84,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
   const hasFilter =
     selectedIds.length > 0 || Boolean(operation) || Boolean(q) || Boolean(dateFrom) || Boolean(dateTo);
 
-  const [drivers, trips, locations, wageRules, operationOptions] = await Promise.all([
+  const [drivers, trips, locations, wageRule, operationOptions] = await Promise.all([
     activeDriverOptions(),
     listTrips({
       ...(selectedIds.length > 0 ? { driverIds: selectedIds } : {}),
@@ -97,7 +97,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
     }),
     // Edit-dialog dictionaries (in-page client dialog, always mounted)
     activeLocationOptions(),
-    activeWageRuleVersions(),
+    currentWageRule(),
     activeOperationOptions()
   ]);
   const total = trips[0]?.total ?? 0;
@@ -201,7 +201,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
           <TripsTable
             trips={trips}
             returnTo={queryWith({ page }).toString()}
-            edit={{ locations, operations: operationOptions, wageRules }}
+            edit={{ locations, operations: operationOptions, wageRule }}
             empty={
               hasFilter
                 ? "没有符合条件的行程。调整筛选条件，或点右上角「录入行程」前往首页录入。"

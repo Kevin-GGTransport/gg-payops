@@ -4,17 +4,17 @@ import Link from "next/link";
 import { type ColumnDef } from "@tanstack/react-table";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { WageRuleStateBadge } from "@/components/badges";
+import { ConfirmButton } from "@/components/confirm-button";
 import { money } from "@/lib/format";
+import { activateVersion } from "./actions";
 import type { WageRuleVersionSummary } from "@/lib/queries/wage-rules";
 
-/** Version timeline on the shared TanStack + shadcn table shell */
+/** Version list on the shared TanStack + shadcn table shell */
 export function WageRulesTable({
   versions,
-  today,
   selectedId
 }: {
   versions: WageRuleVersionSummary[];
-  today: string;
   /** Currently opened version: its row gets the route-blue pick line */
   selectedId?: string;
 }) {
@@ -26,17 +26,20 @@ export function WageRulesTable({
       cell: ({ row }) => <span className="mono strong">{row.original.name}</span>
     },
     {
-      id: "effective_from",
-      header: "生效日期",
+      id: "created_on",
+      header: "创建日期",
       size: 110,
-      cell: ({ row }) => <span className="mono">{row.original.effective_from}</span>
+      cell: ({ row }) => <span className="mono">{row.original.created_on}</span>
     },
     {
       id: "state",
       header: "状态",
       size: 90,
       cell: ({ row }) => (
-        <WageRuleStateBadge effective={row.original.effective_from <= today} />
+        <WageRuleStateBadge
+          effective={row.original.status === "ACTIVE"}
+          label={row.original.status === "ACTIVE" ? "生效中" : "未生效"}
+        />
       )
     },
     {
@@ -57,12 +60,26 @@ export function WageRulesTable({
     {
       id: "actions",
       header: "操作",
-      size: 70,
+      size: 130,
       enableResizing: false,
       meta: { cellClass: "actions" },
-      cell: ({ row }) => (
-        <Link href={`/dashboard/wage-rules?v=${row.original.id}`}>详情</Link>
-      )
+      cell: ({ row }) =>
+        row.original.status === "ACTIVE" ? (
+          <Link href={`/dashboard/wage-rules?v=${row.original.id}`}>详情</Link>
+        ) : (
+          <span className="inline-flex items-center gap-3">
+            <Link href={`/dashboard/wage-rules?v=${row.original.id}`}>详情</Link>
+            <form action={activateVersion} className="contents">
+              <input type="hidden" name="id" value={row.original.id} />
+              <ConfirmButton
+                className="button button-quiet h-7! px-2! text-xs"
+                message="确定将该版本设为生效？当前生效版本会立即停用，新录入的行程按新版本计价。"
+              >
+                设为生效
+              </ConfirmButton>
+            </form>
+          </span>
+        )
     }
   ];
 

@@ -9,7 +9,7 @@ import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeLocationOptions } from "@/lib/queries/locations";
 import { activeOperationOptions } from "@/lib/queries/operations";
 import { activeTruckOptions } from "@/lib/queries/trucks";
-import { activeWageRuleVersions } from "@/lib/queries/wage-rules";
+import { currentWageRule } from "@/lib/queries/wage-rules";
 import { TripEntryForm, type RefillGroup } from "./trip-entry-form";
 
 export const metadata: Metadata = { title: "录入行程 · G&G PayOps" };
@@ -77,12 +77,12 @@ export default async function EntryPage({
         })
       : undefined;
 
-  const [drivers, trucks, locations, operations, wageRules] = await Promise.all([
+  const [drivers, trucks, locations, operations, wageRule] = await Promise.all([
     activeDriverOptions(),
     activeTruckOptions(),
     activeLocationOptions(),
     activeOperationOptions(),
-    activeWageRuleVersions()
+    currentWageRule()
   ]);
 
   const errorMessage = errorCode
@@ -117,7 +117,7 @@ export default async function EntryPage({
         trucks={trucks}
         locations={locations}
         operations={operations}
-        wageRules={wageRules}
+        wageRule={wageRule}
         defaultDriverId={preselectedDriver}
         refillGroups={refillGroups}
         initialActiveIndex={initialActiveIndex}

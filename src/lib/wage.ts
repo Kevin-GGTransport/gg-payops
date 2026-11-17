@@ -43,7 +43,6 @@ export type WageTier = {
 export type WageRuleData = {
   id: string;
   name: string;
-  effective_from: string;
   owner_multiplier: number;
   bobtail_multiplier: number;
   overage_increment: number;
@@ -163,27 +162,7 @@ export function matchPackageRule(
 }
 
 /**
- * Pick the version governing a trip date: the latest ACTIVE version with
- * effective_from <= tripDate (null when none covers the date).
- */
-export function pickVersion<T extends { effective_from: string }>(
-  versions: T[],
-  tripDate: string
-): T | null {
-  let best: T | null = null;
-  for (const version of versions) {
-    if (
-      version.effective_from <= tripDate &&
-      (!best || version.effective_from > best.effective_from)
-    ) {
-      best = version;
-    }
-  }
-  return best;
-}
-
-/**
- * Full per-trip wage against a rule version:
+ * Full per-trip wage against the single ACTIVE rule version:
  * 1. the most specific matching LEG rule wins outright - its amount is the
  *    final price (owner column when negotiated, otherwise driver price x
  *    owner multiplier); neither multiplier stacks on a rule price;

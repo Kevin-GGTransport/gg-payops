@@ -14,7 +14,7 @@ import { STATEMENT_STATUS_FLOW, STATEMENT_STATUS_LABELS } from "@/lib/labels";
 import { getDriverById } from "@/lib/queries/drivers";
 import { activeOperationOptions } from "@/lib/queries/operations";
 import { activeLocationOptions } from "@/lib/queries/locations";
-import { activeWageRuleVersions } from "@/lib/queries/wage-rules";
+import { currentWageRule } from "@/lib/queries/wage-rules";
 import { driverPeriodTrips, periodPayTotals, type DriverPeriodTripRow } from "@/lib/queries/trips";
 import { getStatementByDriverPeriod } from "@/lib/queries/statements";
 import { advanceStatement, revertStatement } from "../../payroll/actions";
@@ -79,14 +79,14 @@ export default async function DriverPeriodPage({
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
 
-  const [legs, periodTotals, statement, locations, wageRules, operationOptions] =
+  const [legs, periodTotals, statement, locations, wageRule, operationOptions] =
     await Promise.all([
       driverPeriodTrips(period, driver.id),
       periodPayTotals(),
       getStatementByDriverPeriod(driver.id, period.start),
       // Edit-dialog dictionaries (in-page client dialog, always mounted)
       activeLocationOptions(),
-      activeWageRuleVersions(),
+      currentWageRule(),
       activeOperationOptions()
     ]);
   const days = groupByDay(legs);
@@ -230,7 +230,7 @@ export default async function DriverPeriodPage({
             totalFuel={String(totals.fuel)}
             totalPay={String(totals.pay)}
             returnTo={returnTo}
-            edit={{ locations, operations: operationOptions, wageRules }}
+            edit={{ locations, operations: operationOptions, wageRule }}
             storageKey="payops.payroll.detail.cols"
           />
           {legs.length === 0 && (

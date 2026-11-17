@@ -11,7 +11,7 @@ import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { ComboboxField } from "@/components/combobox-field";
 import { DateField } from "@/components/date-field";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
-import { calcTripWage, matchPackageRule, pickVersion, type WageRuleData } from "@/lib/wage";
+import { calcTripWage, matchPackageRule, type WageRuleData } from "@/lib/wage";
 import { money, todayIso } from "@/lib/format";
 import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
 import {
@@ -77,8 +77,8 @@ type TripEntryFormProps = {
   locations: LocationOption[];
   /** Operation dictionary (ACTIVE rows); the row dropdown reads it */
   operations: OperationOption[];
-  /** Wage-rule versions (current + scheduled); each row prices by its own date */
-  wageRules: WageRuleData[];
+  /** The single ACTIVE wage-rule version; every row prices by it */
+  wageRule: WageRuleData | null;
   defaultDriverId?: string;
   /** Present when redirected back after a validation error */
   refillGroups?: RefillGroup[];
@@ -220,7 +220,7 @@ const EntryRow = React.memo(function EntryRow({
   priceAsDriver,
   locations,
   operations,
-  wageRules,
+  wageRule,
   defaults,
   removable,
   carryFrom,
@@ -260,7 +260,7 @@ const EntryRow = React.memo(function EntryRow({
   /** Operation dictionary; drives the dropdown and the Load# lock */
   operations: OperationOption[];
   /** Wage-rule versions; the row's own date picks the governing one */
-  wageRules: WageRuleData[];
+  wageRule: WageRuleData | null;
   defaults?: RefillRow;
   removable: boolean;
   /** Current to-value of the previous leg in this group ("" when none yet) */
@@ -416,8 +416,8 @@ const EntryRow = React.memo(function EntryRow({
   const wageEndpoint = (value: string) =>
     locations.find(l => `loc:${l.id}` === value) ?? null;
 
-  // Rule price follows the row's own date (future versions price future rows)
-  const rule = pickVersion(wageRules, dateValue);
+  // Every row prices by the single ACTIVE rule version
+  const rule = wageRule;
   const autoPay = React.useMemo(
     () =>
       rule
@@ -680,7 +680,7 @@ const GroupSection = React.memo(function GroupSection({
   trucks,
   locations,
   operations,
-  wageRules,
+  wageRule,
   sheetTable,
   removable,
   onRemove,
@@ -699,7 +699,7 @@ const GroupSection = React.memo(function GroupSection({
   trucks: TruckOption[];
   locations: LocationOption[];
   operations: OperationOption[];
-  wageRules: WageRuleData[];
+  wageRule: WageRuleData | null;
   /** Shared columns-only TanStack instance (thead + colgroup for this sheet) */
   sheetTable: TanstackTable<unknown>;
   removable: boolean;
@@ -753,13 +753,12 @@ const GroupSection = React.memo(function GroupSection({
     [pkgUnit, rows, dateByRow, fromByRow, toByRow]
   );
 
-  // Rule suggestion per package: driver-scoped beats global, the package's
-  // own date picks the governing version (OWNER: owner column, else driver
-  // price x owner multiplier)
+  // Rule suggestion per package: driver-scoped beats global (OWNER: owner
+  // column, else driver price x owner multiplier)
   const suggestionByPkg = React.useMemo(() => {
     const map: Record<string, { amount: string; label: string } | null> = {};
     for (const plan of plans) {
-      const rule = pickVersion(wageRules, plan.date);
+      const rule = wageRule;
       const match = rule ? matchPackageRule(plan.unit, driverId, rule.price_rules) : null;
       if (!rule || !match) {
         map[plan.id] = null;
@@ -772,7 +771,7 @@ const GroupSection = React.memo(function GroupSection({
       map[plan.id] = { amount: amount.toFixed(2), label: match.label ?? "" };
     }
     return map;
-  }, [plans, wageRules, driverId, driverType, priceAsDriver]);
+  }, [plans, wageRule, driverId, driverType, priceAsDriver]);
 
   /** Effective amount of a package: manual override, else rule suggestion */
   const amountOf = React.useCallback(
@@ -1143,7 +1142,7 @@ const GroupSection = React.memo(function GroupSection({
                     priceAsDriver={priceAsDriver}
                     locations={locations}
                     operations={operations}
-                    wageRules={wageRules}
+                    wageRule={wageRule}
                     defaults={slot.defaults}
                     removable={rows.length > 1}
                     carryFrom={i === 0 ? "" : (toByRow[rows[i - 1].id] ?? "")}
@@ -1195,7 +1194,7 @@ export function TripEntryForm({
   trucks,
   locations,
   operations,
-  wageRules,
+  wageRule,
   defaultDriverId = "",
   refillGroups,
   initialActiveIndex,
@@ -1605,7 +1604,7 @@ export function TripEntryForm({
                 trucks={trucks}
                 locations={locations}
                 operations={operations}
-                wageRules={wageRules}
+                wageRule={wageRule}
                 sheetTable={sheetTable}
                 removable={groups.length > 1}
                 onRemove={removeGroup}

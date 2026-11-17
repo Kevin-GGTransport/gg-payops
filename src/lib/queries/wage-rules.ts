@@ -5,7 +5,9 @@ import type { WagePriceRule, WageRuleData } from "@/lib/wage";
 export type WageRuleVersionSummary = {
   id: string;
   name: string;
-  effective_from: string;
+  status: string;
+  /** Display date (versions no longer carry an effective date) */
+  created_on: string;
   owner_multiplier: string;
   bobtail_multiplier: string;
   overage_increment: string;
@@ -13,25 +15,24 @@ export type WageRuleVersionSummary = {
   min_amount: string;
   max_amount: string;
   price_rule_count: number;
-  status: string;
   notes: string | null;
 };
 
 export async function wageRuleVersionsList() {
   return prisma.$queryRaw<WageRuleVersionSummary[]>`
-    SELECT v.id::text, v.name,
-           to_char(v.effective_from, 'YYYY-MM-DD') AS effective_from,
+    SELECT v.id::text, v.name, v.status,
+           to_char(v.created_at, 'YYYY-MM-DD') AS created_on,
            v.owner_multiplier::text, v.bobtail_multiplier::text, v.overage_increment::text,
            count(t.id)::int AS tier_count,
            coalesce(min(t.amount), 0)::text AS min_amount,
            coalesce(max(t.amount), 0)::text AS max_amount,
            (SELECT count(*)::int FROM pay.wage_rule_prices p
              WHERE p.version_id = v.id) AS price_rule_count,
-           v.status, v.notes
+           v.notes
     FROM pay.wage_rule_versions v
     LEFT JOIN pay.wage_rule_tiers t ON t.version_id = v.id
     GROUP BY v.id
-    ORDER BY v.effective_from DESC
+    ORDER BY v.status = 'ACTIVE' DESC, v.id DESC
   `;
 }
 
@@ -99,17 +100,17 @@ export async function wageRuleVersionDetail(id: string) {
     Array<{
       id: string;
       name: string;
-      effective_from: string;
+      status: string;
+      created_on: string;
       owner_multiplier: string;
       bobtail_multiplier: string;
       overage_increment: string;
-      status: string;
       notes: string | null;
     }>
   >`
-    SELECT id::text, name, to_char(effective_from, 'YYYY-MM-DD') AS effective_from,
+    SELECT id::text, name, status, to_char(created_at, 'YYYY-MM-DD') AS created_on,
            owner_multiplier::text, bobtail_multiplier::text, overage_increment::text,
-           status, notes
+           notes
     FROM pay.wage_rule_versions WHERE id = ${id}::bigint LIMIT 1
   `;
   const version = versions[0];
@@ -126,28 +127,28 @@ export async function wageRuleVersionDetail(id: string) {
 
 export type WageRuleVersionDetail = NonNullable<Awaited<ReturnType<typeof wageRuleVersionDetail>>>;
 
-/** Every ACTIVE version's full rule (current + scheduled); callers pick by date. */
-export async function activeWageRuleVersions(): Promise<WageRuleData[]> {
+/** The single ACTIVE version's full rule (null when none exists). */
+export async function currentWageRule(): Promise<WageRuleData | null> {
   const versions = await prisma.$queryRaw<
     Array<{
       id: string;
       name: string;
-      effective_from: string;
       owner_multiplier: string;
       bobtail_multiplier: string;
       overage_increment: string;
     }>
   >`
-    SELECT id::text, name, to_char(effective_from, 'YYYY-MM-DD') AS effective_from,
+    SELECT id::text, name,
            owner_multiplier::text, bobtail_multiplier::text, overage_increment::text
     FROM pay.wage_rule_versions WHERE status = 'ACTIVE'
-    ORDER BY effective_from
+    ORDER BY id DESC LIMIT 1
   `;
-  if (versions.length === 0) return [];
+  const version = versions[0];
+  if (!version) return null;
   const [tiers, priceRules] = await Promise.all([
-    prisma.$queryRaw<Array<{ version_id: string; miles_from: number; amount: string }>>`
-      SELECT version_id::text, miles_from, amount::text
-      FROM pay.wage_rule_tiers ORDER BY miles_from
+    prisma.$queryRaw<Array<{ miles_from: number; amount: string }>>`
+      SELECT miles_from, amount::text FROM pay.wage_rule_tiers
+      WHERE version_id = ${version.id}::bigint ORDER BY miles_from
     `,
     prisma.$queryRaw<PriceRuleRaw[]>`
       SELECT p.version_id::text, p.id::text, p.driver_id::text AS driver_id, p.unit,
@@ -159,33 +160,29 @@ export async function activeWageRuleVersions(): Promise<WageRuleData[]> {
       FROM pay.wage_rule_prices p
       LEFT JOIN ops.locations f ON f.id = p.from_location_id
       LEFT JOIN ops.locations t ON t.id = p.to_location_id
+      WHERE p.version_id = ${version.id}::bigint
       ORDER BY p.id
     `
   ]);
-  return versions.map(version => ({
+  return {
     id: version.id,
     name: version.name,
-    effective_from: version.effective_from,
     owner_multiplier: Number(version.owner_multiplier),
     bobtail_multiplier: Number(version.bobtail_multiplier),
     overage_increment: Number(version.overage_increment),
-    tiers: tiers
-      .filter(tier => tier.version_id === version.id)
-      .map(tier => ({ miles_from: tier.miles_from, amount: Number(tier.amount) })),
-    price_rules: priceRules
-      .filter(rule => rule.version_id === version.id)
-      .map(rule => ({
-        id: rule.id,
-        driver_id: rule.driver_id,
-        unit: rule.unit as WagePriceRule["unit"],
-        from_location_id: rule.from_location_id,
-        to_location_id: rule.to_location_id,
-        from_tag: rule.from_tag,
-        to_tag: rule.to_tag,
-        operation: rule.operation,
-        label: rule.label,
-        driver_amount: Number(rule.driver_amount),
-        owner_amount: rule.owner_amount === null ? null : Number(rule.owner_amount)
-      }))
-  }));
+    tiers: tiers.map(tier => ({ miles_from: tier.miles_from, amount: Number(tier.amount) })),
+    price_rules: priceRules.map(rule => ({
+      id: rule.id,
+      driver_id: rule.driver_id,
+      unit: rule.unit as WagePriceRule["unit"],
+      from_location_id: rule.from_location_id,
+      to_location_id: rule.to_location_id,
+      from_tag: rule.from_tag,
+      to_tag: rule.to_tag,
+      operation: rule.operation,
+      label: rule.label,
+      driver_amount: Number(rule.driver_amount),
+      owner_amount: rule.owner_amount === null ? null : Number(rule.owner_amount)
+    }))
+  };
 }

@@ -8,7 +8,7 @@ import { ComboboxField } from "@/components/combobox-field";
 import { DateField } from "@/components/date-field";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
 import { Input } from "@/components/ui/input";
-import { calcTripWage, pickVersion, type WageRuleData } from "@/lib/wage";
+import { calcTripWage, type WageRuleData } from "@/lib/wage";
 import type { DriverType, OperationType } from "@/lib/labels";
 import type { OperationOption } from "../trip-entry-form";
 import type { TripEditRow } from "@/lib/queries/trips";
@@ -47,7 +47,7 @@ function DialogField({
 export type TripEditDictionaries = {
   locations: LocationOption[];
   operations: OperationOption[];
-  wageRules: WageRuleData[];
+  wageRule: WageRuleData | null;
 };
 
 /**
@@ -71,7 +71,7 @@ export function TripEditDialog({
   /** Serialized filters the save redirects back to */
   returnTo: string;
 }) {
-  const { locations, operations, wageRules } = dictionaries;
+  const { locations, operations, wageRule } = dictionaries;
 
   // Stored endpoint -> picker value: the loc: pick when the row is in the
   // dictionary, else txt:<code> (an INACTIVE location still resolves by code
@@ -99,7 +99,7 @@ export function TripEditDialog({
               trip={trip}
               locations={locations}
               operations={operations}
-              wageRules={wageRules}
+              wageRule={wageRule}
               returnTo={returnTo}
               endpointInitial={endpointInitial}
             />
@@ -116,14 +116,14 @@ function EditForm({
   trip,
   locations,
   operations,
-  wageRules,
+  wageRule,
   returnTo,
   endpointInitial
 }: {
   trip: TripEditRow;
   locations: LocationOption[];
   operations: OperationOption[];
-  wageRules: WageRuleData[];
+  wageRule: WageRuleData | null;
   returnTo: string;
   endpointInitial: (locationId: string | null, code: string | null) => string;
 }) {
@@ -187,8 +187,8 @@ function EditForm({
   const wageEndpoint = (value: string) =>
     locations.find(l => `loc:${l.id}` === value) ?? null;
 
-  // Rule price follows the trip's own date (future versions price future dates)
-  const rule = pickVersion(wageRules, dateValue);
+  // Every trip prices by the single ACTIVE rule version
+  const rule = wageRule;
   const autoPay = React.useMemo(
     () =>
       rule

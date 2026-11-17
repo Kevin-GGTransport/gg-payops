@@ -5,7 +5,6 @@ import { PlusIcon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ComboboxField } from "@/components/combobox-field";
-import { DateField } from "@/components/date-field";
 import { FormGrid, NumberField, TextField } from "@/components/form-fields";
 import type { LocationOption } from "@/components/location-picker";
 import type { WageRuleVersionDetail } from "@/lib/queries/wage-rules";
@@ -73,24 +72,19 @@ function CellSelect({
  * Whole-ruleset editor for one wage-rule version: the price-rule table is the
  * ONLY pricing primitive (适用司机 x 起点/终点位置 x 操作 x 计价单位 x 两档价),
  * with the mileage tiers as the no-match fallback. Positional FormData, same
- * convention as the entry sheet. Saving a version effective before today
- * auto-clones it to a today-effective version server-side (saveVersion).
+ * convention as the entry sheet. Saves in place - the ACTIVE version takes
+ * effect immediately, INACTIVE versions are editable presets.
  */
 export function RulesEditor({
   version,
   drivers,
   operations,
-  locations,
-  locked,
-  today
+  locations
 }: {
   version: WageRuleVersionDetail;
   drivers: DriverOption[];
   operations: OperationOption[];
   locations: LocationOption[];
-  /** Version already effective before today: saving creates today's clone */
-  locked: boolean;
-  today: string;
 }) {
   const [tiers, setTiers] = React.useState<TierRow[]>(
     version.tiers.map(t => ({
@@ -197,12 +191,6 @@ export function RulesEditor({
       <input type="hidden" name="price_count" value={prices.length} />
 
       <div className="grid gap-5 px-4 py-4">
-        {locked && (
-          <p className="notice">
-            该版本自 {version.effective_from} 起生效，是锁定历史。在这里修改并保存会自动创建一个<b>今天（{today}）生效</b>的新版本承接改动，历史行程金额不受影响。
-          </p>
-        )}
-
         <FormGrid className="gap-x-3 px-0 pt-0 md:grid-cols-6">
           <TextField
             label="版本名"
@@ -210,13 +198,6 @@ export function RulesEditor({
             required
             defaultValue={version.name}
             maxLength={120}
-            className="md:col-span-3"
-          />
-          <DateField
-            label="生效日期"
-            name="effective_from"
-            defaultValue={version.effective_from}
-            required
             className="md:col-span-3"
           />
           <NumberField
@@ -250,9 +231,6 @@ export function RulesEditor({
             <p className="text-xs font-medium text-muted-foreground">
               价格规则（按趟=终价不叠乘数；按往返/按天=录入打包建议价；都没命中走里程档）
             </p>
-            <Button type="button" variant="ghost" className="h-7 px-2 text-xs" onClick={addPrice}>
-              <PlusIcon className="mr-0.5 size-3.5" /> 添加价格规则
-            </Button>
           </div>
           <div className="mb-1.5 flex items-center gap-2 text-xs text-muted-foreground">
             <span>按司机看价：</span>
@@ -425,6 +403,10 @@ export function RulesEditor({
               )}
             </tbody>
           </table>
+          <button type="button" className="add-row-bar" onClick={addPrice}>
+            <PlusIcon className="size-3.5" />
+            添加价格规则
+          </button>
         </div>
 
         <div>
@@ -432,9 +414,6 @@ export function RulesEditor({
             <p className="text-xs font-medium text-muted-foreground">
               里程档位（兜底：无规则命中的行程按此计价；首档 1、按 50 递进）
             </p>
-            <Button type="button" variant="ghost" className="h-7 px-2 text-xs" onClick={addTier}>
-              <PlusIcon className="mr-0.5 size-3.5" /> 添加档位
-            </Button>
           </div>
           <table>
             <thead>
@@ -493,6 +472,10 @@ export function RulesEditor({
               ))}
             </tbody>
           </table>
+          <button type="button" className="add-row-bar" onClick={addTier}>
+            <PlusIcon className="size-3.5" />
+            添加档位
+          </button>
         </div>
       </div>
     </form>

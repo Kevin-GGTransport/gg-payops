@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
-import { todayIso } from "@/lib/format";
 
 function str(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
@@ -90,7 +89,6 @@ function parsePriceRules(formData: FormData): PriceRuleInput[] | "bad_side" {
 /** Shared validation for a full version payload; returns an error code or null */
 function validateVersion(input: {
   name: string;
-  effectiveFrom: string;
   ownerMultiplier: number;
   bobtailMultiplier: number;
   overageIncrement: number;
@@ -98,7 +96,6 @@ function validateVersion(input: {
   prices: PriceRuleInput[];
 }): string | null {
   if (!input.name) return "missing_name";
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveFrom)) return "bad_date";
   if (!(input.ownerMultiplier > 0) || !(input.bobtailMultiplier > 0)) return "bad_multiplier";
   if (!(input.overageIncrement >= 0)) return "bad_overage";
   if (input.tiers.length === 0) return "no_tiers";
@@ -123,20 +120,11 @@ function validateVersion(input: {
   return null;
 }
 
-async function effectiveDateTaken(effectiveFrom: string, exceptId: string) {
-  const rows = await prisma.$queryRaw<{ one: number }[]>`
-    SELECT 1 AS one FROM pay.wage_rule_versions
-    WHERE effective_from = ${effectiveFrom}::date AND id <> ${exceptId}::bigint LIMIT 1
-  `;
-  return rows.length > 0;
-}
-
 /** Replace a version's whole child payload (params + tiers + price rules) */
 async function writeVersionChildren(
   id: string,
   input: {
     name: string;
-    effectiveFrom: string;
     ownerMultiplier: number;
     bobtailMultiplier: number;
     overageIncrement: number;
@@ -147,7 +135,7 @@ async function writeVersionChildren(
   await prisma.$transaction([
     prisma.$executeRaw`
       UPDATE pay.wage_rule_versions SET
-        name = ${input.name}, effective_from = ${input.effectiveFrom}::date,
+        name = ${input.name},
         owner_multiplier = ${input.ownerMultiplier}, bobtail_multiplier = ${input.bobtailMultiplier},
         overage_increment = ${input.overageIncrement}, updated_at = now()
       WHERE id = ${id}::bigint
@@ -173,11 +161,9 @@ async function writeVersionChildren(
 }
 
 /**
- * Save the rules of the version the form shows. A version already effective
- * BEFORE today is locked history: saving clones it into a new version
- * effective TODAY (same params + children) and writes the edits there - the
- * user just edits and saves, version bookkeeping stays automatic. Versions
- * effective today or later save in place.
+ * Save the rules of the version the form shows, in place. The ACTIVE version
+ * saves live (new trips price by the new rules immediately); INACTIVE
+ * versions are freely editable presets that only take effect once activated.
  */
 export async function saveVersion(formData: FormData) {
   await requireUser();
@@ -185,43 +171,12 @@ export async function saveVersion(formData: FormData) {
   const id = str(formData, "id");
   const back = (error: string) => `/dashboard/wage-rules?v=${id}&error=${error}`;
 
-  const existing = await prisma.$queryRaw<
-    Array<{ effective_from: string }>
-  >`
-    SELECT to_char(effective_from, 'YYYY-MM-DD') AS effective_from
-    FROM pay.wage_rule_versions WHERE id = ${id}::bigint LIMIT 1
+  const existing = await prisma.$queryRaw<Array<{ one: number }>>`
+    SELECT 1 AS one FROM pay.wage_rule_versions WHERE id = ${id}::bigint LIMIT 1
   `;
   if (existing.length === 0) redirect("/dashboard/wage-rules");
 
-  const today = todayIso();
-  let targetId = id;
-  if (existing[0].effective_from < today) {
-    // Locked history -> clone to a today-effective version first
-    if (await effectiveDateTaken(today, id)) redirect("/dashboard/wage-rules?error=dup_date");
-    const inserted = await prisma.$queryRaw<{ id: string }[]>`
-      INSERT INTO pay.wage_rule_versions(name, effective_from, owner_multiplier, bobtail_multiplier, overage_increment, notes)
-      SELECT name, ${today}::date, owner_multiplier, bobtail_multiplier, overage_increment,
-             concat('自版本 #', ${id}::bigint::text, ' 复制调价')
-      FROM pay.wage_rule_versions WHERE id = ${id}::bigint
-      RETURNING id::text
-    `;
-    targetId = inserted[0]?.id ?? id;
-    await prisma.$executeRaw`
-      INSERT INTO pay.wage_rule_tiers(version_id, miles_from, amount)
-      SELECT ${targetId}::bigint, miles_from, amount FROM pay.wage_rule_tiers
-      WHERE version_id = ${id}::bigint
-    `;
-    await prisma.$executeRaw`
-      INSERT INTO pay.wage_rule_prices(version_id, driver_id, unit, from_location_id, to_location_id,
-                                       from_tag, to_tag, operation, label, driver_amount, owner_amount)
-      SELECT ${targetId}::bigint, driver_id, unit, from_location_id, to_location_id, from_tag, to_tag, operation, label,
-             driver_amount, owner_amount
-      FROM pay.wage_rule_prices WHERE version_id = ${id}::bigint
-    `;
-  }
-
   const name = str(formData, "name");
-  const effectiveFrom = str(formData, "effective_from") || today;
   const ownerMultiplier = Number(str(formData, "owner_multiplier"));
   const bobtailMultiplier = Number(str(formData, "bobtail_multiplier"));
   const overageIncrement = Number(str(formData, "overage_increment"));
@@ -230,46 +185,37 @@ export async function saveVersion(formData: FormData) {
   if (prices === "bad_side") redirect(back("bad_price_side"));
 
   const error = validateVersion({
-    name, effectiveFrom, ownerMultiplier, bobtailMultiplier, overageIncrement, tiers, prices
+    name, ownerMultiplier, bobtailMultiplier, overageIncrement, tiers, prices
   });
   if (error) redirect(back(error));
-  // The cloned target is born today; hand-edited dates may not slip into the past
-  if (effectiveFrom < today) redirect(back("past_date"));
-  if (await effectiveDateTaken(effectiveFrom, targetId)) redirect(back("dup_date"));
 
-  await writeVersionChildren(targetId, {
-    name, effectiveFrom, ownerMultiplier, bobtailMultiplier, overageIncrement, tiers, prices
+  await writeVersionChildren(id, {
+    name, ownerMultiplier, bobtailMultiplier, overageIncrement, tiers, prices
   });
 
   revalidatePath("/dashboard/wage-rules");
   revalidatePath("/dashboard");
-  redirect(`/dashboard/wage-rules?v=${targetId}&saved=1`);
+  redirect(`/dashboard/wage-rules?v=${id}&saved=1`);
 }
 
-/** Copy an existing version (params + children) under a new date (advanced: schedule) */
+/** Copy an existing version (params + children) as an INACTIVE preset */
 export async function createVersion(formData: FormData) {
   await requireUser();
 
   const sourceId = str(formData, "source_id");
   const name = str(formData, "name");
-  const effectiveFrom = str(formData, "effective_from");
   const back = (error: string) => {
     const params = new URLSearchParams({ new: "1", from: sourceId, error });
     if (name) params.set("f_name", name);
-    if (effectiveFrom) params.set("f_effective_from", effectiveFrom);
     return `/dashboard/wage-rules?${params.toString()}`;
   };
 
   if (!sourceId) redirect(back("bad_source"));
   if (!name) redirect(back("missing_name"));
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) redirect(back("bad_date"));
-  // Today is allowed (same-day adjustment); before today would be born locked
-  if (effectiveFrom < todayIso()) redirect(back("past_date"));
-  if (await effectiveDateTaken(effectiveFrom, "0")) redirect(back("dup_date"));
 
   const inserted = await prisma.$queryRaw<{ id: string }[]>`
-    INSERT INTO pay.wage_rule_versions(name, effective_from, owner_multiplier, bobtail_multiplier, overage_increment, notes)
-    SELECT ${name}, ${effectiveFrom}::date, v.owner_multiplier, v.bobtail_multiplier, v.overage_increment,
+    INSERT INTO pay.wage_rule_versions(name, status, owner_multiplier, bobtail_multiplier, overage_increment, notes)
+    SELECT ${name}, 'INACTIVE', v.owner_multiplier, v.bobtail_multiplier, v.overage_increment,
            concat('基于版本 #', v.id::text, ' 复制')
     FROM pay.wage_rule_versions v WHERE v.id = ${sourceId}::bigint
     RETURNING id::text
@@ -295,17 +241,40 @@ export async function createVersion(formData: FormData) {
   redirect(`/dashboard/wage-rules?v=${newId}`);
 }
 
-/** Pending versions only; effective versions are locked forever */
+/**
+ * Activate one version and deactivate every other: the single-switch rule
+ * (exactly one ACTIVE version at any time). New trips price by it instantly.
+ */
+export async function activateVersion(formData: FormData) {
+  await requireUser();
+
+  const id = str(formData, "id");
+  const existing = await prisma.$queryRaw<Array<{ one: number }>>`
+    SELECT 1 AS one FROM pay.wage_rule_versions WHERE id = ${id}::bigint LIMIT 1
+  `;
+  if (existing.length === 0) redirect("/dashboard/wage-rules");
+
+  await prisma.$transaction([
+    prisma.$executeRaw`UPDATE pay.wage_rule_versions SET status = 'INACTIVE', updated_at = now() WHERE status = 'ACTIVE'`,
+    prisma.$executeRaw`UPDATE pay.wage_rule_versions SET status = 'ACTIVE', updated_at = now() WHERE id = ${id}::bigint`
+  ]);
+
+  revalidatePath("/dashboard/wage-rules");
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/trips");
+  redirect(`/dashboard/wage-rules?v=${id}&activated=1`);
+}
+
+/** INACTIVE versions only; the ACTIVE version cannot be deleted */
 export async function deleteVersion(formData: FormData) {
   await requireUser();
 
   const id = str(formData, "id");
-  const existing = await prisma.$queryRaw<Array<{ effective_from: string }>>`
-    SELECT to_char(effective_from, 'YYYY-MM-DD') AS effective_from
-    FROM pay.wage_rule_versions WHERE id = ${id}::bigint LIMIT 1
+  const existing = await prisma.$queryRaw<Array<{ status: string }>>`
+    SELECT status FROM pay.wage_rule_versions WHERE id = ${id}::bigint LIMIT 1
   `;
   if (existing.length === 0) redirect("/dashboard/wage-rules");
-  if (existing[0].effective_from <= todayIso()) {
+  if (existing[0].status === "ACTIVE") {
     redirect(`/dashboard/wage-rules?v=${id}&error=locked`);
   }
 
