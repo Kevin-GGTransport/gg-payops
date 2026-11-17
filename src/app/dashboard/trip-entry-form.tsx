@@ -95,10 +95,12 @@ const DRAFT_GROUP_ID_BASE = 1_000;
 
 /** Locations carrying this class tag are container docks (wage rules key on it) */
 const DOCK_CLASS_TAG = "码头";
-/** Dock -> base (HW/SHIPPER) leg defaults to this operation (还柜) */
-const DOCK_RETURN_OPERATION = "CNTRDEL";
-/** Base (HW/SHIPPER) -> dock leg defaults to this operation (提柜) */
-const DOCK_PICKUP_OPERATION = "CNTRPU";
+/** Dock -> base (HW/SHIPPER) leg defaults to this operation: 提柜 - the
+ *  container is picked up at the terminal and hauled to the warehouse */
+const DOCK_TO_BASE_OPERATION = "CNTRPU";
+/** Base (HW/SHIPPER) -> dock leg defaults to this operation: 还柜 - the
+ *  empty container goes back to the terminal */
+const BASE_TO_DOCK_OPERATION = "CNTRDEL";
 
 /** Compact bordered input for table cells: standard shadcn Input at h-8 */
 const cellInput = "h-8 px-2 text-[13px]";
@@ -438,7 +440,7 @@ const EntryRow = React.memo(function EntryRow({
 
   // Special-route defaults: while the operation is untouched it follows the
   // endpoints - dock-tagged yard -> base (HW/SHIPPER) reads as a container
-  // return (还柜), base -> dock as a container pickup (提柜); anything else
+  // pickup (提柜), base -> dock as a container return (还柜); anything else
   // falls back to the dictionary default
   React.useEffect(() => {
     if (operationTouched.current) return;
@@ -450,9 +452,9 @@ const EntryRow = React.memo(function EntryRow({
     const toBase = to?.location_type === "BASE";
     const autoOperation =
       fromDock && toBase
-        ? DOCK_RETURN_OPERATION
+        ? DOCK_TO_BASE_OPERATION
         : fromBase && toDock
-          ? DOCK_PICKUP_OPERATION
+          ? BASE_TO_DOCK_OPERATION
           : defaultOperation;
     setOperation(autoOperation);
     // eslint-disable-next-line react-hooks/exhaustive-deps
