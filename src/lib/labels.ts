@@ -22,26 +22,16 @@ export const RECORD_STATUS_LABELS: Record<RecordStatus, string> = {
   ARCHIVED: "归档"
 };
 
-export type StatementStatus = "DRAFT" | "REVIEWED" | "VERIFIED" | "DONE";
+/** REVIEWED/DONE are legacy DB enum values kept in the type only - the app never uses them */
+export type StatementStatus = "DRAFT" | "VERIFIED";
 
 export const STATEMENT_STATUS_LABELS: Record<StatementStatus, string> = {
   DRAFT: "草稿",
-  REVIEWED: "审核",
-  VERIFIED: "核对",
-  DONE: "完成"
+  VERIFIED: "核对"
 };
 
-/** Forward flow order; edit is allowed in DRAFT and VERIFIED only */
+/** DRAFT numbers track the live trips; VERIFIED freezes them (one-way) */
 export const STATEMENT_STATUS_FLOW: readonly StatementStatus[] = [
   "DRAFT",
-  "REVIEWED",
-  "VERIFIED",
-  "DONE"
-];
-
-/** Statuses selectable inside the edit dialog (DONE only via advance) */
-export const STATE_EDITABLE_STATUSES: readonly StatementStatus[] = [
-  "DRAFT",
-  "REVIEWED",
   "VERIFIED"
 ];

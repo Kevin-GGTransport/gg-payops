@@ -10,14 +10,13 @@ import { requireUser } from "@/lib/auth";
 import { firstValue, type SearchParams } from "@/lib/search-params";
 import { fuel as fmtFuel, miles as fmtMiles, money, todayIso } from "@/lib/format";
 import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
-import { STATEMENT_STATUS_FLOW, STATEMENT_STATUS_LABELS } from "@/lib/labels";
 import { getDriverById } from "@/lib/queries/drivers";
 import { activeOperationOptions } from "@/lib/queries/operations";
 import { activeLocationOptions } from "@/lib/queries/locations";
 import { currentWageRule } from "@/lib/queries/wage-rules";
 import { driverPeriodTrips, periodPayTotals, type DriverPeriodTripRow } from "@/lib/queries/trips";
 import { getStatementByDriverPeriod } from "@/lib/queries/statements";
-import { advanceStatement, revertStatement } from "../../payroll/actions";
+import { verifyStatement } from "../../payroll/actions";
 import { PayrollLegsTable } from "../payroll-legs-table";
 
 export const metadata: Metadata = { title: "周期工资单 · G&G PayOps" };
@@ -109,19 +108,13 @@ export default async function DriverPeriodPage({
     { miles: 0, fuel: 0, pay: 0, subsidy: 0 }
   );
 
-  // Full-path return so a per-row delete stays on this sheet
+  // Full-path return so verify / per-row delete stays on this sheet
   const returnTo = `/dashboard/trips/${driver.id}?period=${period.start}`;
   const navHref = (p: { start: string }) => `/dashboard/trips/${driver.id}?period=${p.start}`;
 
-  // Statement flow helpers for the masthead
-  const statusIndex = statement ? STATEMENT_STATUS_FLOW.indexOf(statement.status) : -1;
-  const nextStatus = statement && statusIndex < STATEMENT_STATUS_FLOW.length - 1
-    ? STATEMENT_STATUS_FLOW[statusIndex + 1]
-    : null;
-  const prevStatus = statement && statusIndex > 0 ? STATEMENT_STATUS_FLOW[statusIndex - 1] : null;
-  const snapshotStale = statement !== null &&
-    (legs.length !== statement.leg_count ||
-      Math.abs(totals.pay - Number(statement.total_pay)) > 0.005);
+  // Draft numbers always equal the live ledger; VERIFIED freezes them. The
+  // permanent edited_after_verify flag (not a live comparison) drives the red
+  const statementFrozen = statement !== null && statement.status === "VERIFIED";
 
   return (
     <>
@@ -129,40 +122,35 @@ export default async function DriverPeriodPage({
         title={`${driver.full_name} · 周期工资单`}
         description={
           statement ? (
-            <>
-              工资单已生成 <StatementStatusBadge status={statement.status} />
-              {snapshotStale && (
-                <span className="text-amber-600">
-                  {" "}快照 {money(statement.total_pay)} 与实时台账 {money(totals.pay)} 不一致（快照被编辑或行程有变动）
+            statement.edited_after_verify ? (
+              <>
+                <StatementStatusBadge status={statement.status} edited />
+                <span className="text-red-700">
+                  {" "}核对后行程有改动：核对金额 {money(statement.total_pay)} 已冻结（改动不自动计入），红色标记不消除，请人工复核。
                 </span>
-              )}
-            </>
+              </>
+            ) : (
+              <>
+                工资单 <StatementStatusBadge status={statement.status} />
+                {statementFrozen
+                  ? " 已核对，金额冻结；再改行程只会标红。"
+                  : " 草稿中，数字实时跟随行程。"}
+              </>
+            )
           ) : (
-            <>本周期行程与工资台账，按日分组核对（工资单未生成）。</>
+            <>本周期行程与工资台账，按日分组核对（无行程，无工资单）。</>
           )
         }
         actions={
           <div className="flex items-center gap-2">
-            {statement && nextStatus && (
-              <form action={advanceStatement}>
+            {statement && statement.status === "DRAFT" && legs.length > 0 && (
+              <form action={verifyStatement}>
                 <input type="hidden" name="id" value={statement.id} />
                 <input type="hidden" name="return_to" value={returnTo} />
-                <button type="submit" className="button button-quiet">
-                  {nextStatus === "DONE" ? "标记完成" : `推进至${STATEMENT_STATUS_LABELS[nextStatus]}`}
+                <button type="submit" className="button button-dark">
+                  标记核对
                 </button>
               </form>
-            )}
-            {statement && prevStatus && (
-              <form action={revertStatement}>
-                <input type="hidden" name="id" value={statement.id} />
-                <input type="hidden" name="return_to" value={returnTo} />
-                <button type="submit" className="linklike">回退</button>
-              </form>
-            )}
-            {statement && (statement.status === "DRAFT" || statement.status === "VERIFIED") && (
-              <Link className="linklike" href={`/dashboard/payroll?edit=${statement.id}`}>
-                编辑快照
-              </Link>
             )}
             <Link className="button button-quiet" href={`/dashboard/payroll?period=${period.start}`}>
               返回工资单
@@ -241,12 +229,9 @@ export default async function DriverPeriodPage({
         >
           <PayrollLegsTable
             days={days}
-            totalMiles={String(totals.miles)}
-            totalFuel={String(totals.fuel)}
-            totalPay={String(totals.pay)}
-            totalSubsidy={String(totals.subsidy)}
             returnTo={returnTo}
             edit={{ locations, operations: operationOptions, wageRule }}
+            frozen={statementFrozen}
             storageKey="payops.payroll.detail.cols"
           />
           {legs.length === 0 && (

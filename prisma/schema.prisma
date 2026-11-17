@@ -83,11 +83,15 @@ model PayrollStatement {
   periodStart  DateTime        @map("period_start") @db.Date
   periodEnd    DateTime        @map("period_end") @db.Date
   status       StatementStatus @default(DRAFT)
+  /// Permanent flag: a trip under this VERIFIED statement changed after
+  /// verification; never cleared, the numbers stay frozen
+  editedAfterVerify Boolean     @default(false) @map("edited_after_verify")
   tripDays     Int             @map("trip_days")
   legCount     Int             @map("leg_count")
   totalMiles   Decimal         @map("total_miles") @db.Decimal(10, 2)
   totalFuel    Decimal         @map("total_fuel") @db.Decimal(10, 2)
   totalPay     Decimal         @map("total_pay") @db.Decimal(12, 2)
+  totalFuelSubsidy Decimal     @default(0) @map("total_fuel_subsidy") @db.Decimal(12, 2)
   opCounts     Json            @default("{}") @map("op_counts")
   trucks       String          @default("")
   note         String?

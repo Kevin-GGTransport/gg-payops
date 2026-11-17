@@ -499,6 +499,17 @@ td.ctr {
 .roster .row-off:hover {
   @apply bg-muted/30;
 }
+/* Verified statement whose trips changed afterwards: permanent red flag */
+.roster .row-flagged td {
+  @apply bg-red-50 text-red-700;
+}
+.roster .row-flagged .num,
+.roster .row-flagged .mono {
+  @apply text-red-700;
+}
+.roster .row-flagged:hover {
+  @apply bg-red-100/70;
+}
 /* The td itself must stay a table cell: display:flex on a td makes the
    browser wrap it in an anonymous cell that drops out of the row's
    height/vertical alignment. Lay the action items out inline instead. */

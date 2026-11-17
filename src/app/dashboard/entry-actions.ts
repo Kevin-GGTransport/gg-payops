@@ -8,6 +8,7 @@ import { requireUser } from "@/lib/auth";
 import { calcFuelSubsidy } from "@/lib/wage";
 import type { DriverType } from "@/lib/labels";
 import { resolveEndpointId } from "@/lib/locations";
+import { syncStatements } from "@/lib/statements";
 import { periodOf } from "@/lib/period";
 import { todayIso } from "@/lib/format";
 
@@ -319,6 +320,15 @@ export async function addTripsBatch(formData: FormData) {
       driver_name, truck_snapshot, package_id, package_note)
     VALUES ${Prisma.join(values)}
   `;
+
+  // Entry IS generation: every touched (driver, period) gets its statement
+  // synced - created as DRAFT if missing, recomputed otherwise
+  await syncStatements(
+    insertRows.map(r => ({
+      driverId: r.driverId,
+      periodStart: periodOf(r.tripDate).start
+    }))
+  );
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/trips");

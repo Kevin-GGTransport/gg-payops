@@ -2,12 +2,11 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { Period } from "@/lib/period";
 import type { DriverType, StatementStatus } from "@/lib/labels";
-import { payrollMatrix } from "@/lib/queries/trips";
 
 /**
  * One driver's period rollup as shown on the payroll page. `status === null`
- * means no statement exists yet: the numbers are live aggregates from trips
- * and generating is the next action.
+ * means no statement exists - only ACTIVE drivers without trips (no entry,
+ * nothing to pay); every driver with trips gets a statement at entry time.
  */
 export type StatementRow = {
   id: string | null;
@@ -17,14 +16,16 @@ export type StatementRow = {
   period_start: string;
   period_end: string;
   status: StatementStatus | null;
+  /** Permanent flag: trips changed under a VERIFIED statement (red) */
+  edited_after_verify: boolean;
   trip_days: number;
   leg_count: number;
   total_miles: string;
   total_fuel: string;
   total_pay: string;
-  /** Owner fuel subsidy of the period (frozen when generated, live otherwise) */
+  /** Owner fuel subsidy of the period (live in DRAFT, frozen once verified) */
   total_fuel_subsidy: string;
-  /** Leg counts per operation code (frozen when generated, live otherwise) */
+  /** Leg counts per operation code (live in DRAFT, frozen once verified) */
   op_counts: Record<string, number>;
   trucks: string;
   note: string | null;
@@ -39,16 +40,15 @@ export type GeneratedStatementRow = Omit<StatementRow, "id" | "status"> & {
 export type StatementStatusCounts = {
   total: number;
   draft: number;
-  reviewed: number;
   verified: number;
-  done: number;
 };
 
 const STATEMENT_SELECT = Prisma.sql`
   SELECT s.id::text, s.driver_id::text, d.full_name, d.driver_type::text AS driver_type,
          to_char(s.period_start, 'YYYY-MM-DD') AS period_start,
          to_char(s.period_end, 'YYYY-MM-DD') AS period_end,
-         s.status::text AS status, s.trip_days, s.leg_count,
+         s.status::text AS status, s.edited_after_verify,
+         s.trip_days, s.leg_count,
          s.total_miles::text AS total_miles, s.total_fuel::text AS total_fuel,
          s.total_pay::text AS total_pay, s.total_fuel_subsidy::text AS total_fuel_subsidy,
          s.op_counts, s.trucks, s.note
@@ -82,15 +82,13 @@ export async function listStatements(filter: {
     prisma.$queryRaw<StatementStatusCounts[]>`
       SELECT count(*)::int AS total,
              count(*) FILTER (WHERE s.status = 'DRAFT')::int AS draft,
-             count(*) FILTER (WHERE s.status = 'REVIEWED')::int AS reviewed,
-             count(*) FILTER (WHERE s.status = 'VERIFIED')::int AS verified,
-             count(*) FILTER (WHERE s.status = 'DONE')::int AS done
+             count(*) FILTER (WHERE s.status = 'VERIFIED')::int AS verified
       FROM pay.payroll_statements s
       JOIN ops.drivers d ON d.id = s.driver_id
       WHERE 1 = 1 ${scope[0]} ${scope[1]}
     `
   ]);
-  return { rows, counts: counts[0] ?? { total: 0, draft: 0, reviewed: 0, verified: 0, done: 0 } };
+  return { rows, counts: counts[0] ?? { total: 0, draft: 0, verified: 0 } };
 }
 
 export async function getStatementById(id: string) {
@@ -125,41 +123,47 @@ export async function statementPeriodTotals() {
 }
 
 /**
- * One period's full rollup: every active driver, statements winning over the
- * live aggregates for the same driver. Un-generated drivers keep live numbers
- * with status null. Drivers who were deactivated after generating still show
- * their frozen row (the pay is owed).
+ * One period's full rollup: every stored statement, plus ACTIVE drivers
+ * without one (no trips - dimmed zero rows for roster context). Drivers who
+ * were deactivated after their statement was created still show their row
+ * (the pay is owed). Statement numbers are live in DRAFT, frozen in VERIFIED.
  */
 export async function mergedPeriodStatements(period: Period): Promise<StatementRow[]> {
-  const [matrix, generated] = await Promise.all([
-    payrollMatrix(period),
-    listStatements({ period: period.start, status: "all", q: "" })
+  const [generated, actives] = await Promise.all([
+    listStatements({ period: period.start, status: "all", q: "" }),
+    prisma.$queryRaw<
+      Array<{ driver_id: string; full_name: string; driver_type: DriverType }>
+    >`
+      SELECT id::text AS driver_id, full_name, driver_type::text AS driver_type
+      FROM ops.drivers
+      WHERE status = 'ACTIVE'
+    `
   ]);
   const byDriver = new Map(generated.rows.map(s => [s.driver_id, s]));
 
-  const rows = matrix.map(r => {
-    const s = byDriver.get(r.driver_id);
-    return s ?? {
+  const rows: StatementRow[] = [...generated.rows];
+  for (const d of actives) {
+    if (byDriver.has(d.driver_id)) continue;
+    rows.push({
       id: null,
-      driver_id: r.driver_id,
-      full_name: r.full_name,
-      driver_type: r.driver_type,
+      driver_id: d.driver_id,
+      full_name: d.full_name,
+      driver_type: d.driver_type,
       period_start: period.start,
       period_end: period.end,
       status: null,
-      trip_days: r.trip_days,
-      leg_count: r.leg_count,
-      total_miles: r.total_miles,
-      total_fuel: r.total_fuel,
-      total_pay: r.total_pay,
-      total_fuel_subsidy: r.total_fuel_subsidy,
-      op_counts: r.op_counts,
-      trucks: r.trucks,
+      edited_after_verify: false,
+      trip_days: 0,
+      leg_count: 0,
+      total_miles: "0",
+      total_fuel: "0",
+      total_pay: "0",
+      total_fuel_subsidy: "0",
+      op_counts: {},
+      trucks: "",
       note: null
-    };
-  });
-  const matrixDrivers = new Set(matrix.map(r => r.driver_id));
-  rows.push(...generated.rows.filter(s => !matrixDrivers.has(s.driver_id)));
+    });
+  }
   rows.sort((a, b) => a.full_name.localeCompare(b.full_name, "zh-Hans-CN"));
   return rows;
 }

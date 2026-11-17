@@ -52,11 +52,14 @@ function addDriverSheet(
   ];
 
   // Driver identity + period + statement status, then the detail table
+  const statusLabel = driver.status
+    ? `${STATEMENT_STATUS_LABELS[driver.status]}${driver.edited_after_verify ? "（核对后已改动）" : ""}`
+    : "无行程";
   const info = sheet.addRow([`${driver.full_name} · ${DRIVER_TYPE_LABELS[driver.driver_type]} · 车号：${driver.trucks || "—"}`]);
   info.font = { bold: true, size: 12 };
   sheet.mergeCells(1, 1, 1, 9);
   const sub = sheet.addRow([
-    `核算周期 ${periodLabel(period)}（${period.start} ~ ${period.end}） · 工资单：${driver.status ? STATEMENT_STATUS_LABELS[driver.status] : "未生成"}`
+    `核算周期 ${periodLabel(period)}（${period.start} ~ ${period.end}） · 工资单：${statusLabel}`
   ]);
   sub.font = { color: { argb: "FF71717A" } };
   sheet.mergeCells(2, 1, 2, 9);
@@ -108,8 +111,9 @@ function addDriverSheet(
   totals.font = { bold: true };
   sheet.mergeCells(totals.number, 1, totals.number, 4);
 
-  // Generated statements freeze the numbers; when the frozen pay was adjusted
-  // by hand it no longer matches the leg sum - show both so the gap is visible
+  // VERIFIED statements freeze the numbers; when a verified sheet was flagged
+  // (trips changed after verification) the frozen pay no longer matches the
+  // leg sum - show both so the gap stays visible on the exported sheet
   const legPay = legs.reduce((acc, l) => acc + Number(l.pay_amount), 0);
   if (driver.id !== null && Math.abs(Number(driver.total_pay) - legPay) >= 0.005) {
     const frozen = sheet.addRow([
