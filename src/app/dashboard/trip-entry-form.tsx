@@ -93,6 +93,13 @@ const INITIAL_ROWS = 10;
 /** Draft-restored groups take ids from here so they always mount fresh */
 const DRAFT_GROUP_ID_BASE = 1_000;
 
+/** Locations carrying this class tag are container docks (wage rules key on it) */
+const DOCK_CLASS_TAG = "码头";
+/** Dock -> base (HW/SHIPPER) leg defaults to this operation (还柜) */
+const DOCK_RETURN_OPERATION = "CNTRDEL";
+/** Base (HW/SHIPPER) -> dock leg defaults to this operation (提柜) */
+const DOCK_PICKUP_OPERATION = "CNTRPU";
+
 /** Compact bordered input for table cells: standard shadcn Input at h-8 */
 const cellInput = "h-8 px-2 text-[13px]";
 const cellHint = "block text-[10px] leading-tight font-normal text-muted-foreground";
@@ -311,6 +318,16 @@ const EntryRow = React.memo(function EntryRow({
   // Dictionary order decides the opening choice (seeds: DEL first)
   const defaultOperation = operations[0]?.code ?? "DEL";
   const [operation, setOperation] = React.useState(defaults?.operation || defaultOperation);
+  // Once the operation is hand-picked (or arrived via photo/refill), endpoint
+  // picks stop steering it - mirroring the date/from sticky-follow above. A
+  // restored draft/photo value equal to the running default counts as
+  // untouched: the DOM snapshot cannot tell "hand-picked DEL" from "never
+  // looked at", and the special-route effect re-derives the same DEL for
+  // ordinary pairs anyway.
+  const presetOperation = defaults?.operation || "";
+  const operationTouched = React.useRef(
+    presetOperation !== "" && presetOperation !== defaultOperation
+  );
   // Container-less operations (requires_load=false) clear and lock Load#
   const operationRequiresLoad = (code: string) =>
     operations.find(o => o.code === code)?.requires_load ?? true;
@@ -418,6 +435,28 @@ const EntryRow = React.memo(function EntryRow({
   // Free-text endpoints match no price rule (no location id) -> mileage tier
   const wageEndpoint = (value: string) =>
     locations.find(l => `loc:${l.id}` === value) ?? null;
+
+  // Special-route defaults: while the operation is untouched it follows the
+  // endpoints - dock-tagged yard -> base (HW/SHIPPER) reads as a container
+  // return (还柜), base -> dock as a container pickup (提柜); anything else
+  // falls back to the dictionary default
+  React.useEffect(() => {
+    if (operationTouched.current) return;
+    const from = wageEndpoint(fromValue);
+    const to = wageEndpoint(toValue);
+    const fromDock = from?.class_tag === DOCK_CLASS_TAG;
+    const toDock = to?.class_tag === DOCK_CLASS_TAG;
+    const fromBase = from?.location_type === "BASE";
+    const toBase = to?.location_type === "BASE";
+    const autoOperation =
+      fromDock && toBase
+        ? DOCK_RETURN_OPERATION
+        : fromBase && toDock
+          ? DOCK_PICKUP_OPERATION
+          : defaultOperation;
+    setOperation(autoOperation);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromValue, toValue]);
 
   // Every row prices by the single ACTIVE rule version
   const rule = wageRule;
@@ -539,12 +578,13 @@ const EntryRow = React.memo(function EntryRow({
       <td className="px-1.5">
         <ComboboxField
           name={`${prefix}operation`}
-          defaultValue={defaults?.operation || defaultOperation}
+          value={operation}
           clearable={false}
           searchable={false}
           aria-label={`${legLabel}操作`}
           triggerClassName="h-8"
           onValueChange={value => {
+            operationTouched.current = true;
             setOperation(value);
             if (!operationRequiresLoad(value)) setLoadNoValue("");
             onDirty();

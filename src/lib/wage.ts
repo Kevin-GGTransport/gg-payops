@@ -180,9 +180,11 @@ export function matchPackageRule(
 
 /**
  * Full per-trip wage against the single ACTIVE rule version:
- * 1. the most specific matching LEG rule wins outright - its amount is the
- *    final price (owner column when negotiated, otherwise driver price x
- *    owner multiplier); neither multiplier stacks on a rule price;
+ * 1. the most specific matching LEG rule wins outright - its amount bills as
+ *    the route price (owner column when negotiated, otherwise driver price x
+ *    owner multiplier). An operation-agnostic rule price still takes the
+ *    BOBTAIL discount; a rule that pins BOBTAIL (e.g. 码头空车) is already
+ *    the hand-set final price and never discounts twice;
  * 2. otherwise the mileage tier table x (OWNER ? owner_multiplier : 1) x
  *    (BOBTAIL ? bobtail_multiplier : 1), rounded to cents.
  * priceAsDriver overrides the pricing identity: an owner-type driver flagged
@@ -202,10 +204,14 @@ export function calcTripWage(input: {
   const billsAsOwner = input.driverType === "OWNER" && !input.priceAsDriver;
   const legRule = matchingLegRules({ ...input, rules: input.rule.price_rules })[0];
   if (legRule) {
+    const bobtailX =
+      input.operation === "BOBTAIL" && legRule.operation === null
+        ? input.rule.bobtail_multiplier
+        : 1;
     const amount = billsAsOwner
       ? (legRule.owner_amount ?? legRule.driver_amount * input.rule.owner_multiplier)
       : legRule.driver_amount;
-    return roundCents(amount);
+    return roundCents(amount * bobtailX);
   }
   const tier = mileageTierWage(input.miles, input.rule.tiers, input.rule.overage_increment);
   const ownerX = billsAsOwner ? input.rule.owner_multiplier : 1;

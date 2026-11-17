@@ -59,7 +59,7 @@ Extract EVERY trip row, top to bottom, following the sheet's own order:
 - load_no: copy the container number, drop the leading #. Full container numbers (e.g. EGSU8097779) keep as-is.
 - from_zip / to_zip: as written; empty string if unreadable.
 - nature: the From-To codes as written, e.g. "HW - MCE1".
-- operation guess: only use codes from this list: {OPERATIONS}. Picking up / 提货 / 提柜 (hauling a container out of the yard) -> PU; delivering / 卸货 / 还柜 -> DEL; 空车 / 空木柜 / 车架 (no container, chassis only) -> BOBTAIL; 带空柜 (empty container reposition) -> EMPTY. Default DEL.
+- operation guess: only use codes from this list: {OPERATIONS}. Picking up / 提货 (general freight pickup) -> PU; 提柜 (container pickup at a terminal) -> CNTRPU; delivering / 卸货 (general delivery) -> DEL; 还柜 (returning a container to a terminal) -> CNTRDEL; 空车 / 空木柜 / 车架 (no container, chassis only) -> BOBTAIL; 带空柜 (empty container reposition) -> EMPTY. Default DEL.
 - note: extra marks like 等卸/detention time ranges (14:30-18:30), 还柜, 提货; empty string if none.
 driver_name = the handwritten name in the 司机/Driver header; truck_code = the handwritten 车号 (truck number, e.g. 0608). Use "" when a value is unreadable.`;;
 

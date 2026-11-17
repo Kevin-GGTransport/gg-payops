@@ -27,28 +27,39 @@ INSERT INTO pay.wage_rule_prices
   (version_id, unit, from_location_id, from_tag, to_location_id, to_tag, operation, label, driver_amount, owner_amount, driver_id)
 SELECT v.id, 'LEG', f.id, '码头', NULL, NULL, 'PU', '码头 → HW · 提柜', 80, NULL, NULL
 FROM pay.wage_rule_versions v CROSS JOIN ops.locations f
-WHERE v.effective_from = '2026-11-15' AND f.code = 'HW'
+WHERE v.status = 'ACTIVE' AND f.code = 'HW'
   AND NOT EXISTS (SELECT 1 FROM pay.wage_rule_prices p WHERE p.version_id = v.id AND p.label = '码头 → HW · 提柜');
 
 INSERT INTO pay.wage_rule_prices
   (version_id, unit, from_location_id, from_tag, to_location_id, to_tag, operation, label, driver_amount, owner_amount, driver_id)
 SELECT v.id, 'LEG', f.id, NULL, NULL, '码头', 'EMPTY', 'HW → 码头 · 还柜', 80, NULL, NULL
 FROM pay.wage_rule_versions v CROSS JOIN ops.locations f
-WHERE v.effective_from = '2026-11-15' AND f.code = 'HW'
+WHERE v.status = 'ACTIVE' AND f.code = 'HW'
   AND NOT EXISTS (SELECT 1 FROM pay.wage_rule_prices p WHERE p.version_id = v.id AND p.label = 'HW → 码头 · 还柜');
 
 INSERT INTO pay.wage_rule_prices
   (version_id, unit, from_location_id, from_tag, to_location_id, to_tag, operation, label, driver_amount, owner_amount, driver_id)
 SELECT v.id, 'LEG', f.id, NULL, NULL, '码头', 'CHASSIS', 'HW → 码头 · 车架', 50, NULL, NULL
 FROM pay.wage_rule_versions v CROSS JOIN ops.locations f
-WHERE v.effective_from = '2026-11-15' AND f.code = 'HW'
+WHERE v.status = 'ACTIVE' AND f.code = 'HW'
   AND NOT EXISTS (SELECT 1 FROM pay.wage_rule_prices p WHERE p.version_id = v.id AND p.label = 'HW → 码头 · 车架');
 
 INSERT INTO pay.wage_rule_prices
   (version_id, unit, from_location_id, from_tag, to_location_id, to_tag, operation, label, driver_amount, owner_amount, driver_id)
 SELECT v.id, 'LEG', f.id, NULL, NULL, '码头', 'BOBTAIL', 'HW → 码头 · 空车', 25, NULL, NULL
 FROM pay.wage_rule_versions v CROSS JOIN ops.locations f
-WHERE v.effective_from = '2026-11-15' AND f.code = 'HW'
+WHERE v.status = 'ACTIVE' AND f.code = 'HW'
   AND NOT EXISTS (SELECT 1 FROM pay.wage_rule_prices p WHERE p.version_id = v.id AND p.label = 'HW → 码头 · 空车');
+
+-- 4. 2026-11-17: dedicated 还柜/提柜 operations (CNTRDEL/CNTRPU) were added
+--    on prod via /dashboard/operations and the dock rules now bind them
+--    (CNTRDEL 还柜 80 / CNTRPU 提柜 80 - rule sides match as an unordered
+--    pair, so one rule covers both directions); mirror the dictionary rows
+--    so the entry form's special-route defaults (dock -> base auto-picks
+--    CNTRDEL, base -> dock auto-picks CNTRPU) resolve on local too.
+INSERT INTO ops.operation_types (code, label, description, requires_load, sort_order)
+SELECT c.code, c.label, c.label, true, 100
+FROM (VALUES ('CNTRDEL', '还柜'), ('CNTRPU', '提货')) AS c(code, label)
+WHERE NOT EXISTS (SELECT 1 FROM ops.operation_types t WHERE t.code = c.code);
 
 COMMIT;

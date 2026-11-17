@@ -237,7 +237,7 @@ export function RulesEditor({
         <div>
           <div className="mb-1.5 flex items-center justify-between">
             <p className="text-xs font-medium text-muted-foreground">
-              价格规则（按趟=终价不叠乘数；按往返/按天=录入打包建议价；都没命中走里程档）
+              价格规则（按趟=终价；不限操作的按趟价遇 BOBTAIL 仍乘折扣，绑定 BOBTAIL 的价不打折；按往返/按天=录入打包建议价；都没命中走里程档）
             </p>
           </div>
           <div className="mb-1.5 flex items-center gap-2 text-xs text-muted-foreground">
