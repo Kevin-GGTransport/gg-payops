@@ -65,7 +65,7 @@ function addDriverSheet(
   const header = sheet.addRow(["日期", "操作", "Load#", "起点 → 终点", "里程(mi)", "加油(gal)", "燃油补助($)", "本趟工资($)", "备注"]);
   header.font = { bold: true };
 
-  // Legs arrive sorted by date then origin -> destination; group per day
+  // Legs arrive sorted by date, each day chained origin -> destination; group per day
   const days = new Map<string, DayGroup>();
   for (const leg of legs) {
     const day = days.get(leg.trip_date) ?? { date: leg.trip_date, miles: 0, fuel: 0, subsidy: 0, pay: 0 };

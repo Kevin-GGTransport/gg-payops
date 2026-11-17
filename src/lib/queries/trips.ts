@@ -245,9 +245,84 @@ export type DriverPeriodTripRow = {
   package_note: string | null;
 };
 
-/** Payroll drill-down: every leg of one driver inside the period, by date then entry order (round trips are entered consecutively) */
+/**
+ * Try to walk the whole day as ONE route: an Eulerian trail over the leg
+ * multigraph (each leg is an edge, its destination feeds the next origin).
+ * Choices and the start anchor follow entry order (id); the step budget
+ * guards pathological days. Returns null when no full trail exists.
+ */
+function oneDayTrail(chainable: DriverPeriodTripRow[]): DriverPeriodTripRow[] | null {
+  const outgoing = new Map<string, DriverPeriodTripRow[]>();
+  for (const leg of chainable) {
+    const bucket = outgoing.get(leg.from_location_id!);
+    if (bucket) bucket.push(leg);
+    else outgoing.set(leg.from_location_id!, [leg]);
+  }
+  const trail: DriverPeriodTripRow[] = [];
+  const used = new Set<string>();
+  let budget = 5000;
+
+  const walk = (origin: string | null): boolean => {
+    if (used.size === chainable.length) return true;
+    for (const cand of origin === null ? [] : outgoing.get(origin) ?? []) {
+      if (used.has(cand.id) || budget-- <= 0) continue;
+      used.add(cand.id);
+      trail.push(cand);
+      if (walk(cand.to_location_id)) return true;
+      used.delete(cand.id);
+      trail.pop();
+    }
+    return false;
+  };
+
+  // Start candidates in entry order; null destinations cannot continue
+  for (const start of chainable) {
+    used.add(start.id);
+    trail.push(start);
+    if (walk(start.to_location_id)) return trail;
+    used.delete(start.id);
+    trail.pop();
+    if (budget <= 0) return null;
+  }
+  return null;
+}
+
+/**
+ * Greedy fallback for days that cannot fully chain (missed legs, disjoint
+ * tours): follow origin -> destination while possible, restart from the
+ * earliest entered leftover when the chain breaks.
+ */
+function greedyChain(chainable: DriverPeriodTripRow[]): DriverPeriodTripRow[] {
+  const chained: DriverPeriodTripRow[] = [];
+  const remaining = [...chainable];
+  while (remaining.length > 0) {
+    const last = chained[chained.length - 1];
+    const found = last?.to_location_id
+      ? remaining.findIndex(l => l.from_location_id === last.to_location_id)
+      : -1;
+    chained.push(...remaining.splice(found === -1 ? 0 : found, 1));
+  }
+  return chained;
+}
+
+/**
+ * Order one day's legs head-to-tail: each leg's destination feeds the next
+ * leg's origin, round trips stay together. Days whose legs form one route
+ * come out as a single unbroken chain; otherwise entry order (id) decides
+ * ties and restarts. NULL-origin legs never chain and go last.
+ */
+function chainDayLegs(legs: DriverPeriodTripRow[]): DriverPeriodTripRow[] {
+  const chainable = legs.filter(l => l.from_location_id !== null);
+  const orphans = legs.filter(l => l.from_location_id === null);
+  return [...(oneDayTrail(chainable) ?? greedyChain(chainable)), ...orphans];
+}
+
+/**
+ * Payroll drill-down: every leg of one driver inside the period, grouped by
+ * date, each day chained origin -> destination (entry order fills the gaps).
+ */
 export async function driverPeriodTrips(period: Period, driverId: string) {
-  return prisma.$queryRaw<DriverPeriodTripRow[]>`
+  const rows = await prisma.$queryRaw<DriverPeriodTripRow[]>`
     SELECT t.id::text, t.driver_id::text, t.driver_name,
            d.driver_type::text AS driver_type, d.price_as_driver,
            to_char(t.trip_date, 'YYYY-MM-DD') AS trip_date,
@@ -265,8 +340,18 @@ export async function driverPeriodTrips(period: Period, driverId: string) {
     WHERE t.driver_id = ${driverId}::bigint
       AND t.trip_date >= ${period.start}::date
       AND t.trip_date <= ${period.end}::date
-    ORDER BY t.trip_date, t.created_at
+    ORDER BY t.trip_date, t.id
   `;
+  // created_at ties within a submitted batch (one multi-row INSERT shares the
+  // transaction timestamp), so id - the entry order - is the only stable base
+  // before chaining
+  const days: DriverPeriodTripRow[][] = [];
+  for (const row of rows) {
+    const day = days[days.length - 1];
+    if (day && day[0].trip_date === row.trip_date) day.push(row);
+    else days.push([row]);
+  }
+  return days.flatMap(chainDayLegs);
 }
 
 /**
