@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 
 import { requireUser } from "@/lib/auth";
 import { DRIVER_TYPE_LABELS, STATEMENT_STATUS_LABELS } from "@/lib/labels";
-import { currentPeriod, periodLabel, periodOf, type Period } from "@/lib/period";
+import { defaultPeriod, periodLabel, periodOf, type Period } from "@/lib/period";
 import { listOperationTypes } from "@/lib/queries/operations";
 import { mergedPeriodStatements } from "@/lib/queries/statements";
 import { driverPeriodTrips } from "@/lib/queries/trips";
@@ -137,7 +137,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const param = url.searchParams.get("period");
   const period: Period =
-    param && /^\d{4}-\d{2}-\d{2}$/.test(param) ? periodOf(param) : currentPeriod();
+    param && /^\d{4}-\d{2}-\d{2}$/.test(param) ? periodOf(param) : defaultPeriod();
 
   const [rows, operations] = await Promise.all([
     mergedPeriodStatements(period),

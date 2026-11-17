@@ -9,7 +9,7 @@ import { PeriodPicker } from "@/components/period-picker";
 import { requireUser } from "@/lib/auth";
 import { firstValue, type SearchParams } from "@/lib/search-params";
 import { fuel as fmtFuel, miles as fmtMiles, money, todayIso } from "@/lib/format";
-import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
+import { defaultPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
 import { getDriverById } from "@/lib/queries/drivers";
 import { activeOperationOptions } from "@/lib/queries/operations";
 import { activeLocationOptions } from "@/lib/queries/locations";
@@ -81,8 +81,9 @@ export default async function DriverPeriodPage({
   if (!driver) notFound();
 
   const sp = await searchParams;
-  const period = dateParam(firstValue(sp.period)) ? periodOf(dateParam(firstValue(sp.period))!) : currentPeriod();
-  const thisWeek = currentPeriod();
+  // Same landing default as the payroll list: the week that just closed
+  const period = dateParam(firstValue(sp.period)) ? periodOf(dateParam(firstValue(sp.period))!) : defaultPeriod();
+  const defaultWeek = defaultPeriod();
   const today = todayIso();
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
@@ -175,7 +176,9 @@ export default async function DriverPeriodPage({
           <Link href={navHref(next)} aria-label="下一周期" className={arrowClass}>›</Link>
         </div>
         <div className="filter-actions">
-          {period.start !== thisWeek.start && <Link href={`/dashboard/trips/${driver.id}`}>回到本周</Link>}
+          {period.start !== defaultWeek.start && (
+            <Link href={`/dashboard/trips/${driver.id}?period=${defaultWeek.start}`}>回到上周</Link>
+          )}
         </div>
       </div>
 

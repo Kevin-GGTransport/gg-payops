@@ -48,10 +48,10 @@ const SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
   { id: "to", header: "终点", size: 138 },
   { id: "operation", header: "操作", size: 92 },
   { id: "load", header: "Load#", size: 108 },
-  { id: "miles", header: "Miles", size: 86, meta: { headerClass: "num" } },
-  { id: "fuel", header: "加油(gal)", size: 86, meta: { headerClass: "num" } },
-  { id: "subsidy", header: "燃油补助", size: 86, meta: { headerClass: "num" } },
-  { id: "pay", header: "本趟工资", size: 108, meta: { headerClass: "num" } },
+  { id: "miles", header: "Miles", size: 86 },
+  { id: "fuel", header: "加油(gal)", size: 86 },
+  { id: "subsidy", header: "燃油补助", size: 86 },
+  { id: "pay", header: "本趟工资", size: 108 },
   { id: "notes", header: "备注", size: 130 },
   { id: "actions", header: "操作", size: 76, enableResizing: false, meta: { headerClass: "px-1.5" } }
 ];
@@ -235,7 +235,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           value={fromValue}
           placeholder="起点"
           aria-label={`${legLabel}起点`}
-          triggerClassName="h-8"
+          triggerClassName="h-8 px-2"
           onValueChange={value => {
             setFromValue(value);
             onDirty(leg.id);
@@ -250,7 +250,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           value={toValue}
           placeholder="终点"
           aria-label={`${legLabel}终点`}
-          triggerClassName="h-8"
+          triggerClassName="h-8 px-2"
           onValueChange={value => {
             setToValue(value);
             onDirty(leg.id);
@@ -264,7 +264,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           clearable={false}
           searchable={false}
           aria-label={`${legLabel}操作`}
-          triggerClassName="h-8"
+          triggerClassName="h-8 px-2"
           onValueChange={value => {
             setOperation(value);
             if (!operationRequiresLoad(value)) setLoadNoValue("");
@@ -302,10 +302,10 @@ const EditableLegRow = React.memo(function EditableLegRow({
             onDirty(leg.id);
           }}
           aria-label={`${legLabel}里程`}
-          className={`${cellInput} text-right font-mono`}
+          className={`${cellInput} font-mono`}
         />
         {milesHint && (
-          <span className={`${cellHint} text-right ${phase === "failed" ? "text-destructive" : ""}`}>
+          <span className={`${cellHint} ${phase === "failed" ? "text-destructive" : ""}`}>
             {milesHint}
           </span>
         )}
@@ -323,10 +323,10 @@ const EditableLegRow = React.memo(function EditableLegRow({
           }}
           placeholder="—"
           aria-label={`${legLabel}加油量`}
-          className={`${cellInput} text-right font-mono`}
+          className={`${cellInput} font-mono`}
         />
       </td>
-      <td className="num px-1.5 font-mono text-[13px]">
+      <td className="px-1.5 font-mono text-[13px]">
         {leg.driver_type === "OWNER" && subsidyRate > 0
           ? money(subsidyValue.toFixed(2))
           : "—"}
@@ -335,10 +335,10 @@ const EditableLegRow = React.memo(function EditableLegRow({
         {packaged ? (
           <>
             <input type="hidden" name={`${prefix}pay_amount`} value={payValue} />
-            <span className="block px-1 text-right font-mono text-[13px] tabular-nums">
+            <span className="block px-2 font-mono text-[13px] tabular-nums">
               {money(payValue)}
             </span>
-            <span className={`${cellHint} text-right`}>
+            <span className={cellHint}>
               {leg.package_note ?? "打包内"}
             </span>
           </>
@@ -355,10 +355,10 @@ const EditableLegRow = React.memo(function EditableLegRow({
                 onDirty(leg.id);
               }}
               aria-label={`${legLabel}工资`}
-              className={`${cellInput} text-right font-mono`}
+              className={`${cellInput} font-mono`}
             />
             {manualPay !== null && (
-              <span className={`${cellHint} text-right`}>
+              <span className={cellHint}>
                 手动 ·{" "}
                 <button
                   type="button"
@@ -531,10 +531,10 @@ export function PayrollLegsTable({
                   <td colSpan={5}>
                     小计 · {day.date.slice(5).replace("-", "/")} 周{dowOf(day.date)}
                   </td>
-                  <td className="num">{fmtMiles(t.miles.toString())}</td>
-                  <td className="num">{fmtFuel(t.fuel.toString())}</td>
-                  <td className="num">{t.subsidy > 0 ? money(t.subsidy.toString()) : "—"}</td>
-                  <td className="num">{money(t.pay.toString())}</td>
+                  <td>{fmtMiles(t.miles.toString())}</td>
+                  <td>{fmtFuel(t.fuel.toString())}</td>
+                  <td>{t.subsidy > 0 ? money(t.subsidy.toString()) : "—"}</td>
+                  <td>{money(t.pay.toString())}</td>
                   <td colSpan={2} />
                 </tr>
               );
@@ -543,10 +543,10 @@ export function PayrollLegsTable({
           {days.length > 1 && (
             <tr className="matrix-total">
               <td colSpan={5}>周合计 · {days.length} 天</td>
-              <td className="num">{fmtMiles(week.miles.toString())}</td>
-              <td className="num">{fmtFuel(week.fuel.toString())}</td>
-              <td className="num">{week.subsidy > 0 ? money(week.subsidy.toString()) : "—"}</td>
-              <td className="num">{money(week.pay.toString())}</td>
+              <td>{fmtMiles(week.miles.toString())}</td>
+              <td>{fmtFuel(week.fuel.toString())}</td>
+              <td>{week.subsidy > 0 ? money(week.subsidy.toString()) : "—"}</td>
+              <td>{money(week.pay.toString())}</td>
               <td colSpan={2} />
             </tr>
           )}

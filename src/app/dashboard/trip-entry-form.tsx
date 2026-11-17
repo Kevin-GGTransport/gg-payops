@@ -13,7 +13,7 @@ import { DateField } from "@/components/date-field";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
 import { calcFuelSubsidy, calcTripWage, matchPackageRule, type WageRuleData } from "@/lib/wage";
 import { money, todayIso } from "@/lib/format";
-import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
+import { defaultPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
 import {
   clearEntryDraft,
   collectDraftFromDOM,
@@ -119,9 +119,9 @@ const SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
   { id: "to_location", header: "终点", size: 130, minSize: 100 },
   { id: "operation", header: "操作", size: 72, minSize: 64 },
   { id: "load_no", header: "Load#", size: 90, minSize: 76 },
-  { id: "miles", header: "里程 (mi)", size: 82, minSize: 72, meta: { headerClass: "num" } },
-  { id: "fuel_gallons", header: "加油 (gal)", size: 78, minSize: 68, meta: { headerClass: "num" } },
-  { id: "pay_amount", header: "本趟工资 ($)", size: 100, minSize: 92, meta: { headerClass: "num" } },
+  { id: "miles", header: "里程 (mi)", size: 82, minSize: 72 },
+  { id: "fuel_gallons", header: "加油 (gal)", size: 78, minSize: 68 },
+  { id: "pay_amount", header: "本趟工资 ($)", size: 100, minSize: 92 },
   { id: "notes", header: "备注", size: 182, minSize: 100 },
   { id: "delete", header: "操作", size: 40, enableResizing: false, meta: { headerClass: "px-1.5" } }
 ];
@@ -550,7 +550,7 @@ const EntryRow = React.memo(function EntryRow({
           value={fromValue}
           placeholder="起点"
           aria-label={`${legLabel}起点`}
-          triggerClassName="h-8"
+          triggerClassName="h-8 px-2"
           onValueChange={value => {
             fromInherited.current = false;
             setFromValue(value);
@@ -567,7 +567,7 @@ const EntryRow = React.memo(function EntryRow({
           defaultValue={defaults?.to || ""}
           placeholder="终点"
           aria-label={`${legLabel}终点`}
-          triggerClassName="h-8"
+          triggerClassName="h-8 px-2"
           onValueChange={value => {
             setToValue(value);
             onToChange(rowId, value);
@@ -582,7 +582,7 @@ const EntryRow = React.memo(function EntryRow({
           clearable={false}
           searchable={false}
           aria-label={`${legLabel}操作`}
-          triggerClassName="h-8"
+          triggerClassName="h-8 px-2"
           onValueChange={value => {
             operationTouched.current = true;
             setOperation(value);
@@ -620,10 +620,10 @@ const EntryRow = React.memo(function EntryRow({
             setManual(true);
           }}
           aria-label={`${legLabel}里程`}
-          className={`${cellInput} text-right font-mono`}
+          className={`${cellInput} font-mono`}
         />
         {milesHint && (
-          <span className={`${cellHint} text-right ${phase === "failed" ? "text-destructive" : ""}`}>
+          <span className={`${cellHint} ${phase === "failed" ? "text-destructive" : ""}`}>
             {milesHint}
           </span>
         )}
@@ -638,7 +638,7 @@ const EntryRow = React.memo(function EntryRow({
           onChange={e => setFuelValue(e.target.value)}
           placeholder="—"
           aria-label={`${legLabel}加油量`}
-          className={`${cellInput} text-right font-mono`}
+          className={`${cellInput} font-mono`}
         />
       </td>
       <td className="px-1.5">
@@ -657,17 +657,17 @@ const EntryRow = React.memo(function EntryRow({
           readOnly={packaged}
           onChange={e => setManualPay(e.target.value)}
           aria-label={`${legLabel}工资`}
-          className={`${cellInput} text-right font-mono`}
+          className={`${cellInput} font-mono`}
         />
         {packaged && (
-          <span className={`${cellHint} text-right`}>
+          <span className={cellHint}>
             {isPackageCarrier ? "打包价 · 上方计价条改" : "打包内 · $0"}
           </span>
         )}
         {!packaged && manualPay !== null && (
           // data-manual-pay: the draft collector keeps hand-edited wages as
           // manual on restore; auto-priced rows restore empty and recalc
-          <span data-manual-pay className={`${cellHint} text-right`}>
+          <span data-manual-pay className={cellHint}>
             手动 ·{" "}
             <button
               type="button"
@@ -682,7 +682,7 @@ const EntryRow = React.memo(function EntryRow({
           </span>
         )}
         {dateValue && !rule && manualPay === null && !packaged && (
-          <span className={`${cellHint} text-right`}>该日期无生效规则</span>
+          <span className={cellHint}>该日期无生效规则</span>
         )}
       </td>
       <td className="px-1.5">
@@ -1298,7 +1298,7 @@ export function TripEntryForm({
   const [periodStart, setPeriodStart] = React.useState(
     initialPeriodStart && /^\d{4}-\d{2}-\d{2}$/.test(initialPeriodStart)
       ? periodOf(initialPeriodStart).start
-      : currentPeriod().start
+      : defaultPeriod().start
   );
   // One columns-only instance shared by every tab's sheet (synced column widths)
   const sheetTable = useRosterTable({

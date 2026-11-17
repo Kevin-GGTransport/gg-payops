@@ -3,7 +3,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { FormError } from "@/components/form-fields";
 import { requireUser } from "@/lib/auth";
-import { currentPeriod, periodOf } from "@/lib/period";
+import { defaultPeriod, periodOf } from "@/lib/period";
 import { firstValue, type SearchParams } from "@/lib/search-params";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeLocationOptions } from "@/lib/queries/locations";
@@ -40,12 +40,12 @@ export default async function EntryPage({
   const tabParam = Number.parseInt(firstValue(sp.tab) ?? "", 10);
   const initialActiveIndex =
     Number.isFinite(tabParam) && tabParam >= 0 ? tabParam : undefined;
-  // Sheet-cover period (a Saturday); defaults to this week
+  // Sheet-cover period (a Saturday); defaults to the week that just closed
   const periodRaw = firstValue(sp.period) ?? "";
   const initialPeriodStart =
     /^\d{4}-\d{2}-\d{2}$/.test(periodRaw) && new Date(periodRaw).toString() !== "Invalid Date"
       ? periodOf(periodRaw).start
-      : currentPeriod().start;
+      : defaultPeriod().start;
   const periodTripsHref = `/dashboard/trips?view=period&period=${initialPeriodStart}`;
 
   // Refill groups after a failed submit: f_group_count tells how many groups to

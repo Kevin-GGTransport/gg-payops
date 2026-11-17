@@ -21,6 +21,15 @@ export function currentPeriod(): Period {
   return periodOf(todayIso());
 }
 
+/**
+ * Working period: the week that just closed. Entry and payroll default here -
+ * a week's trips are entered and verified after it ends, so the previous
+ * period is where work actually happens.
+ */
+export function defaultPeriod(): Period {
+  return shiftPeriod(currentPeriod(), -1);
+}
+
 /** 周期平移：n=1 下一个周期，n=-1 上一个周期 */
 export function shiftPeriod(period: Period, weeks: number): Period {
   const base = new Date(`${period.start}T00:00:00Z`);

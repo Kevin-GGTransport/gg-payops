@@ -7,7 +7,7 @@ import { requireUser } from "@/lib/auth";
 import { todayIso } from "@/lib/format";
 import { miles as fmtMiles, money } from "@/lib/format";
 import { firstValue, type SearchParams } from "@/lib/search-params";
-import { currentPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
+import { defaultPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
 import type { StatementStatus } from "@/lib/labels";
 import {
   listStatements,
@@ -51,8 +51,9 @@ export default async function PayrollPage({
   if (view === "all") baseParams.set("view", "all");
   if (q) baseParams.set("q", q);
 
-  const thisWeek = currentPeriod();
-  const shownPeriod = view === "period" ? periodOf(period ?? thisWeek.start) : null;
+  // Landing period = the week that just closed (same default as entry)
+  const defaultWeek = defaultPeriod();
+  const shownPeriod = view === "period" ? periodOf(period ?? defaultWeek.start) : null;
 
   const filterParams = new URLSearchParams(baseParams);
   if (period) filterParams.set("period", period);
@@ -145,7 +146,9 @@ export default async function PayrollPage({
               <Link href={`/dashboard/payroll?period=${shiftPeriod(shownPeriod, 1).start}`} aria-label="下一周期" className={arrowClass}>›</Link>
             </div>
             <div className="filter-actions">
-              {shownPeriod.start !== thisWeek.start && <Link href="/dashboard/payroll">回到本周</Link>}
+              {shownPeriod.start !== defaultWeek.start && (
+                <Link href={`/dashboard/payroll?period=${defaultWeek.start}`}>回到上周</Link>
+              )}
               <Link href="/dashboard/payroll?view=all">全部周期档案</Link>
             </div>
           </div>

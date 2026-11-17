@@ -143,6 +143,9 @@ export function LocationPicker({
         placeholder={placeholder}
         searchPlaceholder="搜索代码、地址，或直接输入"
         mono
+        // Trigger shows the code only (typed text for txt: picks) - the full
+        // address stays in the dropdown and the hover title
+        triggerLabelOnly
         onValueChange={commit}
         labelForValue={v => (v.startsWith("txt:") ? stripGeoSuffix(v.slice(4)) : undefined)}
         aria-label={rest["aria-label"] ?? (label ? `选择${label}` : undefined)}

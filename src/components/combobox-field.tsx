@@ -44,6 +44,9 @@ type ComboboxFieldProps = {
   mono?: boolean;
   /** Two-line trigger: label prominent on top, description below (band-level picks like the driver) */
   prominent?: boolean;
+  /** Flat trigger shows the label only; description moves to the hover title
+   *  (narrow cells cramp when code and address share one line) */
+  triggerLabelOnly?: boolean;
   /** Notified on every pick, including clearing (empty string) */
   onValueChange?: (value: string) => void;
   /** Auto-submit the enclosing form after picking (GET filters); empty values stay out of the URL */
@@ -89,6 +92,7 @@ export function ComboboxField({
   searchable = true,
   mono = false,
   prominent = false,
+  triggerLabelOnly = false,
   autoSubmit = false,
   onValueChange,
   onQueryChange,
@@ -142,7 +146,13 @@ export function ComboboxField({
             role="combobox"
             aria-expanded={open}
             aria-label={rest["aria-label"] ?? (label ? `选择${label}` : undefined)}
-            className={cn("h-9 w-full justify-between px-2.5 font-normal", triggerClassName)}
+            // text-left: <button> defaults to text-align:center and the flex-1
+            // label span inherits it - without this the picked text renders
+            // centered inside the stretched span
+            className={cn(
+              "h-9 w-full justify-between px-2.5 text-left font-normal",
+              triggerClassName
+            )}
           >
             {selected ? (
               prominent ? (
@@ -161,7 +171,11 @@ export function ComboboxField({
               ) : (
                 <>
                   <span
-                    title={selected.label}
+                    title={
+                      triggerLabelOnly && selected.description
+                        ? `${selected.label} · ${selected.description}`
+                        : selected.label
+                    }
                     className={cn(
                       "min-w-0 flex-1 truncate text-[13px] leading-tight",
                       mono && "font-mono font-semibold"
@@ -169,7 +183,7 @@ export function ComboboxField({
                   >
                     {selected.label}
                   </span>
-                  {selected.description && (
+                  {!triggerLabelOnly && selected.description && (
                     <span
                       title={selected.description}
                       className="min-w-0 max-w-[60%] shrink-0 truncate text-xs font-normal text-muted-foreground"
