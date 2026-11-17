@@ -43,7 +43,7 @@ const cellHint = "block text-[10px] leading-tight font-normal text-muted-foregro
 
 /** Stable column set (module scope: a fresh array per render churns TanStack's sizing sync) */
 const SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
-  { id: "date", header: "日期", size: 118, enableResizing: false },
+  { id: "date", header: "日期", size: 132, minSize: 118 },
   { id: "from", header: "起点", size: 138 },
   { id: "to", header: "终点", size: 138 },
   { id: "operation", header: "操作", size: 92 },

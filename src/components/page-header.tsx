@@ -7,7 +7,8 @@ export function PageHeader({
   actions,
   className
 }: {
-  title: string;
+  /** Plain string, or inline markup (e.g. a state-colored driver name) */
+  title: ReactNode;
   /** Plain string, or inline markup (e.g. a mono driver code inside the sentence) */
   description: ReactNode;
   actions?: ReactNode;

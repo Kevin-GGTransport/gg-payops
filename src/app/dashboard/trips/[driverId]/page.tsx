@@ -116,11 +116,24 @@ export default async function DriverPeriodPage({
   // Draft numbers always equal the live ledger; VERIFIED freezes them. The
   // permanent edited_after_verify flag (not a live comparison) drives the red
   const statementFrozen = statement !== null && statement.status === "VERIFIED";
+  // Muted name tone for the whole page: dark green once verified clean, dark
+  // red once edited after verification - dim shades only, never bright
+  const nameTone = statement
+    ? statement.edited_after_verify
+      ? "text-red-800"
+      : statementFrozen
+        ? "text-emerald-800"
+        : undefined
+    : undefined;
 
   return (
     <>
       <PageHeader
-        title={`${driver.full_name} · 周期工资单`}
+        title={
+          <>
+            <span className={nameTone}>{driver.full_name}</span> · 周期工资单
+          </>
+        }
         description={
           statement ? (
             statement.edited_after_verify ? (
@@ -185,7 +198,8 @@ export default async function DriverPeriodPage({
       <section className="gauge" aria-label="本周期读数">
         <header className="gauge-head">
           <span className="gauge-title">
-            {driver.full_name} <DriverTypeBadge type={driver.driver_type} />
+            <span className={nameTone}>{driver.full_name}</span>{" "}
+            <DriverTypeBadge type={driver.driver_type} />
           </span>
           <span className="gauge-range">{periodLabel(period)} · 周六 ~ 周五</span>
         </header>

@@ -69,7 +69,21 @@ export function StatementsTable({
       id: "driver",
       header: "司机 / 车主",
       size: 140,
-      cell: ({ row }) => row.original.full_name
+      // Same muted tones as the detail masthead: dark green = verified clean,
+      // dark red = edited after verification; drafts stay neutral
+      cell: ({ row }) => (
+        <span
+          className={
+            row.original.edited_after_verify
+              ? "text-red-800"
+              : row.original.status === "VERIFIED"
+                ? "text-emerald-800"
+                : undefined
+          }
+        >
+          {row.original.full_name}
+        </span>
+      )
     },
     {
       id: "type",
