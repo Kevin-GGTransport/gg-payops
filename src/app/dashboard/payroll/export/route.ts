@@ -1,20 +1,16 @@
 import ExcelJS from "exceljs";
 
 import { requireUser } from "@/lib/auth";
-import { DRIVER_TYPE_LABELS, STATEMENT_STATUS_LABELS } from "@/lib/labels";
+import { DRIVER_TYPE_LABELS } from "@/lib/labels";
 import { defaultPeriod, periodLabel, periodOf, type Period } from "@/lib/period";
 import { listOperationTypes } from "@/lib/queries/operations";
 import { mergedPeriodStatements } from "@/lib/queries/statements";
 import { driverPeriodTrips } from "@/lib/queries/trips";
 
-const DOW = ["日", "一", "二", "三", "四", "五", "六"];
-
-function dowOf(iso: string) {
-  return DOW[new Date(`${iso}T00:00:00Z`).getUTCDay()];
-}
-
 const FMT_MONEY = '"$"#,##0.00';
 const FMT_ONE = "#,##0.0";
+// Detail sheets follow the reference workbook: plain numbers, no $ sign
+const FMT_PAY = "#,##0.00";
 
 /** Excel sheet names: <=31 chars, no []:*?/\ ; collide -> numeric suffix */
 function sheetName(base: string, used: Set<string>) {
@@ -25,105 +21,108 @@ function sheetName(base: string, used: Set<string>) {
   return name;
 }
 
-type DayGroup = {
-  date: string;
-  miles: number;
-  fuel: number;
-  subsidy: number;
-  pay: number;
-};
+/** "2026-11-07" -> "11/7" for the banner, matching the reference sheet */
+function mdOf(iso: string) {
+  return `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
+}
 
-/** Build one driver's detail sheet: every leg, day subtotals, week totals */
+/** Non-zero-padded "2026-11-7" date cell, the reference sheet's style */
+function dateCell(iso: string) {
+  return `${iso.slice(0, 4)}-${Number(iso.slice(5, 7))}-${Number(iso.slice(8, 10))}`;
+}
+
+const THIN = { style: "thin" as const, color: { argb: "FF000000" } };
+const GRID = { top: THIN, left: THIN, bottom: THIN, right: THIN };
+
+/** Reference-sheet look: full thin grid, everything centered */
+function gridify(row: ExcelJS.Row, bold = false) {
+  row.eachCell({ includeEmpty: true }, cell => {
+    cell.border = GRID;
+    cell.alignment = { horizontal: "center", vertical: "middle" };
+    if (bold) cell.font = { bold: true };
+  });
+}
+
+/**
+ * Build one driver's detail sheet in the reference workbook's shape: a single
+ * banner row (name + period + truck annotation), a flat bordered grid of legs
+ * (date printed once per day), then the fuel-subsidy line and the Total row -
+ * the subsidy lands in the Driver column so the column sum equals total
+ * payable.
+ */
 function addDriverSheet(
   workbook: ExcelJS.Workbook,
   name: string,
   driver: Awaited<ReturnType<typeof mergedPeriodStatements>>[number],
   legs: Awaited<ReturnType<typeof driverPeriodTrips>>,
-  period: Period
+  period: Period,
+  opLabels: Map<string, string>
 ) {
   const sheet = workbook.addWorksheet(name);
   sheet.columns = [
-    { width: 14 }, { width: 10 }, { width: 12 }, { width: 28 },
-    { width: 10, style: { numFmt: FMT_ONE } },
-    { width: 10, style: { numFmt: FMT_ONE } },
-    { width: 12, style: { numFmt: FMT_MONEY } },
-    { width: 13, style: { numFmt: FMT_MONEY } },
-    { width: 26 }
+    { width: 12 }, { width: 16 }, { width: 24 }, { width: 10 }, { width: 10 },
+    { width: 12 }, { width: 10, style: { numFmt: FMT_ONE } },
+    { width: 12, style: { numFmt: FMT_PAY } }
   ];
 
-  // Driver identity + period + statement status, then the detail table
-  const statusLabel = driver.status
-    ? `${STATEMENT_STATUS_LABELS[driver.status]}${driver.edited_after_verify ? "（核对后已改动）" : ""}`
-    : "无行程";
-  const info = sheet.addRow([`${driver.full_name} · ${DRIVER_TYPE_LABELS[driver.driver_type]} · 车号：${driver.trucks || "—"}`]);
-  info.font = { bold: true, size: 12 };
-  sheet.mergeCells(1, 1, 1, 9);
-  const sub = sheet.addRow([
-    `核算周期 ${periodLabel(period)}（${period.start} ~ ${period.end}） · 工资单：${statusLabel}`
+  // Banner like "David Gao 10/31-11/6（521）"; no truck -> no annotation
+  const banner = sheet.addRow([
+    `${driver.full_name} ${mdOf(period.start)}-${mdOf(period.end)}${driver.trucks ? `（${driver.trucks}）` : ""}`
   ]);
-  sub.font = { color: { argb: "FF71717A" } };
-  sheet.mergeCells(2, 1, 2, 9);
-  sheet.addRow([]);
+  banner.font = { bold: true, size: 12 };
+  banner.alignment = { horizontal: "center" };
+  sheet.mergeCells(1, 1, 1, 8);
 
-  const header = sheet.addRow(["日期", "操作", "Load#", "起点 → 终点", "里程(mi)", "加油(gal)", "燃油补助($)", "本趟工资($)", "备注"]);
-  header.font = { bold: true };
+  const header = sheet.addRow(["Date", "Load#", "Nature", "From", "To", "操作方式", "Miles", "Driver"]);
+  gridify(header, true);
 
-  // Legs arrive sorted by date, each day chained origin -> destination; group per day
-  const days = new Map<string, DayGroup>();
+  let prevDate = "";
+  let totalMiles = 0;
+  let totalPay = 0;
+  let subsidy = 0;
   for (const leg of legs) {
-    const day = days.get(leg.trip_date) ?? { date: leg.trip_date, miles: 0, fuel: 0, subsidy: 0, pay: 0 };
-    sheet.addRow([
-      `${leg.trip_date.slice(5).replace("-", "/")} 周${dowOf(leg.trip_date)}`,
-      leg.operation, leg.load_no || "—",
-      `${leg.from_code ?? "—"} → ${leg.to_code ?? "—"}`,
-      Number(leg.miles), Number(leg.fuel_gallons), Number(leg.fuel_subsidy), Number(leg.pay_amount),
-      leg.notes ?? ""
-    ]);
-    day.miles += Number(leg.miles);
-    day.fuel += Number(leg.fuel_gallons);
-    day.subsidy += Number(leg.fuel_subsidy);
-    day.pay += Number(leg.pay_amount);
-    days.set(leg.trip_date, day);
-  }
-
-  for (const day of days.values()) {
     const row = sheet.addRow([
-      `小计 · ${day.date.slice(5).replace("-", "/")} 周${dowOf(day.date)}`,
-      "", "", "", day.miles, day.fuel, day.subsidy, day.pay, ""
+      leg.trip_date === prevDate ? "" : dateCell(leg.trip_date),
+      leg.load_no ?? "",
+      `${leg.from_code ?? ""} -> ${leg.to_code ?? ""}`,
+      leg.from_code ?? "",
+      leg.to_code ?? "",
+      leg.operation ? (opLabels.get(leg.operation) ?? leg.operation) : "",
+      Number(leg.miles),
+      Number(leg.pay_amount)
     ]);
-    row.font = { bold: true };
-    sheet.mergeCells(row.number, 1, row.number, 4);
+    gridify(row);
+    prevDate = leg.trip_date;
+    totalMiles += Number(leg.miles);
+    totalPay += Number(leg.pay_amount);
+    subsidy += Number(leg.fuel_subsidy);
   }
 
-  const totals = sheet.addRow([
-    `行程合计 · ${legs.length} 段 / ${days.size} 天`, "", "", "",
-    ...legs.reduce(
-      (acc, l) => [
-        acc[0] + Number(l.miles),
-        acc[1] + Number(l.fuel_gallons),
-        acc[2] + Number(l.fuel_subsidy),
-        acc[3] + Number(l.pay_amount)
-      ],
-      [0, 0, 0, 0]
-    ),
-    ""
+  // Fuel-subsidy settlement line for every driver (and owner): label sits
+  // under Load#, amount in the Driver column
+  const fuel = sheet.addRow(["", "燃油补助", "", "", "", "", null, Number(subsidy.toFixed(2))]);
+  gridify(fuel, true);
+
+  const total = sheet.addRow([
+    "Total", "", "", "", "", "",
+    Number(totalMiles.toFixed(1)), Number((totalPay + subsidy).toFixed(2))
   ]);
-  totals.font = { bold: true };
-  sheet.mergeCells(totals.number, 1, totals.number, 4);
+  gridify(total, true);
 
   // VERIFIED statements freeze the numbers; when a verified sheet was flagged
   // (trips changed after verification) the frozen pay no longer matches the
-  // leg sum - show both so the gap stays visible on the exported sheet
-  const legPay = legs.reduce((acc, l) => acc + Number(l.pay_amount), 0);
-  if (driver.id !== null && Math.abs(Number(driver.total_pay) - legPay) >= 0.005) {
+  // leg sum - append the frozen row so the gap stays visible on the export
+  if (driver.id !== null && Math.abs(Number(driver.total_pay) - totalPay) >= 0.005) {
     const frozen = sheet.addRow([
-      `工资单合计（${driver.leg_count} 段）`, "", "", "",
-      Number(driver.total_miles), Number(driver.total_fuel),
-      Number(driver.total_fuel_subsidy), Number(driver.total_pay),
-      driver.note ?? ""
+      `工资单合计（核对冻结 ${driver.leg_count} 段）`, "", "", "", "",
+      Number(driver.total_miles), Number(driver.total_pay)
     ]);
-    frozen.font = { bold: true };
-    sheet.mergeCells(frozen.number, 1, frozen.number, 4);
+    frozen.eachCell({ includeEmpty: true }, cell => {
+      cell.border = GRID;
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.font = { bold: true, color: { argb: "FFB91C1C" } };
+    });
+    sheet.mergeCells(frozen.number, 1, frozen.number, 5);
   }
 }
 
@@ -197,10 +196,13 @@ export async function GET(request: Request) {
   totals.font = { bold: true };
 
   /* ---------- One detail sheet per attended driver ---------- */
+  const opLabels = new Map(operations.map(o => [o.code, o.label]));
   const drivers = rows.filter(r => r.leg_count > 0 || r.id !== null);
   const legLists = await Promise.all(drivers.map(d => driverPeriodTrips(period, d.driver_id)));
   const used = new Set<string>(["汇总"]);
-  drivers.forEach((d, i) => addDriverSheet(workbook, sheetName(d.full_name, used), d, legLists[i], period));
+  drivers.forEach((d, i) =>
+    addDriverSheet(workbook, sheetName(d.full_name, used), d, legLists[i], period, opLabels)
+  );
 
   const buffer = await workbook.xlsx.writeBuffer();
   const filename = `工资表-${period.start}~${period.end}.xlsx`;
