@@ -66,6 +66,32 @@ type LegValues = { miles: number; fuel: number; pay: number; subsidy: number };
 
 type CalcStatus = "loading" | "auto" | "failed";
 
+/** Carrier-headed contiguous run of one package inside a day: the pay cell
+ *  merges across the run (members skip their own cell, their hidden inputs
+ *  move into the merged cell so dirty member rows still submit $0) */
+type PaySpan = { span: number; members: DriverPeriodTripRow[] };
+
+/**
+ * Per day, annotate package carriers with the length of their contiguous
+ * same-package stretch. Chained order keeps circuits together and the carrier
+ * is the day's earliest-entered package leg, so it heads the stretch in the
+ * common case; a stretch split by chaining degrades to today's per-cell rows.
+ */
+function planPaySpans(days: DayGroup[]) {
+  const spans = new Map<string, PaySpan>();
+  const folded = new Set<string>();
+  for (const day of days) {
+    day.legs.forEach((leg, i) => {
+      if (!leg.package_id || !leg.package_note) return;
+      let k = i + 1;
+      while (k < day.legs.length && day.legs[k].package_id === leg.package_id) k++;
+      spans.set(leg.id, { span: k - i, members: day.legs.slice(i + 1, k) });
+      for (let j = i + 1; j < k; j++) folded.add(day.legs[j].id);
+    });
+  }
+  return { spans, folded };
+}
+
 /**
  * One stored leg as a directly editable sheet row - same field set and
  * behavior as a home-sheet entry row: location pickers (creatable + map),
@@ -79,6 +105,8 @@ const EditableLegRow = React.memo(function EditableLegRow({
   operations,
   wageRule,
   returnTo,
+  paySpan,
+  payFolded,
   onDirty,
   onValues
 }: {
@@ -88,6 +116,10 @@ const EditableLegRow = React.memo(function EditableLegRow({
   wageRule: WageRuleData | null;
   /** Full path the per-row delete redirects back to */
   returnTo: string;
+  /** Carrier: how many rows its pay cell merges over + folded member legs */
+  paySpan?: PaySpan;
+  /** Member inside a merged run: renders no pay cell at all */
+  payFolded?: boolean;
   onDirty: (id: string) => void;
   onValues: (id: string, values: LegValues) => void;
 }) {
@@ -340,7 +372,8 @@ const EditableLegRow = React.memo(function EditableLegRow({
           ? money(subsidyValue.toFixed(2))
           : "—"}
       </td>
-      <td className="px-1.5">
+      {payFolded ? null : (
+      <td className="px-1.5" rowSpan={paySpan?.span}>
         {packageCarrier ? (
           <>
             <Input
@@ -357,8 +390,12 @@ const EditableLegRow = React.memo(function EditableLegRow({
               className={`${cellInput} font-mono`}
             />
             <span className={cellHint}>
-              {leg.package_note} · 整包金额
+              {leg.package_note} · 整包金额{paySpan && paySpan.span > 1 ? `（${paySpan.span} 程）` : ""}
             </span>
+            {/* Folded members submit their stored $0 from the merged cell */}
+            {paySpan?.members.map(m => (
+              <input key={m.id} type="hidden" name={`leg_${m.id}_pay_amount`} value={m.pay_amount} />
+            ))}
           </>
         ) : packaged ? (
           <>
@@ -403,6 +440,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           </>
         )}
       </td>
+      )}
       <td className="px-1.5">
         <Input
           name={`${prefix}notes`}
@@ -493,6 +531,10 @@ export function PayrollLegsTable({
   );
   const [dirty, setDirty] = React.useState<Set<string>>(new Set());
 
+  // Package pay cells merge across each carrier's contiguous run (stable
+  // across renders: EditableLegRow is memo'd on these props)
+  const { spans, folded } = React.useMemo(() => planPaySpans(days), [days]);
+
   const onDirty = React.useCallback((id: string) => {
     setDirty(prev => (prev.has(id) ? prev : new Set(prev).add(id)));
   }, []);
@@ -555,6 +597,8 @@ export function PayrollLegsTable({
                 operations={edit.operations}
                 wageRule={edit.wageRule}
                 returnTo={returnTo}
+                paySpan={spans.get(leg.id)}
+                payFolded={folded.has(leg.id)}
                 onDirty={onDirty}
                 onValues={onValues}
               />

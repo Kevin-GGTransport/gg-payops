@@ -34,6 +34,33 @@ function dateCell(iso: string) {
 const THIN = { style: "thin" as const, color: { argb: "FF000000" } };
 const GRID = { top: THIN, left: THIN, bottom: THIN, right: THIN };
 
+/** Driver-column index of the pay amount (1-based, for mergeCells) */
+const PAY_COL = 8;
+
+/**
+ * Carrier-headed contiguous runs of one package (same id AND date, so a
+ * member edited into another day never widens a merge). Returns leg index ->
+ * run length; members covered by a run land in the folded set. Mirrors the
+ * detail page's planPaySpans so both views merge the same way.
+ */
+function planPayRuns(legs: Array<{ package_id: string | null; package_note: string | null; trip_date: string }>) {
+  const runs = new Map<number, number>();
+  const folded = new Set<number>();
+  for (let i = 0; i < legs.length; i++) {
+    const leg = legs[i];
+    if (!leg.package_id || !leg.package_note) continue;
+    let k = i + 1;
+    while (
+      k < legs.length &&
+      legs[k].package_id === leg.package_id &&
+      legs[k].trip_date === leg.trip_date
+    ) k++;
+    runs.set(i, k - i);
+    for (let j = i + 1; j < k; j++) folded.add(j);
+  }
+  return { runs, folded };
+}
+
 /** Reference-sheet look: full thin grid, everything centered */
 function gridify(row: ExcelJS.Row, bold = false) {
   row.eachCell({ includeEmpty: true }, cell => {
@@ -80,7 +107,8 @@ function addDriverSheet(
   let totalMiles = 0;
   let totalPay = 0;
   let subsidy = 0;
-  for (const leg of legs) {
+  const { runs, folded } = planPayRuns(legs);
+  for (const [i, leg] of legs.entries()) {
     const row = sheet.addRow([
       leg.trip_date === prevDate ? "" : dateCell(leg.trip_date),
       leg.load_no ?? "",
@@ -89,13 +117,28 @@ function addDriverSheet(
       leg.to_code ?? "",
       leg.operation ? (opLabels.get(leg.operation) ?? leg.operation) : "",
       Number(leg.miles),
-      Number(leg.pay_amount)
+      // Folded members' $0 stays blank: the run's carrier cell merges over it
+      folded.has(i) ? null : Number(leg.pay_amount)
     ]);
     gridify(row);
     prevDate = leg.trip_date;
     totalMiles += Number(leg.miles);
     totalPay += Number(leg.pay_amount);
     subsidy += Number(leg.fuel_subsidy);
+  }
+
+  // Merge each package run's Driver cell into one (the carrier amount spans
+  // its legs); style every cell in the range so the merged outline stays a
+  // full thin grid like the reference sheet
+  const firstLegRow = header.number + 1;
+  for (const [start, span] of runs) {
+    if (span < 2) continue;
+    sheet.mergeCells(firstLegRow + start, PAY_COL, firstLegRow + start + span - 1, PAY_COL);
+    for (let r = firstLegRow + start; r < firstLegRow + start + span; r++) {
+      const cell = sheet.getCell(r, PAY_COL);
+      cell.border = GRID;
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+    }
   }
 
   // Fuel-subsidy settlement line for every driver (and owner): label sits

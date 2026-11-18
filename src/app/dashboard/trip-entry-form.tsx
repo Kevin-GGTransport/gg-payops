@@ -157,10 +157,12 @@ const PKG_UNIT_OPTIONS: ReadonlyArray<{ value: PkgUnit; label: string }> = (
 ).map(([value, label]) => ({ value, label }));
 
 /**
- * Plan packages over a group's filled legs in sheet order: DAY groups every
- * leg of a date into one package; ROUND_TRIP splits the day's legs into
- * circuits that close by returning to the circuit's opening origin (an
- * unclosed tail stays per-leg). Undated legs never group.
+ * Plan packages over a group's filled legs: DAY groups every leg of a date
+ * into one package; ROUND_TRIP chains the date's legs road-order (each next
+ * leg's from feeds the previous to, sheet order breaks ties) and cuts one
+ * package per circuit that returns to its opening origin - interleaved entry
+ * re-orders into road order instead of swallowing other trips' legs, and
+ * dead-end walks stay per-leg. Undated legs never group.
  */
 function planPackages(
   unit: Exclude<PkgUnit, "LEG">,
@@ -184,30 +186,25 @@ function planPackages(
       plans.push({ id: `d-${date}`, date, rowIds: ids, unit });
       continue;
     }
-    let i = 0;
     let seq = 0;
-    while (i < ids.length) {
-      const origin = fromByRow[ids[i]];
-      if (!origin) {
-        // No anchor to close on: this leg stays per-priced
-        i++;
-        continue;
+    const remaining = [...ids];
+    while (remaining.length > 0) {
+      const head = remaining.shift()!;
+      const origin = fromByRow[head];
+      // No anchor to close on: this leg stays per-priced
+      if (!origin) continue;
+      const rowIds = [head];
+      let cursorTo = toByRow[head];
+      while (cursorTo !== origin) {
+        const next = remaining.findIndex(id => fromByRow[id] === cursorTo);
+        if (next < 0) break; // dead end: the walked legs stay per-priced
+        const leg = remaining.splice(next, 1)[0];
+        rowIds.push(leg);
+        cursorTo = toByRow[leg];
       }
-      let closedAt = -1;
-      for (let j = i; j < ids.length; j++) {
-        if (toByRow[ids[j]] === origin) {
-          closedAt = j;
-          break;
-        }
+      if (cursorTo === origin) {
+        plans.push({ id: `r-${date}-${seq++}`, date, rowIds, unit });
       }
-      if (closedAt < 0) break; // trailing legs never close: all per-priced
-      plans.push({
-        id: `r-${date}-${seq++}`,
-        date,
-        rowIds: ids.slice(i, closedAt + 1),
-        unit
-      });
-      i = closedAt + 1;
     }
   }
   return plans;
