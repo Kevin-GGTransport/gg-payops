@@ -163,14 +163,38 @@ const PKG_UNIT_OPTIONS: ReadonlyArray<{ value: PkgUnit; label: string }> = (
  * package per circuit that returns to its opening origin - interleaved entry
  * re-orders into road order instead of swallowing other trips' legs, and
  * dead-end walks stay per-leg. Undated legs never group.
+ *
+ * Endpoints compare by filing key, mirroring resolveEndpointId on the server:
+ * a roster pick keys by its location code, a hand-typed endpoint by the
+ * uppercase code (16 chars, geo payload stripped) the server reuses for the
+ * same place - so "94587" picked from the roster and "94587" typed by hand
+ * close one circuit instead of pricing per-trip.
  */
 function planPackages(
   unit: Exclude<PkgUnit, "LEG">,
   slots: { id: number }[],
   dateByRow: Record<number, string>,
   fromByRow: Record<number, string>,
-  toByRow: Record<number, string>
+  toByRow: Record<number, string>,
+  codeByLocId: Map<string, string>
 ): PkgPlan[] {
+  const keyOf = (value: string | undefined): string => {
+    if (!value) return "";
+    if (value.startsWith("loc:")) return codeByLocId.get(value.slice(4)) ?? value;
+    if (value.startsWith("txt:")) {
+      // locations.code column caps at 16 chars (CODE_MAX in lib/locations);
+      // importing that server module here would drag prisma into the client
+      const code = value.slice(4).split("|geo:")[0].trim().toUpperCase().slice(0, 16);
+      return code || value;
+    }
+    return value;
+  };
+  const fromKey = new Map<number, string>();
+  const toKey = new Map<number, string>();
+  for (const slot of slots) {
+    fromKey.set(slot.id, keyOf(fromByRow[slot.id]));
+    toKey.set(slot.id, keyOf(toByRow[slot.id]));
+  }
   const byDate = new Map<string, number[]>();
   for (const slot of slots) {
     const to = toByRow[slot.id];
@@ -190,17 +214,17 @@ function planPackages(
     const remaining = [...ids];
     while (remaining.length > 0) {
       const head = remaining.shift()!;
-      const origin = fromByRow[head];
+      const origin = fromKey.get(head) ?? "";
       // No anchor to close on: this leg stays per-priced
       if (!origin) continue;
       const rowIds = [head];
-      let cursorTo = toByRow[head];
+      let cursorTo = toKey.get(head);
       while (cursorTo !== origin) {
-        const next = remaining.findIndex(id => fromByRow[id] === cursorTo);
+        const next = remaining.findIndex(id => fromKey.get(id) === cursorTo);
         if (next < 0) break; // dead end: the walked legs stay per-priced
         const leg = remaining.splice(next, 1)[0];
         rowIds.push(leg);
-        cursorTo = toByRow[leg];
+        cursorTo = toKey.get(leg);
       }
       if (cursorTo === origin) {
         plans.push({ id: `r-${date}-${seq++}`, date, rowIds, unit });
@@ -818,13 +842,21 @@ const GroupSection = React.memo(function GroupSection({
   // Fuel subsidy: OWNER drivers only (price_as_driver included), needs a rate
   const showSubsidy = driverType === "OWNER" && subsidyRate > 0;
 
+  // Location code per roster id: circuit detection compares filing keys, so
+  // the same place picked from the roster and typed by hand chains together
+  const codeByLocId = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const location of locations) map.set(location.id, location.code);
+    return map;
+  }, [locations]);
+
   // Planned packages follow the sheet live (endpoints/dates/rows/mode)
   const plans = React.useMemo(
     () =>
       pkgUnit === "LEG"
         ? []
-        : planPackages(pkgUnit, rows, dateByRow, fromByRow, toByRow),
-    [pkgUnit, rows, dateByRow, fromByRow, toByRow]
+        : planPackages(pkgUnit, rows, dateByRow, fromByRow, toByRow, codeByLocId),
+    [pkgUnit, rows, dateByRow, fromByRow, toByRow, codeByLocId]
   );
 
   // Rule suggestion per package: driver-scoped beats global (OWNER: owner
