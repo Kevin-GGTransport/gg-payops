@@ -182,9 +182,12 @@ const EditableLegRow = React.memo(function EditableLegRow({
     [operation, milesValue, fromValue, toValue, rule]
   );
 
-  // Package legs are frozen history: the amount lives on the carrier leg and
-  // the strip that set it is gone, so the cell stays read-only
+  // Package legs: the carrier holds the whole amount (its note was set at
+  // entry) and stays editable as an in-place correction - the strip that set
+  // it is gone but the negotiated amount may need a fix; member legs bill $0
+  // and stay read-only
   const packaged = Boolean(leg.package_id);
+  const packageCarrier = packaged && Boolean(leg.package_note);
   const payValue = leg.pay_amount;
 
   // Owner fuel subsidy: derived from miles, read-only (the server re-snapshots
@@ -199,9 +202,11 @@ const EditableLegRow = React.memo(function EditableLegRow({
   // Report live numbers upward on every change (day subtotals + week totals)
   const milesNum = Number(milesValue) || 0;
   const fuelNum = Number(fuelValue) || 0;
-  const payNum = packaged
-    ? Number(payValue) || 0
-    : Number(manualPay ?? autoPay.toFixed(2)) || 0;
+  const payNum = packageCarrier
+    ? Number(manualPay ?? payValue) || 0
+    : packaged
+      ? Number(payValue) || 0
+      : Number(manualPay ?? autoPay.toFixed(2)) || 0;
   React.useEffect(() => {
     onValues(leg.id, { miles: milesNum, fuel: fuelNum, pay: payNum, subsidy: subsidyValue });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -336,14 +341,33 @@ const EditableLegRow = React.memo(function EditableLegRow({
           : "—"}
       </td>
       <td className="px-1.5">
-        {packaged ? (
+        {packageCarrier ? (
+          <>
+            <Input
+              type="number"
+              name={`${prefix}pay_amount`}
+              min={0}
+              step={0.01}
+              value={manualPay ?? ""}
+              onChange={e => {
+                setManualPay(e.target.value);
+                onDirty(leg.id);
+              }}
+              aria-label={`${legLabel}工资`}
+              className={`${cellInput} font-mono`}
+            />
+            <span className={cellHint}>
+              {leg.package_note} · 整包金额
+            </span>
+          </>
+        ) : packaged ? (
           <>
             <input type="hidden" name={`${prefix}pay_amount`} value={payValue} />
             <span className="block px-2 font-mono text-[13px] tabular-nums">
               {money(payValue)}
             </span>
             <span className={cellHint}>
-              {leg.package_note ?? "打包内"}
+              {leg.package_note ?? "打包内 · $0"}
             </span>
           </>
         ) : (

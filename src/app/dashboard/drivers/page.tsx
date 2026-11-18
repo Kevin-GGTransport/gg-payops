@@ -4,11 +4,11 @@ import { ModalShell } from "@/components/modal-shell";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel } from "@/components/ledger";
 import { DriverTypeCards } from "@/components/choice-cards";
-import { FormGrid, TextField, DateField, TextareaField, CheckboxField, SubmitButton, FormError } from "@/components/form-fields";
+import { FormGrid, TextField, DateField, TextareaField, CheckboxField, SelectField, SubmitButton, FormError } from "@/components/form-fields";
 import { FlashToast } from "@/components/flash-toast";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
-import type { DriverType } from "@/lib/labels";
+import { PRICING_MODE_LABELS, type DriverType, type PricingMode } from "@/lib/labels";
 import { listDrivers, getDriverById, driverTypeCounts } from "@/lib/queries/drivers";
 import { saveDriver } from "./actions";
 import { DriversTable } from "./drivers-table";
@@ -63,6 +63,7 @@ export default async function DriversPage({
       firstValue(sp.price_as_driver) !== undefined
         ? firstValue(sp.price_as_driver) === "1"
         : (editing?.price_as_driver ?? false),
+    pricingMode: formField(sp, "pricing_mode", editing?.pricing_mode) as PricingMode,
     phone: formField(sp, "phone", editing?.phone),
     licenseNo: formField(sp, "license_no", editing?.license_no),
     licenseClass: formField(sp, "license_class", editing?.license_class),
@@ -151,6 +152,13 @@ export default async function DriversPage({
               name="price_as_driver"
               defaultChecked={values.priceAsDriver}
               hint="车主按司机价计价（规则用司机价列，不乘车主系数）"
+            />
+            <SelectField
+              label="计价方式"
+              name="pricing_mode"
+              defaultValue={values.pricingMode ?? "LEG"}
+              options={Object.entries(PRICING_MODE_LABELS).map(([value, label]) => ({ value, label }))}
+              hint="录入行程时计价下拉自动跟随，可临时手改"
             />
             <TextareaField label="备注" name="notes" placeholder="结算方式、车辆信息等" defaultValue={values.notes} />
           </FormGrid>

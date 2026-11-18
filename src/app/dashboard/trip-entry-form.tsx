@@ -24,8 +24,10 @@ import {
 } from "@/lib/entry-draft";
 import {
   DRIVER_TYPE_LABELS,
+  PRICING_MODE_LABELS,
   type DriverType,
-  type OperationType
+  type OperationType,
+  type PricingMode
 } from "@/lib/labels";
 import { addTripsBatch } from "./entry-actions";
 import { PhotoImport, type PhotoApply } from "./photo-import";
@@ -36,6 +38,8 @@ type DriverOption = {
   driver_type: DriverType;
   /** Owner-type driver billed at driver prices (pricing identity override) */
   price_as_driver: boolean;
+  /** Entry pricing mode this group's 计价 dropdown follows on driver pick */
+  pricing_mode: PricingMode;
 };
 
 type TruckOption = {
@@ -143,16 +147,14 @@ function dowOf(iso: string) {
 type CalcStatus = "loading" | "auto" | "failed";
 
 /** Package pricing mode of one group sheet (per-leg default) */
-type PkgUnit = "LEG" | "DAY" | "ROUND_TRIP";
+type PkgUnit = PricingMode;
 
 /** One priced package planned from the sheet: legs share one amount */
 type PkgPlan = { id: string; date: string; rowIds: number[]; unit: Exclude<PkgUnit, "LEG"> };
 
-const PKG_UNIT_OPTIONS: ReadonlyArray<{ value: PkgUnit; label: string }> = [
-  { value: "LEG", label: "按趟计价" },
-  { value: "DAY", label: "按天打包" },
-  { value: "ROUND_TRIP", label: "按往返打包" }
-];
+const PKG_UNIT_OPTIONS: ReadonlyArray<{ value: PkgUnit; label: string }> = (
+  Object.entries(PRICING_MODE_LABELS) as Array<[PkgUnit, string]>
+).map(([value, label]) => ({ value, label }));
 
 /**
  * Plan packages over a group's filled legs in sheet order: DAY groups every
@@ -367,6 +369,14 @@ const EntryRow = React.memo(function EntryRow({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [carryFrom]);
+
+  // Keep the group's from map current (ROUND_TRIP circuits anchor on it);
+  // carry-over starts never pass through the picker's onValueChange, so the
+  // map must track the value itself, exactly like the date map below
+  React.useEffect(() => {
+    onFromChange(rowId, fromValue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromValue]);
 
   // Report the initial (refill/photo) endpoint once so the next leg can carry it
   React.useEffect(() => {
@@ -788,11 +798,14 @@ const GroupSection = React.memo(function GroupSection({
   const [fromByRow, setFromByRow] = React.useState<Record<number, string>>({});
   // rowId -> current date, feeding the next leg's date carry-down
   const [dateByRow, setDateByRow] = React.useState<Record<number, string>>({});
-  // Package pricing mode of this sheet (per-leg default); pkgAmounts holds
-  // only the clerk's manual overrides keyed by package id - a package without
-  // an override prices at its rule suggestion (derived during render, no
-  // effect needed)
-  const [pkgUnit, setPkgUnit] = React.useState<PkgUnit>("LEG");
+  // Package pricing mode of this sheet (per-leg default); it starts at the
+  // roster setting of the group's initial driver and re-follows on every
+  // driver switch. pkgAmounts holds only the clerk's manual overrides keyed
+  // by package id - a package without an override prices at its rule
+  // suggestion (derived during render, no effect needed)
+  const [pkgUnit, setPkgUnit] = React.useState<PkgUnit>(
+    () => drivers.find(d => d.id === group.driverId)?.pricing_mode ?? "LEG"
+  );
   const [pkgAmounts, setPkgAmounts] = React.useState<Record<string, string>>({});
   // Row ids that have at least one endpoint (what the buttons count)
   const [filledIds, setFilledIds] = React.useState<Set<number>>(new Set());
@@ -865,8 +878,9 @@ const GroupSection = React.memo(function GroupSection({
     > = {};
     for (const plan of plans) {
       const amount = amountOf(plan.id).trim();
-      const note =
-        plan.unit === "DAY" ? `日打包 $${amount}` : `往返打包 $${amount}`;
+      // Static note: the amount lives in pay_amount and may be edited later
+      // on the statement sheet, so it must not be baked into the note
+      const note = plan.unit === "DAY" ? "日打包" : "往返打包";
       plan.rowIds.forEach((rowId, i) => {
         const carrier = i === 0;
         map[rowId] = {
@@ -1055,6 +1069,11 @@ const GroupSection = React.memo(function GroupSection({
           triggerClassName="h-10"
           onValueChange={value => {
             setDriverId(value);
+            // Package mode follows the picked driver's roster setting; manual
+            // package amounts are keyed by date-only ids and must never cross
+            // a driver switch, so they reset with the mode
+            setPkgUnit(drivers.find(d => d.id === value)?.pricing_mode ?? "LEG");
+            setPkgAmounts({});
             onDirty();
           }}
           options={drivers.map(d => ({

@@ -10,6 +10,15 @@ export const DRIVER_TYPE_LABELS: Record<DriverType, string> = {
   OWNER: "车主"
 };
 
+/** Advisory pricing mode stored on ops.drivers.pricing_mode (entry-sheet default) */
+export type PricingMode = "LEG" | "DAY" | "ROUND_TRIP";
+
+export const PRICING_MODE_LABELS: Record<PricingMode, string> = {
+  LEG: "按趟计价",
+  DAY: "按天打包",
+  ROUND_TRIP: "按往返打包"
+};
+
 export const LOCATION_TYPE_LABELS: Record<LocationType, string> = {
   BASE: "基地",
   AMAZON: "亚马逊仓",

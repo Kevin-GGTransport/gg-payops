@@ -7,6 +7,7 @@ import { DriverTypeBadge, StatusPill } from "@/components/badges";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { SubmitButton } from "@/components/submit-button";
 import { daysUntil } from "@/lib/format";
+import { PRICING_MODE_LABELS } from "@/lib/labels";
 import type { DriverRow } from "@/lib/queries/drivers";
 import { setDriverStatus } from "./actions";
 
@@ -34,6 +35,23 @@ export function DriversTable({
       header: "类型",
       size: 88,
       cell: ({ row }) => <DriverTypeBadge type={row.original.driver_type} />
+    },
+    {
+      id: "pricing",
+      header: "计价",
+      size: 92,
+      // Per-leg stays muted noise; a fixed-price mode is worth the emphasis
+      cell: ({ row }) => (
+        <span
+          className={
+            row.original.pricing_mode === "LEG"
+              ? "text-muted-foreground"
+              : "font-medium"
+          }
+        >
+          {PRICING_MODE_LABELS[row.original.pricing_mode] ?? PRICING_MODE_LABELS.LEG}
+        </span>
+      )
     },
     {
       id: "phone",

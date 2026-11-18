@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import type { DriverType, RecordStatus } from "@/lib/labels";
+import type { DriverType, PricingMode, RecordStatus } from "@/lib/labels";
 
 export type DriverRow = {
   id: string;
@@ -8,6 +8,8 @@ export type DriverRow = {
   driver_type: DriverType;
   /** Owner-type driver billed at driver prices everywhere */
   price_as_driver: boolean;
+  /** Entry-sheet pricing mode the 计价 dropdown follows on driver pick */
+  pricing_mode: PricingMode;
   phone: string | null;
   license_no: string | null;
   license_class: string | null;
@@ -19,6 +21,7 @@ export type DriverRow = {
 
 const DRIVER_SELECT = Prisma.sql`
   SELECT d.id::text, d.full_name, d.driver_type::text AS driver_type, d.price_as_driver,
+         d.pricing_mode,
          d.phone, d.license_no, d.license_class,
          to_char(d.license_expires_on, 'YYYY-MM-DD') AS license_expires_on,
          to_char(d.hire_date, 'YYYY-MM-DD') AS hire_date,
@@ -68,9 +71,15 @@ export async function driverTypeCounts() {
 
 export async function activeDriverOptions() {
   return prisma.$queryRaw<
-    { id: string; full_name: string; driver_type: DriverType; price_as_driver: boolean }[]
+    {
+      id: string;
+      full_name: string;
+      driver_type: DriverType;
+      price_as_driver: boolean;
+      pricing_mode: PricingMode;
+    }[]
   >`
-    SELECT id::text, full_name, driver_type::text AS driver_type, price_as_driver
+    SELECT id::text, full_name, driver_type::text AS driver_type, price_as_driver, pricing_mode
     FROM ops.drivers WHERE status = 'ACTIVE'
     ORDER BY driver_type, full_name
   `;

@@ -68,6 +68,34 @@ export function TextareaField({ label, name, placeholder, defaultValue, rows = 2
   );
 }
 
+/** Native select styled to match the other registry-card fields */
+export function SelectField({
+  label,
+  name,
+  defaultValue,
+  options,
+  hint,
+  className
+}: BaseField & { options: ReadonlyArray<{ value: string; label: string }>; hint?: string }) {
+  return (
+    <label className={cn(fieldClass, className)}>
+      {label}
+      <select
+        name={name}
+        defaultValue={defaultValue}
+        className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm font-normal text-foreground shadow-xs outline-none focus-visible:border-route focus-visible:ring-2 focus-visible:ring-route/30"
+      >
+        {options.map(option => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {hint && <span className="text-[11px] font-normal leading-tight text-muted-foreground/80">{hint}</span>}
+    </label>
+  );
+}
+
 /** Native checkbox: submits "1" when checked, nothing when unchecked */
 export function CheckboxField({
   label,
