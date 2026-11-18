@@ -9,6 +9,11 @@ import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { miles as fmtMiles, money } from "@/lib/format";
 import type { StatementRow } from "@/lib/queries/statements";
 import { verifyStatement } from "./actions";
+import {
+  CopyStatementButton,
+  type CopyDriverOption,
+  type CopyTruckOption
+} from "./copy-statement-dialog";
 
 const lgHidden = "hidden lg:table-cell";
 
@@ -49,9 +54,14 @@ function VerifyStatementButton({ statementId }: { statementId: string }) {
 /** Statement ledger on the shared TanStack + shadcn table shell */
 export function StatementsTable({
   statements,
+  drivers,
+  trucks,
   empty
 }: {
   statements: StatementRow[];
+  /** Copy-dialog pickers, pulled by the host page (same sources as entry) */
+  drivers: CopyDriverOption[];
+  trucks: CopyTruckOption[];
   empty: string;
 }) {
   const columns: ColumnDef<StatementRow, unknown>[] = [
@@ -163,7 +173,10 @@ export function StatementsTable({
               详情
             </Link>
             {s.id && s.status === "DRAFT" && s.leg_count > 0 && (
-              <VerifyStatementButton statementId={s.id} />
+              <>
+                <CopyStatementButton statement={{ ...s, id: s.id }} drivers={drivers} trucks={trucks} />
+                <VerifyStatementButton statementId={s.id} />
+              </>
             )}
           </>
         );

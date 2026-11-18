@@ -14,6 +14,8 @@ import {
   statementPeriodTotals,
   mergedPeriodStatements
 } from "@/lib/queries/statements";
+import { activeDriverOptions } from "@/lib/queries/drivers";
+import { activeTruckOptions } from "@/lib/queries/trucks";
 import { StatementsTable } from "./statements-table";
 
 export const metadata: Metadata = { title: "工资单 · G&G PayOps" };
@@ -60,12 +62,15 @@ export default async function PayrollPage({
 
   // Period mode: the period rollup (statements, DRAFT numbers live);
   // Archive mode: statements across all periods
-  const [merged, archive, pickerTotals] = await Promise.all([
+  const [merged, archive, pickerTotals, drivers, trucks] = await Promise.all([
     shownPeriod ? mergedPeriodStatements(shownPeriod) : Promise.resolve(null),
     view === "all"
       ? listStatements({ period: null, status: statusFromTab(firstValue(sp.status)), q })
       : Promise.resolve(null),
-    statementPeriodTotals()
+    statementPeriodTotals(),
+    // Copy-dialog pickers, shared by both table views
+    activeDriverOptions(),
+    activeTruckOptions()
   ]);
 
   const statusFilter = view === "all" ? statusFromTab(firstValue(sp.status)) : "all";
@@ -196,6 +201,8 @@ export default async function PayrollPage({
           <LedgerPanel label={<>汇总矩阵<b>{totals.drivers} 人出勤 · {idleDrivers} 人无行程</b></>}>
             <StatementsTable
               statements={merged!}
+              drivers={drivers}
+              trucks={trucks}
               empty="本周期还没有司机有行程；先去录入行程。"
             />
           </LedgerPanel>
@@ -230,6 +237,8 @@ export default async function PayrollPage({
           <LedgerPanel label={<>工资单档案<b>{archive!.rows.length} 张</b></>}>
             <StatementsTable
               statements={archive!.rows}
+              drivers={drivers}
+              trucks={trucks}
               empty={
                 q || statusFilter !== "all"
                   ? "没有符合条件的工资单。换个筛选条件看看。"

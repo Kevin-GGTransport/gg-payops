@@ -16,7 +16,10 @@ import { activeLocationOptions } from "@/lib/queries/locations";
 import { currentWageRule } from "@/lib/queries/wage-rules";
 import { driverPeriodTrips, periodPayTotals, type DriverPeriodTripRow } from "@/lib/queries/trips";
 import { getStatementByDriverPeriod } from "@/lib/queries/statements";
+import { activeDriverOptions } from "@/lib/queries/drivers";
+import { activeTruckOptions } from "@/lib/queries/trucks";
 import { verifyStatement } from "../../payroll/actions";
+import { CopyStatementButton } from "../../payroll/copy-statement-dialog";
 import { PayrollLegsTable } from "../payroll-legs-table";
 
 export const metadata: Metadata = { title: "周期工资单 · G&G PayOps" };
@@ -88,7 +91,7 @@ export default async function DriverPeriodPage({
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
 
-  const [legs, periodTotals, statement, locations, wageRule, operationOptions] =
+  const [legs, periodTotals, statement, locations, wageRule, operationOptions, driverOptions, truckOptions] =
     await Promise.all([
       driverPeriodTrips(period, driver.id),
       periodPayTotals(),
@@ -96,7 +99,10 @@ export default async function DriverPeriodPage({
       // Edit-dialog dictionaries (in-page client dialog, always mounted)
       activeLocationOptions(),
       currentWageRule(),
-      activeOperationOptions()
+      activeOperationOptions(),
+      // Copy-dialog pickers (copy this draft statement onto another driver)
+      activeDriverOptions(),
+      activeTruckOptions()
     ]);
   const days = groupByDay(legs);
   const totals = legs.reduce(
@@ -158,13 +164,21 @@ export default async function DriverPeriodPage({
         actions={
           <div className="flex items-center gap-2">
             {statement && statement.status === "DRAFT" && legs.length > 0 && (
-              <form action={verifyStatement}>
-                <input type="hidden" name="id" value={statement.id} />
-                <input type="hidden" name="return_to" value={returnTo} />
-                <button type="submit" className="button button-dark">
-                  标记核对
-                </button>
-              </form>
+              <>
+                <CopyStatementButton
+                  statement={statement}
+                  drivers={driverOptions}
+                  trucks={truckOptions}
+                  triggerClassName="button button-quiet"
+                />
+                <form action={verifyStatement}>
+                  <input type="hidden" name="id" value={statement.id} />
+                  <input type="hidden" name="return_to" value={returnTo} />
+                  <button type="submit" className="button button-dark">
+                    标记核对
+                  </button>
+                </form>
+              </>
             )}
             <Link className="button button-quiet" href={`/dashboard/payroll?period=${period.start}`}>
               返回工资单
