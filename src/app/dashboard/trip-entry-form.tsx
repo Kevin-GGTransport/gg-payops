@@ -9,6 +9,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PeriodPicker } from "@/components/period-picker";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { ComboboxField } from "@/components/combobox-field";
+import { ConfirmAction } from "@/components/confirm-action";
+import { SubmitButton } from "@/components/submit-button";
 import { DateField } from "@/components/date-field";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
 import { calcFuelSubsidy, calcTripWage, matchPackageRule, type WageRuleData } from "@/lib/wage";
@@ -1728,9 +1730,9 @@ export function TripEntryForm({
                 <CameraIcon className="mr-1 inline size-3.5" />
                 照片识别
               </button>
-              <Button type="submit" className="h-9 px-5">
+              <SubmitButton className="h-9 px-5" pendingLabel="记入中…">
                 记入全部 {totalRows} 段行程
-              </Button>
+              </SubmitButton>
             </div>
           </div>
 
@@ -1783,25 +1785,28 @@ export function TripEntryForm({
                 </>
               )}
             </span>
-            <button
-              type="button"
-              className="linklike danger"
-              onClick={() => {
-                if (window.confirm("清空未提交的草稿并重置表单？")) discardDraft();
-              }}
-            >
-              清空表单
-            </button>
+            <ConfirmAction
+              danger
+              title="清空未提交的草稿并重置表单？"
+              description="清空后需重新录入，已提交的行程不受影响。"
+              confirmLabel="清空"
+              trigger={props => (
+                <button {...props} className="linklike danger">
+                  清空表单
+                </button>
+              )}
+              onConfirm={() => discardDraft()}
+            />
           </span>
-          <Button
-            type="submit"
+          <SubmitButton
             name="submit_group"
             value={String(activeGroupIndex)}
             variant="outline"
             className="h-9 px-4"
+            pendingLabel="记入中…"
           >
             只记本组 {activeGroupRows} 段
-          </Button>
+          </SubmitButton>
         </div>
       </div>
     </form>

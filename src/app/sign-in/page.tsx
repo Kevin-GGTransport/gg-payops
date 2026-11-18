@@ -1,4 +1,5 @@
 import { authenticate } from "@/app/actions";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function SignInPage({
   searchParams
@@ -39,7 +40,7 @@ export default async function SignInPage({
               <label htmlFor="password">密码</label>
               <input id="password" name="password" type="password" autoComplete="current-password" required />
             </div>
-            <button className="button" type="submit">登录</button>
+            <SubmitButton className="button" pendingLabel="登录中…">登录</SubmitButton>
           </form>
         </div>
 

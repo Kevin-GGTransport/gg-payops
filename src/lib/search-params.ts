@@ -20,3 +20,10 @@ export function formField(
 ) {
   return ((firstValue(sp[`f_${key}`]) ?? fallback ?? "") as string);
 }
+
+/** Append a success flash flag (e.g. saved=1) to a redirect path's query */
+export function withFlash(path: string, query: string, flag: string, value = "1") {
+  const params = new URLSearchParams(query);
+  params.set(flag, value);
+  return `${path}?${params.toString()}`;
+}

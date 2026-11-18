@@ -1,4 +1,7 @@
+"use client";
+
 import type { ReactNode } from "react";
+import { useFormStatus } from "react-dom";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -100,8 +103,14 @@ export function FormGrid({ children, className }: { children: ReactNode; classNa
   return <div className={cn("grid grid-cols-2 gap-x-2.5 gap-y-3 px-4 pt-3.5 max-md:grid-cols-1", className)}>{children}</div>;
 }
 
-export function SubmitButton({ children }: { children: ReactNode }) {
-  return <Button type="submit" className="mx-4 mb-4 mt-3.5 w-[calc(100%-2rem)]">{children}</Button>;
+/** Registry-card submit: disables + swaps label while the form action is in flight */
+export function SubmitButton({ children, pendingLabel = "提交中…" }: { children: ReactNode; pendingLabel?: string }) {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" disabled={pending} className="mx-4 mb-4 mt-3.5 w-[calc(100%-2rem)]">
+      {pending ? pendingLabel : children}
+    </Button>
+  );
 }
 
 export function FormError({ message }: { message?: string }) {

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { ModalShell } from "@/components/modal-shell";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel, LedgerEmpty } from "@/components/ledger";
+import { ConfirmButton } from "@/components/confirm-button";
+import { FlashToast } from "@/components/flash-toast";
 import {
   FormGrid,
   TextField,
@@ -54,6 +56,17 @@ export default async function TrucksPage({
   const odoId = (firstValue(sp.odo) ?? "").trim();
   const errorCode = firstValue(sp.error);
   const isNew = firstValue(sp.new) === "1";
+  const savedFlash = firstValue(sp.saved);
+  const savedMessage =
+    savedFlash === "1"
+      ? "车辆已保存"
+      : savedFlash === "status"
+        ? "状态已更新"
+        : savedFlash === "odometer"
+          ? "读数已记入"
+          : savedFlash === "deleted"
+            ? "读数已删除"
+            : undefined;
 
   const filterQuery = new URLSearchParams();
   if (ownFilter !== "all") filterQuery.set("own", ownFilter);
@@ -107,6 +120,7 @@ export default async function TrucksPage({
           </Link>
         }
       />
+      {savedMessage && <FlashToast message={savedMessage} param="saved" />}
 
       <section aria-label="车辆名单">
         <div className="toolbar">
@@ -225,7 +239,14 @@ export default async function TrucksPage({
                       <input type="hidden" name="id" value={row.id} />
                       <input type="hidden" name="truck_id" value={odoTruck?.id ?? ""} />
                       <input type="hidden" name="return_to" value={returnTo} />
-                      <button type="submit" className="linklike danger">删除</button>
+                      <ConfirmButton
+                        className="linklike danger"
+                        title="删除这条读数？"
+                        message="删除后该表显里程记录不可恢复。"
+                        danger
+                      >
+                        删除
+                      </ConfirmButton>
                     </form>
                   </td>
                 </tr>

@@ -8,6 +8,7 @@ import { WageRuleStateBadge } from "@/components/badges";
 import { ConfirmButton } from "@/components/confirm-button";
 import { Button } from "@/components/ui/button";
 import { FormError, FormGrid, SubmitButton, TextField } from "@/components/form-fields";
+import { FlashToast } from "@/components/flash-toast";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
 import { activeDriverOptions } from "@/lib/queries/drivers";
@@ -50,8 +51,15 @@ export default async function WageRulesPage({
   const errorCode = firstValue(sp.error);
   const isNew = firstValue(sp.new) === "1";
   const fromId = (firstValue(sp.from) ?? "").trim();
-  const saved = firstValue(sp.saved) === "1";
-  const activated = firstValue(sp.activated) === "1";
+  const savedFlash = firstValue(sp.saved);
+  const savedMessage =
+    savedFlash === "1"
+      ? "已保存；生效中版本的改动即刻计入新录入的行程。"
+      : savedFlash === "activated"
+        ? "已切换生效；新录入的行程即按此版本计价。"
+        : savedFlash === "deleted"
+          ? "版本已删除。"
+          : undefined;
 
   const [versions, drivers, operations, locations] = await Promise.all([
     wageRuleVersionsList(),
@@ -89,11 +97,7 @@ export default async function WageRulesPage({
       />
 
       {errorMessage && !isNew && <FormError message={errorMessage} />}
-      {(saved || activated) && !errorMessage && (
-        <p className="notice" role="status">
-          {activated ? "已切换生效；新录入的行程即按此版本计价。" : "已保存；生效中版本的改动即刻计入新录入的行程。"}
-        </p>
-      )}
+      {savedMessage && !isNew && !errorMessage && <FlashToast message={savedMessage} param="saved" />}
 
       {detail && (
         <section aria-label="当前规则" className="mb-4">
@@ -118,7 +122,9 @@ export default async function WageRulesPage({
                       <input type="hidden" name="id" value={detail.id} />
                       <ConfirmButton
                         className="button button-quiet button-danger h-7! px-2.5! text-xs"
-                        message="确定删除该未生效版本？此操作不可撤销。"
+                        title="删除该未生效版本？"
+                        message="此操作不可撤销。"
+                        danger
                       >
                         删除
                       </ConfirmButton>

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
+import { FlashToast } from "@/components/flash-toast";
 import { FormError } from "@/components/form-fields";
 import { requireUser } from "@/lib/auth";
 import { defaultPeriod, periodOf } from "@/lib/period";
@@ -106,9 +106,12 @@ export default async function EntryPage({
       />
 
       {savedCount !== undefined && (
-        <p role="status" className="notice">
-          已记入 {savedCount} 段行程。前往 <Link href={periodTripsHref}>行程与工资</Link> 查看与核对。
-        </p>
+        <FlashToast
+          message={`已记入 ${savedCount} 段行程`}
+          param="saved"
+          actionLabel="查看工资"
+          actionHref={periodTripsHref}
+        />
       )}
       <FormError message={errorMessage} />
 

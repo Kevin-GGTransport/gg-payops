@@ -100,7 +100,7 @@ export async function saveLocation(formData: FormData) {
 
   revalidatePath("/dashboard/locations");
   revalidatePath("/dashboard");
-  redirect("/dashboard/locations");
+  redirect("/dashboard/locations?saved=1");
 }
 
 export async function setLocationStatus(formData: FormData) {
@@ -116,5 +116,5 @@ export async function setLocationStatus(formData: FormData) {
   `;
   revalidatePath("/dashboard/locations");
   revalidatePath("/dashboard");
-  redirect("/dashboard/locations");
+  redirect("/dashboard/locations?saved=status");
 }

@@ -5,6 +5,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 
 import { LocationTypeBadge, StatusPill } from "@/components/badges";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
+import { SubmitButton } from "@/components/submit-button";
 import { fullAddress } from "@/lib/format";
 import type { LocationRow } from "@/lib/queries/locations";
 import { setLocationStatus } from "./actions";
@@ -79,9 +80,9 @@ export function LocationsTable({
                 name="status"
                 value={location.status === "ACTIVE" ? "INACTIVE" : "ACTIVE"}
               />
-              <button type="submit" className="linklike">
+              <SubmitButton className="linklike" pendingLabel="处理中…">
                 {location.status === "ACTIVE" ? "停用" : "启用"}
-              </button>
+              </SubmitButton>
             </form>
           </>
         );

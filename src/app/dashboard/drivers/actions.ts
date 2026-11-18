@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
+import { withFlash } from "@/lib/search-params";
 
 const FIELDS = [
   "full_name",
@@ -83,7 +84,7 @@ export async function saveDriver(formData: FormData) {
 
   revalidatePath("/dashboard/drivers");
   revalidatePath("/dashboard");
-  redirect(returnTo ? `/dashboard/drivers?${returnTo}` : "/dashboard/drivers");
+  redirect(withFlash("/dashboard/drivers", returnTo, "saved"));
 }
 
 export async function setDriverStatus(formData: FormData) {
@@ -105,5 +106,5 @@ export async function setDriverStatus(formData: FormData) {
 
   revalidatePath("/dashboard/drivers");
   revalidatePath("/dashboard");
-  redirect(returnTo ? `/dashboard/drivers?${returnTo}` : "/dashboard/drivers");
+  redirect(withFlash("/dashboard/drivers", returnTo, "saved", "status"));
 }

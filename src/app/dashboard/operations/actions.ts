@@ -79,7 +79,7 @@ export async function saveOperation(formData: FormData) {
   }
 
   revalidateDictionary();
-  redirect("/dashboard/operations");
+  redirect("/dashboard/operations?saved=1");
 }
 
 export async function setOperationStatus(formData: FormData) {
@@ -102,7 +102,7 @@ export async function setOperationStatus(formData: FormData) {
     WHERE id = ${id}::bigint
   `;
   revalidateDictionary();
-  redirect("/dashboard/operations");
+  redirect("/dashboard/operations?saved=status");
 }
 
 export async function deleteOperation(formData: FormData) {
@@ -124,5 +124,5 @@ export async function deleteOperation(formData: FormData) {
     DELETE FROM ops.operation_types WHERE id = ${id}::bigint
   `;
   revalidateDictionary();
-  redirect("/dashboard/operations");
+  redirect("/dashboard/operations?saved=deleted");
 }

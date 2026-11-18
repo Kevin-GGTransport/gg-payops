@@ -135,7 +135,7 @@ export async function updateTrip(formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/trips");
   revalidatePath("/dashboard/payroll");
-  redirect(backTo);
+  redirect(`${backTo}${backTo.includes("?") ? "&" : "?"}saved=1`);
 }
 
 /**
@@ -165,7 +165,7 @@ export async function updateTripsBatch(formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/trips");
   revalidatePath("/dashboard/payroll");
-  redirect(backTo);
+  redirect(`${backTo}${backTo.includes("?") ? "&" : "?"}saved=1`);
 }
 
 export async function deleteTrip(formData: FormData) {

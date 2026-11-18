@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
+import { withFlash } from "@/lib/search-params";
 import { todayIso, isoPlusDays } from "@/lib/format";
 
 const FIELDS = [
@@ -147,7 +148,7 @@ export async function saveTruck(formData: FormData) {
 
   revalidatePath("/dashboard/trucks");
   revalidatePath("/dashboard");
-  redirect(returnTo ? `/dashboard/trucks?${returnTo}` : "/dashboard/trucks");
+  redirect(withFlash("/dashboard/trucks", returnTo, "saved"));
 }
 
 export async function setTruckStatus(formData: FormData) {
@@ -169,7 +170,7 @@ export async function setTruckStatus(formData: FormData) {
 
   revalidatePath("/dashboard/trucks");
   revalidatePath("/dashboard");
-  redirect(returnTo ? `/dashboard/trucks?${returnTo}` : "/dashboard/trucks");
+  redirect(withFlash("/dashboard/trucks", returnTo, "saved", "status"));
 }
 
 export async function addOdometerReading(formData: FormData) {
@@ -195,7 +196,7 @@ export async function addOdometerReading(formData: FormData) {
   `;
 
   revalidatePath("/dashboard/trucks");
-  redirect(backToModal());
+  redirect(`${backToModal()}&saved=odometer`);
 }
 
 export async function deleteOdometerReading(formData: FormData) {
@@ -213,5 +214,5 @@ export async function deleteOdometerReading(formData: FormData) {
   }
 
   revalidatePath("/dashboard/trucks");
-  redirect(`/dashboard/trucks?odo=${truckId}${returnTo ? `&${returnTo}` : ""}`);
+  redirect(`/dashboard/trucks?odo=${truckId}${returnTo ? `&${returnTo}` : ""}&saved=deleted`);
 }

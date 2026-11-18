@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { Toaster } from "@/components/ui/sonner";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -18,6 +19,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </header>
         <div className="main flex-1 min-h-0">{children}</div>
       </SidebarInset>
+      <Toaster />
     </SidebarProvider>
   );
 }

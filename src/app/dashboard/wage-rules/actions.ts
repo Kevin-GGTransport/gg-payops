@@ -243,7 +243,7 @@ export async function createVersion(formData: FormData) {
 
   revalidatePath("/dashboard/wage-rules");
   revalidatePath("/dashboard");
-  redirect(`/dashboard/wage-rules?v=${newId}`);
+  redirect(`/dashboard/wage-rules?v=${newId}&saved=1`);
 }
 
 /**
@@ -267,7 +267,7 @@ export async function activateVersion(formData: FormData) {
   revalidatePath("/dashboard/wage-rules");
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/trips");
-  redirect(`/dashboard/wage-rules?v=${id}&activated=1`);
+  redirect(`/dashboard/wage-rules?v=${id}&saved=activated`);
 }
 
 /** INACTIVE versions only; the ACTIVE version cannot be deleted */
@@ -287,5 +287,5 @@ export async function deleteVersion(formData: FormData) {
 
   revalidatePath("/dashboard/wage-rules");
   revalidatePath("/dashboard");
-  redirect("/dashboard/wage-rules");
+  redirect("/dashboard/wage-rules?saved=deleted");
 }

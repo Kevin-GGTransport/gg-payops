@@ -3,10 +3,13 @@
 import * as React from "react";
 import Link from "next/link";
 import { type ColumnDef } from "@tanstack/react-table";
+import { toast } from "sonner";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { DriverTypeBadge, StatementStatusBadge } from "@/components/badges";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { miles as fmtMiles, money } from "@/lib/format";
+import { isRedirectError } from "@/lib/action-result";
 import type { StatementRow } from "@/lib/queries/statements";
 import { verifyStatement } from "./actions";
 import {
@@ -29,25 +32,31 @@ function shortPeriod(start: string, end: string) {
  * table cell works too, but this keeps the cell markup flat.
  */
 function VerifyStatementButton({ statementId }: { statementId: string }) {
-  const [pending, setPending] = React.useState(false);
   return (
-    <button
-      type="button"
-      className="linklike"
-      disabled={pending}
-      onClick={() => {
-        if (!window.confirm("标记核对后金额冻结、不可退回（再改行程只会标红），确定核对？")) return;
-        setPending(true);
+    <ConfirmAction
+      title="标记核对？"
+      description="标记核对后金额冻结、不可退回（再改行程只会标红）。"
+      confirmLabel="核对"
+      pendingLabel="核对中…"
+      trigger={props => (
+        <button {...props} className="linklike">
+          核对
+        </button>
+      )}
+      onConfirm={async () => {
         const fd = new FormData();
         fd.set("id", statementId);
         fd.set("return_to", window.location.pathname + window.location.search);
-        // verifyStatement redirects back to this list; the redirect itself is
-        // the error surface, so a rejected promise just stops the spinner
-        verifyStatement(fd).finally(() => setPending(false));
+        try {
+          await verifyStatement(fd);
+          toast.success("已核对，金额已冻结");
+        } catch (error) {
+          // The action's redirect rejects with NEXT_REDIRECT on success
+          if (isRedirectError(error)) toast.success("已核对，金额已冻结");
+          else toast.error("核对失败，请重试");
+        }
       }}
-    >
-      {pending ? "核对中…" : "核对"}
-    </button>
+    />
   );
 }
 

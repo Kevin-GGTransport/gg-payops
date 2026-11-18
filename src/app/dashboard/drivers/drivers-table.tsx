@@ -5,6 +5,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 
 import { DriverTypeBadge, StatusPill } from "@/components/badges";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
+import { SubmitButton } from "@/components/submit-button";
 import { daysUntil } from "@/lib/format";
 import type { DriverRow } from "@/lib/queries/drivers";
 import { setDriverStatus } from "./actions";
@@ -105,9 +106,9 @@ export function DriversTable({
                 value={driver.status === "ACTIVE" ? "INACTIVE" : "ACTIVE"}
               />
               <input type="hidden" name="return_to" value={returnTo} />
-              <button type="submit" className="linklike">
+              <SubmitButton className="linklike" pendingLabel="处理中…">
                 {driver.status === "ACTIVE" ? "停用" : "启用"}
-              </button>
+              </SubmitButton>
             </form>
           </>
         );

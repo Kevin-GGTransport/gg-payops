@@ -73,7 +73,8 @@ export function WageRulesTable({
               <input type="hidden" name="id" value={row.original.id} />
               <ConfirmButton
                 className="button button-quiet h-7! px-2! text-xs"
-                message="确定将该版本设为生效？当前生效版本会立即停用，新录入的行程按新版本计价。"
+                title="将该版本设为生效？"
+                message="当前生效版本会立即停用，新录入的行程按新版本计价。"
               >
                 设为生效
               </ConfirmButton>

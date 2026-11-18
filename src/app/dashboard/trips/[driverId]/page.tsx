@@ -3,7 +3,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
+import { FlashToast } from "@/components/flash-toast";
 import { LedgerPanel } from "@/components/ledger";
+import { SubmitButton } from "@/components/submit-button";
 import { DriverTypeBadge, StatementStatusBadge } from "@/components/badges";
 import { PeriodPicker } from "@/components/period-picker";
 import { requireUser } from "@/lib/auth";
@@ -84,6 +86,8 @@ export default async function DriverPeriodPage({
   if (!driver) notFound();
 
   const sp = await searchParams;
+  // Trip edits saved (inline batch or dialog) redirect back here
+  const saved = firstValue(sp.saved) === "1";
   // Same landing default as the payroll list: the week that just closed
   const period = dateParam(firstValue(sp.period)) ? periodOf(dateParam(firstValue(sp.period))!) : defaultPeriod();
   const defaultWeek = defaultPeriod();
@@ -134,6 +138,7 @@ export default async function DriverPeriodPage({
 
   return (
     <>
+      {saved && <FlashToast message="修改已保存" param="saved" />}
       <PageHeader
         title={
           <>
@@ -174,9 +179,9 @@ export default async function DriverPeriodPage({
                 <form action={verifyStatement}>
                   <input type="hidden" name="id" value={statement.id} />
                   <input type="hidden" name="return_to" value={returnTo} />
-                  <button type="submit" className="button button-dark">
+                  <SubmitButton className="button button-dark" pendingLabel="核对中…">
                     标记核对
-                  </button>
+                  </SubmitButton>
                 </form>
               </>
             )}

@@ -2,13 +2,17 @@
 
 import * as React from "react";
 import { type ColumnDef } from "@tanstack/react-table";
+import { toast } from "sonner";
 
 import { ComboboxField } from "@/components/combobox-field";
+import { ConfirmAction } from "@/components/confirm-action";
+import { SubmitButton } from "@/components/submit-button";
 import { DateField } from "@/components/date-field";
 import { Input } from "@/components/ui/input";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { fuel as fmtFuel, miles as fmtMiles, money } from "@/lib/format";
+import { isRedirectError } from "@/lib/action-result";
 import { calcFuelSubsidy, calcTripWage, type WageRuleData } from "@/lib/wage";
 import type { OperationType } from "@/lib/labels";
 import type { OperationOption } from "../trip-entry-form";
@@ -395,25 +399,32 @@ const EditableLegRow = React.memo(function EditableLegRow({
 /** Per-leg delete: calls the server action directly - a nested <form> inside
  *  the save form would be invalid HTML */
 function DeleteLegButton({ legId, returnTo }: { legId: string; returnTo: string }) {
-  const [pending, setPending] = React.useState(false);
   return (
-    <button
-      type="button"
-      className="linklike danger"
-      disabled={pending}
-      onClick={() => {
-        if (!window.confirm("删除这条行程？")) return;
-        setPending(true);
+    <ConfirmAction
+      danger
+      title="删除这条行程？"
+      description="删除后该行程将从台账与工资单中移除，不可恢复。"
+      confirmLabel="删除"
+      pendingLabel="删除中…"
+      trigger={props => (
+        <button {...props} className="linklike danger">
+          删除
+        </button>
+      )}
+      onConfirm={async () => {
         const fd = new FormData();
         fd.set("id", legId);
         fd.set("return_to", returnTo);
-        // deleteTrip redirects back to this sheet; the redirect itself is the
-        // error surface, so a rejected promise just stops the spinner
-        deleteTrip(fd).finally(() => setPending(false));
+        try {
+          await deleteTrip(fd);
+          toast.success("行程已删除");
+        } catch (error) {
+          // The action's redirect rejects with NEXT_REDIRECT on success
+          if (isRedirectError(error)) toast.success("行程已删除");
+          else toast.error("删除失败，请重试");
+        }
       }}
-    >
-      {pending ? "删除中…" : "删除"}
-    </button>
+    />
   );
 }
 
@@ -573,9 +584,9 @@ export function PayrollLegsTable({
               放弃修改
             </button>
           )}
-          <button type="submit" className="button button-dark" disabled={dirtyCount === 0}>
+          <SubmitButton className="button button-dark" disabled={dirtyCount === 0} pendingLabel="保存中…">
             保存修改{dirtyCount > 0 ? `（${dirtyCount} 段）` : ""}
-          </button>
+          </SubmitButton>
         </div>
       </div>
     </form>

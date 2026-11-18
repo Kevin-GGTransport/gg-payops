@@ -5,6 +5,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 
 import { StatusPill } from "@/components/badges";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
+import { SubmitButton } from "@/components/submit-button";
 import { odometerMi } from "@/lib/format";
 import type { TruckRow } from "@/lib/queries/trucks";
 import { setTruckStatus } from "./actions";
@@ -99,9 +100,9 @@ export function TrucksTable({
                 value={truck.status === "ACTIVE" ? "INACTIVE" : "ACTIVE"}
               />
               <input type="hidden" name="return_to" value={returnTo} />
-              <button type="submit" className="linklike">
+              <SubmitButton className="linklike" pendingLabel="处理中…">
                 {truck.status === "ACTIVE" ? "停用" : "启用"}
-              </button>
+              </SubmitButton>
             </form>
           </>
         );

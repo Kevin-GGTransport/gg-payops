@@ -4,6 +4,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel } from "@/components/ledger";
 import { FormGrid, TextField, SubmitButton, FormError } from "@/components/form-fields";
+import { FlashToast } from "@/components/flash-toast";
 import { ComboboxField } from "@/components/combobox-field";
 import { MapPicker } from "@/components/map-picker";
 import { requireUser } from "@/lib/auth";
@@ -42,6 +43,13 @@ export default async function LocationsPage({
   const editId = (firstValue(sp.edit) ?? "").trim();
   const errorCode = firstValue(sp.error);
   const isNew = firstValue(sp.new) === "1";
+  const savedFlash = firstValue(sp.saved);
+  const savedMessage =
+    savedFlash === "1"
+      ? "位置已保存"
+      : savedFlash === "status"
+        ? "状态已更新"
+        : undefined;
 
   const [locations, counts, editing, tagSuggestions] = await Promise.all([
     listLocations({ type: typeFilter, q }),
@@ -74,6 +82,7 @@ export default async function LocationsPage({
         description="行程起终点与基准金额的基础数据，按类型区分基地、亚马逊仓、其他。"
         actions={<Link className="button button-quiet" href="/dashboard/locations?new=1">新增位置</Link>}
       />
+      {savedMessage && <FlashToast message={savedMessage} param="saved" />}
 
       <section aria-label="位置名单">
         <div className="toolbar">

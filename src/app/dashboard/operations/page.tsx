@@ -11,6 +11,7 @@ import {
   SubmitButton,
   TextField
 } from "@/components/form-fields";
+import { FlashToast } from "@/components/flash-toast";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
 import { getOperationTypeById, listOperationTypes } from "@/lib/queries/operations";
@@ -41,6 +42,15 @@ export default async function OperationsPage({
   const editId = (firstValue(sp.edit) ?? "").trim();
   const errorCode = firstValue(sp.error);
   const isNew = firstValue(sp.new) === "1";
+  const savedFlash = firstValue(sp.saved);
+  const savedMessage =
+    savedFlash === "1"
+      ? "操作类型已保存"
+      : savedFlash === "status"
+        ? "状态已更新"
+        : savedFlash === "deleted"
+          ? "操作类型已删除"
+          : undefined;
 
   const [operations, editing] = await Promise.all([
     listOperationTypes(),
@@ -61,6 +71,7 @@ export default async function OperationsPage({
         description="行程操作的可管理字典：录入下拉、行程筛选与徽章都读这里；带柜操作可勾选必填 Load#。"
         actions={<Link className="button button-quiet" href="/dashboard/operations?new=1">新增操作</Link>}
       />
+      {savedMessage && <FlashToast message={savedMessage} param="saved" />}
 
       <section aria-label="操作类型名单">
         <LedgerPanel>

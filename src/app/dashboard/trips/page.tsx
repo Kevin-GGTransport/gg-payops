@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
+import { FlashToast } from "@/components/flash-toast";
 import { LedgerPanel } from "@/components/ledger";
 import { ComboboxField } from "@/components/combobox-field";
 import { AutoSubmitDateField } from "@/components/auto-submit";
@@ -69,6 +70,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
   const dateFrom = dateParam(firstValue(sp.from));
   const dateTo = dateParam(firstValue(sp.to));
   const page = intFromParam(firstValue(sp.page));
+  const saved = firstValue(sp.saved) === "1";
 
   // Sanitize driver ids from the URL (bigint identities are digits only);
   // doing this locally lets all three queries start in parallel
@@ -137,6 +139,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
           </div>
         }
       />
+      {saved && <FlashToast message="行程已保存" param="saved" />}
 
       <CleanForm className="trip-filter" action="/dashboard/trips" method="get">
         <div className="toolbar">

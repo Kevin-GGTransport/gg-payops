@@ -1,9 +1,11 @@
 "use client";
 
 import * as React from "react";
+import { toast } from "sonner";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ComboboxField } from "@/components/combobox-field";
+import { isRedirectError } from "@/lib/action-result";
 import { DRIVER_TYPE_LABELS, type DriverType } from "@/lib/labels";
 import { copyStatement, type CopyErrorCode } from "./actions";
 
@@ -172,9 +174,16 @@ function CopyForm({
     fd.set("target_truck_id", truckId);
     copyStatement(fd)
       .then(res => {
+        // res === undefined means the action resolved without redirect (should
+        // not happen - success redirects); a failed validation returns a code
         if (res && !res.ok) setError(COPY_ERROR_MESSAGES[res.code]);
       })
-      .catch(() => setError("操作失败，请重试。"))
+      .catch(error => {
+        // Success redirects to the target sheet, which rejects with
+        // NEXT_REDIRECT - that's the success path, not an error
+        if (isRedirectError(error)) toast.success("复制成功，正在打开目标工资单");
+        else setError("操作失败，请重试。");
+      })
       .finally(() => setPending(false));
   }
 

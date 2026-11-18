@@ -6,6 +6,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 import { StatusPill } from "@/components/badges";
 import { ConfirmButton } from "@/components/confirm-button";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
+import { SubmitButton } from "@/components/submit-button";
 import type { OperationTypeRow } from "@/lib/queries/operations";
 import { deleteOperation, setOperationStatus } from "./actions";
 
@@ -83,15 +84,21 @@ export function OperationsTable({
                   name="status"
                   value={op.status === "ACTIVE" ? "INACTIVE" : "ACTIVE"}
                 />
-                <button type="submit" className="linklike">
+                <SubmitButton className="linklike" pendingLabel="处理中…">
                   {op.status === "ACTIVE" ? "停用" : "启用"}
-                </button>
+                </SubmitButton>
               </form>
             )}
             {!op.is_system && (
               <form action={deleteOperation}>
                 <input type="hidden" name="id" value={op.id} />
-                <ConfirmButton type="submit" className="linklike" message={`确定删除操作类型 ${op.code}（${op.label}）吗？`}>
+                <ConfirmButton
+                  type="submit"
+                  className="linklike"
+                  title={`删除操作类型 ${op.code}（${op.label}）？`}
+                  message="删除后不可恢复。"
+                  danger
+                >
                   删除
                 </ConfirmButton>
               </form>

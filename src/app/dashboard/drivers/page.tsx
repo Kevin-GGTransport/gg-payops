@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { LedgerPanel } from "@/components/ledger";
 import { DriverTypeCards } from "@/components/choice-cards";
 import { FormGrid, TextField, DateField, TextareaField, CheckboxField, SubmitButton, FormError } from "@/components/form-fields";
+import { FlashToast } from "@/components/flash-toast";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
 import type { DriverType } from "@/lib/labels";
@@ -33,6 +34,13 @@ export default async function DriversPage({
   const editId = (firstValue(sp.edit) ?? "").trim();
   const errorCode = firstValue(sp.error);
   const isNew = firstValue(sp.new) === "1";
+  const savedFlash = firstValue(sp.saved);
+  const savedMessage =
+    savedFlash === "1"
+      ? "司机已保存"
+      : savedFlash === "status"
+        ? "状态已更新"
+        : undefined;
 
   const filterQuery = new URLSearchParams();
   if (typeFilter !== "all") filterQuery.set("type", typeFilter);
@@ -80,6 +88,7 @@ export default async function DriversPage({
           </Link>
         }
       />
+      {savedMessage && <FlashToast message={savedMessage} param="saved" />}
 
       <section aria-label="司机名单">
         <div className="toolbar">
