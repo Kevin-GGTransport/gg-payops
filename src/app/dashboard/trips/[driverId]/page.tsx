@@ -22,6 +22,7 @@ import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeTruckOptions } from "@/lib/queries/trucks";
 import { verifyStatement } from "../../payroll/actions";
 import { CopyStatementButton } from "../../payroll/copy-statement-dialog";
+import { ChangeTruckButton } from "../../payroll/change-truck-dialog";
 import { PayrollLegsTable } from "../payroll-legs-table";
 
 export const metadata: Metadata = { title: "周期工资单 · G&G PayOps" };
@@ -168,6 +169,14 @@ export default async function DriverPeriodPage({
         }
         actions={
           <div className="flex items-center gap-2">
+            {statement && legs.length > 0 && (
+              <ChangeTruckButton
+                statement={statement}
+                trucks={truckOptions}
+                returnTo={returnTo}
+                triggerClassName="button button-quiet"
+              />
+            )}
             {statement && statement.status === "DRAFT" && legs.length > 0 && (
               <>
                 <CopyStatementButton
@@ -220,7 +229,9 @@ export default async function DriverPeriodPage({
             <span className={nameTone}>{driver.full_name}</span>{" "}
             <DriverTypeBadge type={driver.driver_type} />
           </span>
-          <span className="gauge-range">{periodLabel(period)} · 周六 ~ 周五</span>
+          <span className="gauge-range">
+            {periodLabel(period)} · 周六 ~ 周五{statement?.trucks ? ` · 车号 ${statement.trucks}` : ""}
+          </span>
         </header>
         <div className="gauge-ticks" aria-hidden="true" />
         <div className="gauge-grid">

@@ -215,3 +215,115 @@ export async function copyStatement(
   revalidateStatementViews();
   redirect(`/dashboard/trips/${targetDriverId}?period=${result.periodStart}`);
 }
+
+/** Why a truck change was refused; the dialog maps these to Chinese messages */
+export type ChangeTruckErrorCode =
+  | "bad_request"
+  | "statement_missing"
+  | "truck_missing"
+  | "no_trips";
+
+/**
+ * Re-stamp one statement's whole period onto a different truck: every leg's
+ * truck_snapshot is replaced with the picked truck's full record (entry-time
+ * pattern); dates, amounts and package structures stay exactly as stored.
+ * Unlike the copy this is allowed on VERIFIED sheets too - a wrong truck is a
+ * bookkeeping fix, not a pay change - so syncStatements only raises the
+ * permanent red flag there, and the frozen sheets' trucks annotation is
+ * refreshed separately below (money stays frozen) so the list column and the
+ * export banner show the truck that actually hauled.
+ *
+ * The statement row is locked FOR UPDATE first, the same serialization point
+ * the copy uses, so a verify or copy racing this rewrite lands strictly
+ * before or after it - never interleaved.
+ */
+export async function changeStatementTruck(
+  formData: FormData
+): Promise<{ ok: false; code: ChangeTruckErrorCode } | undefined> {
+  await requireUser();
+
+  const id = str(formData, "id");
+  const targetTruckId = str(formData, "target_truck_id");
+  const returnTo = str(formData, "return_to");
+  if (!id || !targetTruckId) return { ok: false, code: "bad_request" };
+
+  type Guard = { code: ChangeTruckErrorCode };
+  type Done = { driverId: string; periodStart: string; periodEnd: string };
+
+  const result: Guard | Done = await prisma.$transaction(async tx => {
+    const rows = await tx.$queryRaw<
+      Array<{ driver_id: string; period_start: string; period_end: string }>
+    >`
+      SELECT driver_id::text,
+             to_char(period_start, 'YYYY-MM-DD') AS period_start,
+             to_char(period_end, 'YYYY-MM-DD') AS period_end
+      FROM pay.payroll_statements
+      WHERE id = ${id}::bigint
+      FOR UPDATE
+    `;
+    const statement = rows[0];
+    if (!statement) return { code: "statement_missing" as const };
+
+    // Truck snapshot: the picked truck's full record, frozen (entry-time
+    // pattern); an unknown or deactivated truck refuses the change
+    const trucks = await tx.$queryRaw<
+      Array<{
+        truck_code: string;
+        plate_no: string | null;
+        truck_type: string | null;
+        capacity_note: string | null;
+      }>
+    >`
+      SELECT truck_code, plate_no, truck_type, capacity_note
+      FROM ops.trucks
+      WHERE id = ${targetTruckId}::bigint AND status = 'ACTIVE'
+      LIMIT 1
+    `;
+    const truck = trucks[0];
+    if (!truck) return { code: "truck_missing" as const };
+    const truckSnapshot = JSON.stringify({
+      truck_id: targetTruckId,
+      truck_code: truck.truck_code,
+      plate_no: truck.plate_no,
+      truck_type: truck.truck_type,
+      capacity_note: truck.capacity_note
+    });
+
+    const updated = await tx.$executeRaw`
+      UPDATE pay.trips
+      SET truck_snapshot = ${truckSnapshot}::jsonb, updated_at = now()
+      WHERE driver_id = ${statement.driver_id}::bigint
+        AND trip_date >= ${statement.period_start}::date
+        AND trip_date <= ${statement.period_end}::date
+    `;
+    if (updated === 0) return { code: "no_trips" as const };
+    return {
+      driverId: statement.driver_id,
+      periodStart: statement.period_start,
+      periodEnd: statement.period_end
+    };
+  });
+
+  if ("code" in result) return { ok: false, code: result.code };
+
+  // Drafts recompute in place (trucks included); VERIFIED only gets the red
+  // flag - which is why its frozen trucks annotation needs the extra refresh
+  await syncStatements([{ driverId: result.driverId, periodStart: result.periodStart }]);
+  await prisma.$executeRaw`
+    UPDATE pay.payroll_statements s
+    SET trucks = COALESCE(agg.trucks, ''), updated_at = now()
+    FROM (
+      SELECT string_agg(DISTINCT t.truck_snapshot->>'truck_code', ', ' ORDER BY t.truck_snapshot->>'truck_code') AS trucks
+      FROM pay.trips t
+      WHERE t.driver_id = ${result.driverId}::bigint
+        AND t.trip_date >= ${result.periodStart}::date
+        AND t.trip_date <= ${result.periodEnd}::date
+    ) agg
+    WHERE s.driver_id = ${result.driverId}::bigint
+      AND s.period_start = ${result.periodStart}::date
+      AND s.status = 'VERIFIED'
+  `;
+
+  revalidateStatementViews();
+  redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}saved=1`);
+}
