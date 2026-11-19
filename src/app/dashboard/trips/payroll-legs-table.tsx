@@ -41,8 +41,16 @@ export type TripEditDictionaries = {
   wageRule: WageRuleData | null;
 };
 
-/** Compact bordered input for table cells: standard shadcn Input at h-8 */
-const cellInput = "h-8 px-2 text-[13px]";
+/** Sheet-cell field style: h-8 sizing plus the ledger field look — black rule
+ *  on white for typed cells (overrides the site-wide gray fill via twMerge).
+ *  Focus keeps the black rule (the blue flip reads as a jolt; caret suffices) */
+const cellInput = "h-8 px-2 border-foreground bg-card text-[13px] focus-visible:border-foreground";
+/** Picker-trigger companion: same black rule, pale route fill marks
+ *  choose-from-list cells; hover and open deepen the tint one step */
+const cellPick = "border-foreground bg-route/10 hover:bg-route/20 data-[state=open]:bg-route/20";
+/** DateField group variant of the typed-cell look */
+const cellDate =
+  "border-foreground bg-card has-[[data-slot=input-group-control]:focus-visible]:border-foreground";
 const cellHint = "block text-[10px] leading-tight font-normal text-muted-foreground";
 
 /** Stable column set (module scope: a fresh array per render churns TanStack's sizing sync) */
@@ -266,6 +274,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           }}
           aria-label={`${legLabel}日期`}
           size="sm"
+          groupClassName={cellDate}
         />
       </td>
       <td className="px-1.5">
@@ -276,7 +285,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           value={fromValue}
           placeholder="起点"
           aria-label={`${legLabel}起点`}
-          triggerClassName="h-8 px-2"
+          triggerClassName={`h-8 px-2 ${cellPick}`}
           onValueChange={value => {
             setFromValue(value);
             onDirty(leg.id);
@@ -291,7 +300,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           value={toValue}
           placeholder="终点"
           aria-label={`${legLabel}终点`}
-          triggerClassName="h-8 px-2"
+          triggerClassName={`h-8 px-2 ${cellPick}`}
           onValueChange={value => {
             setToValue(value);
             onDirty(leg.id);
@@ -305,7 +314,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           clearable={false}
           searchable={false}
           aria-label={`${legLabel}操作`}
-          triggerClassName="h-8 px-2"
+          triggerClassName={`h-8 px-2 ${cellPick}`}
           onValueChange={value => {
             setOperation(value);
             if (!operationRequiresLoad(value)) setLoadNoValue("");

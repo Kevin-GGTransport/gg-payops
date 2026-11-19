@@ -32,8 +32,14 @@ const EMPTY_ROW: FuelEditRow = {
 
 const INITIAL_ROWS = 2;
 
-/** Compact bordered input for table cells, same sizing as the legs sheet */
-const cellInput = "h-8 px-2 text-[13px]";
+/** Sheet-cell field style: h-8 sizing plus the ledger field look — black rule
+ *  on white for typed cells (same constants as the legs sheet above); focus
+ *  keeps the black rule, no blue flip */
+const cellInput =
+  "h-8 px-2 border-foreground bg-card text-[13px] focus-visible:border-foreground";
+/** Picker-trigger companion: same black rule, pale route fill marks the
+ *  state dropdown against the white typed fields */
+const cellPick = "border-foreground bg-route/10 hover:bg-route/20 data-[state=open]:bg-route/20";
 
 function toSlots(rows: FuelEditRow[] | undefined, defaultTruckCode: string): FuelSlot[] {
   const source = rows && rows.length > 0 ? rows : [];
@@ -137,7 +143,7 @@ export function FuelEditor({
             const label = `加油第 ${i + 1} 行`;
             return (
               <tr key={slot.id}>
-                <td className="ctr px-1.5 font-mono text-[12px] tabular-nums text-muted-foreground">
+                <td className="ctr px-1.5 font-mono text-[12px] tabular-nums text-foreground">
                   {i + 1}
                 </td>
                 <td className="px-1.5">
@@ -149,7 +155,7 @@ export function FuelEditor({
                     searchPlaceholder="搜索缩写 / 州名"
                     mono
                     triggerLabelOnly
-                    triggerClassName="h-8 w-full px-2"
+                    triggerClassName={`h-8 w-full px-2 ${cellPick}`}
                     aria-label={`${label}州`}
                     onValueChange={next => patch(slot.id, { state: next })}
                     options={states.map(s => ({ value: s.code, label: s.code, description: s.name }))}

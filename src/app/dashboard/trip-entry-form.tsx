@@ -135,8 +135,20 @@ const DOCK_TO_BASE_OPERATION = "CNTRPU";
  *  empty container goes back to the terminal */
 const BASE_TO_DOCK_OPERATION = "CNTRDEL";
 
-/** Compact bordered input for table cells: standard shadcn Input at h-8 */
-const cellInput = "h-8 px-2 text-[13px]";
+/** Sheet-cell field style: h-8 sizing plus the ledger field look — black rule
+ *  on white for typed cells (overrides the site-wide gray fill via twMerge).
+ *  Focus keeps the black rule: the blue border flip reads as a jolt next to
+ *  the strong border, the caret already marks the field */
+const cellInput = "h-8 px-2 border-foreground bg-card text-[13px] focus-visible:border-foreground";
+/** Picker-trigger companion: same black rule, pale route fill marks
+ *  choose-from-list cells (operation / endpoints / state) against the white
+ *  typed fields; hover and open deepen the tint one step */
+const cellPick = "border-foreground bg-route/10 hover:bg-route/20 data-[state=open]:bg-route/20";
+/** DateField group variant of the typed-cell look (the input group draws the
+ *  border, the inner input stays transparent); focus pins the black rule the
+ *  same way cellInput does */
+const cellDate =
+  "border-foreground bg-card has-[[data-slot=input-group-control]:focus-visible]:border-foreground";
 const cellHint = "block text-[10px] leading-tight font-normal text-muted-foreground";
 
 /**
@@ -602,7 +614,7 @@ const EntryRow = React.memo(function EntryRow({
           <GripVerticalIcon className="size-3.5" />
         </span>
       </td>
-      <td className="ctr px-1.5 font-mono text-[12px] tabular-nums text-muted-foreground">
+      <td className="ctr px-1.5 font-mono text-[12px] tabular-nums text-foreground">
         {rowIndex + 1}
       </td>
       <td className="px-1.5">
@@ -615,6 +627,7 @@ const EntryRow = React.memo(function EntryRow({
           }}
           aria-label={`${legLabel}日期`}
           size="sm"
+          groupClassName={cellDate}
         />
       </td>
       <td className="px-1.5">
@@ -625,7 +638,7 @@ const EntryRow = React.memo(function EntryRow({
           value={fromValue}
           placeholder="起点"
           aria-label={`${legLabel}起点`}
-          triggerClassName="h-8 px-2"
+          triggerClassName={`h-8 px-2 ${cellPick}`}
           onValueChange={value => {
             onFromChange(rowId, value);
             onDirty();
@@ -640,7 +653,7 @@ const EntryRow = React.memo(function EntryRow({
           defaultValue={defaults?.to || ""}
           placeholder="终点"
           aria-label={`${legLabel}终点`}
-          triggerClassName="h-8 px-2"
+          triggerClassName={`h-8 px-2 ${cellPick}`}
           onValueChange={value => {
             setToValue(value);
             onToChange(rowId, value);
@@ -655,7 +668,7 @@ const EntryRow = React.memo(function EntryRow({
           clearable={false}
           searchable={false}
           aria-label={`${legLabel}操作`}
-          triggerClassName="h-8 px-2"
+          triggerClassName={`h-8 px-2 ${cellPick}`}
           onValueChange={value => {
             operationTouched.current = true;
             setOperation(value);
@@ -806,7 +819,7 @@ const FuelRow = React.memo(function FuelRow({
   const label = `第 ${groupIndex + 1} 组加油第 ${rowIndex + 1} 行`;
   return (
     <tr>
-      <td className="ctr px-1.5 font-mono text-[12px] tabular-nums text-muted-foreground">
+      <td className="ctr px-1.5 font-mono text-[12px] tabular-nums text-foreground">
         {rowIndex + 1}
       </td>
       <td className="px-1.5">
@@ -817,7 +830,7 @@ const FuelRow = React.memo(function FuelRow({
           searchPlaceholder="搜索缩写 / 州名"
           mono
           triggerLabelOnly
-          triggerClassName="h-8 w-full px-2"
+          triggerClassName={`h-8 w-full px-2 ${cellPick}`}
           aria-label={`${label}州`}
           onValueChange={next => {
             onChange(rowId, { state: next });
@@ -1504,7 +1517,7 @@ const GroupSection = React.memo(function GroupSection({
                       onDirty();
                     }}
                     aria-label={`${plan.date} 打包金额`}
-                    className="h-8 w-28 text-right font-mono text-[13px]"
+                    className="h-8 w-28 border-foreground bg-card text-right font-mono text-[13px]"
                   />
                   {amount === "" && (
                     <span className="text-[11px] font-medium text-destructive">未填金额，提交按 $0</span>

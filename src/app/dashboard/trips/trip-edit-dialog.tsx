@@ -3,31 +3,43 @@
 import * as React from "react";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { FormGrid, SubmitButton, TextareaField } from "@/components/form-fields";
+import { FormGrid, SubmitButton } from "@/components/form-fields";
 import { ComboboxField } from "@/components/combobox-field";
 import { DateField } from "@/components/date-field";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { calcFuelSubsidy, calcTripWage, type WageRuleData } from "@/lib/wage";
 import type { DriverType, OperationType } from "@/lib/labels";
 import type { OperationOption } from "../trip-entry-form";
 import type { TripEditRow } from "@/lib/queries/trips";
 import { updateTrip } from "./actions";
 
+/** Dialog-scale ledger field look, same language as the sheets: black rule on
+ *  white for typed cells (focus keeps the black rule — no blue flip; the
+ *  has-[] pin covers this string doubling as the DateField group class),
+ *  pale route fill for picker triggers */
+const fieldInput =
+  "border-foreground bg-card focus-visible:border-foreground has-[[data-slot=input-group-control]:focus-visible]:border-foreground";
+const fieldPick = "border-foreground bg-route/10 hover:bg-route/20 data-[state=open]:bg-route/20";
+
 /** Label + control + optional hint, the dialog counterpart of a sheet column */
 function DialogField({
   label,
   hint,
   hintDanger = false,
+  className,
   children
 }: {
   label: string;
   hint?: string;
   hintDanger?: boolean;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+    <div className={cn("grid gap-1.5 text-xs font-medium text-muted-foreground", className)}>
       <span>{label}</span>
       {children}
       {hint && (
@@ -240,6 +252,7 @@ function EditForm({
             value={dateValue}
             onValueChange={setDateValue}
             aria-label="行程日期"
+            groupClassName={fieldInput}
           />
         </DialogField>
         <DialogField label="起点">
@@ -250,6 +263,7 @@ function EditForm({
             value={fromValue}
             placeholder="起点"
             aria-label="行程起点"
+            triggerClassName={fieldPick}
             onValueChange={setFromValue}
           />
         </DialogField>
@@ -261,6 +275,7 @@ function EditForm({
             value={toValue}
             placeholder="终点"
             aria-label="行程终点"
+            triggerClassName={fieldPick}
             onValueChange={setToValue}
           />
         </DialogField>
@@ -271,6 +286,7 @@ function EditForm({
             clearable={false}
             searchable={false}
             aria-label="行程操作"
+            triggerClassName={fieldPick}
             onValueChange={value => {
               setOperation(value);
               if (!operationRequiresLoad(value)) setLoadNoValue("");
@@ -288,7 +304,7 @@ function EditForm({
             maxLength={64}
             placeholder={operationRequiresLoad(operation) ? "如 LD101" : "该操作免填"}
             aria-label="行程 Load#"
-            className="font-mono font-semibold"
+            className={`${fieldInput} font-mono font-semibold`}
           />
         </DialogField>
         <DialogField label="里程 (mi)" hint={milesHint} hintDanger={phase === "failed"}>
@@ -303,7 +319,7 @@ function EditForm({
               setManual(true);
             }}
             aria-label="行程里程"
-            className="text-right font-mono"
+            className={`${fieldInput} text-right font-mono`}
           />
         </DialogField>
         <DialogField label="加油 (gal)">
@@ -316,7 +332,7 @@ function EditForm({
             onChange={e => setFuelValue(e.target.value)}
             placeholder="—"
             aria-label="行程加油量"
-            className="text-right font-mono"
+            className={`${fieldInput} text-right font-mono`}
           />
         </DialogField>
         {showSubsidy && (
@@ -353,7 +369,7 @@ function EditForm({
               value={payValue}
               onChange={e => setManualPay(e.target.value)}
               aria-label="行程本趟工资"
-              className="text-right font-mono"
+              className={`${fieldInput} text-right font-mono`}
             />
             {manualPay !== null && (
               <span className="text-[10px] leading-tight font-normal text-muted-foreground">
@@ -365,12 +381,15 @@ function EditForm({
             )}
           </>
         </DialogField>
-        <TextareaField
-          label="备注"
-          name="notes"
-          defaultValue={trip.notes ?? ""}
-          className="col-span-2 max-md:col-span-1"
-        />
+        <DialogField label="备注" className="col-span-2 max-md:col-span-1">
+          <Textarea
+            name="notes"
+            defaultValue={trip.notes ?? ""}
+            rows={2}
+            aria-label="行程备注"
+            className={fieldInput}
+          />
+        </DialogField>
       </FormGrid>
       <SubmitButton>保存修改</SubmitButton>
     </form>

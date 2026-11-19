@@ -154,8 +154,10 @@ export function DateField({
             disabled={disabled}
             inputMode="numeric"
             // sm = table cells: px-2 matches the row's other inputs so every
-          // cell's text starts at the same inset (borders + 8px)
-          className={cn("font-mono tabular-nums", size === "sm" && "h-8 px-2 text-[13px]")}
+          // cell's text starts at the same inset (borders + 8px). Height comes
+          // from the group (h-8) - a fixed h-8 here would overflow the group's
+          // content box and paint over its top/bottom borders when focused
+          className={cn("font-mono tabular-nums", size === "sm" && "px-2 text-[13px]")}
             onChange={e => {
               setText(e.target.value);
               const parsed = parseDateText(e.target.value);

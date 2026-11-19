@@ -129,7 +129,13 @@ function InputGroupInput({ className, ...props }: React.ComponentProps<"input">)
     <Input
       data-slot="input-group-control"
       className={cn(
-        "flex-1 rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent",
+        // h-auto + self-stretch (dropping the base h-9): a fixed 36px input
+        // overflows the group's 34px content box by 1px top and bottom, and
+        // its focused white bg then paints over the group's borders. The bg
+        // stays transparent in every state for the same reason: a square
+        // child bg would cover the group's rounded border arcs at the left
+        // corners - the group itself whitens on focus, already radius-clipped
+        "h-auto flex-1 self-stretch rounded-none border-0 bg-transparent shadow-none focus-visible:bg-transparent focus-visible:ring-0 dark:bg-transparent",
         className
       )}
       {...props}
