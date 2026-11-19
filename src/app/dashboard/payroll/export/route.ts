@@ -9,6 +9,8 @@ import { driverPeriodTrips } from "@/lib/queries/trips";
 
 const FMT_MONEY = '"$"#,##0.00';
 const FMT_ONE = "#,##0.0";
+// Miles ledger as integers (rounded at write; exports round stored history)
+const FMT_MI = "#,##0";
 // Detail sheets follow the reference workbook: plain numbers, no $ sign
 const FMT_PAY = "#,##0.00";
 
@@ -92,7 +94,7 @@ function addDriverSheet(
   const sheet = workbook.addWorksheet(name);
   sheet.columns = [
     { width: 12 }, { width: 16 }, { width: 24 }, { width: 10 }, { width: 10 },
-    { width: 12 }, { width: 10, style: { numFmt: FMT_ONE } },
+    { width: 12 }, { width: 10, style: { numFmt: FMT_MI } },
     { width: 12, style: { numFmt: FMT_PAY } }
   ];
 
@@ -120,13 +122,13 @@ function addDriverSheet(
       leg.from_code ?? "",
       leg.to_code ?? "",
       leg.operation ? (opLabels.get(leg.operation) ?? leg.operation) : "",
-      Number(leg.miles),
+      Math.round(Number(leg.miles)),
       // Folded members' $0 stays blank: the run's carrier cell merges over it
       folded.has(i) ? null : Number(leg.pay_amount)
     ]);
     gridify(row);
     prevDate = leg.trip_date;
-    totalMiles += Number(leg.miles);
+    totalMiles += Math.round(Number(leg.miles));
     totalPay += Number(leg.pay_amount);
     subsidy += Number(leg.fuel_subsidy);
   }
@@ -155,7 +157,7 @@ function addDriverSheet(
 
   const total = sheet.addRow([
     "Total", "", "", "", "", "",
-    Number(totalMiles.toFixed(1)), Number((totalPay + subsidy).toFixed(2))
+    totalMiles, Number((totalPay + subsidy).toFixed(2))
   ]);
   gridify(total, true);
 
@@ -165,7 +167,7 @@ function addDriverSheet(
   if (driver.id !== null && Math.abs(Number(driver.total_pay) - totalPay) >= 0.005) {
     const frozen = sheet.addRow([
       `工资单合计（核对冻结 ${driver.leg_count} 段）`, "", "", "", "",
-      Number(driver.total_miles), Number(driver.total_pay)
+      Math.round(Number(driver.total_miles)), Number(driver.total_pay)
     ]);
     frozen.eachCell({ includeEmpty: true }, cell => {
       cell.border = GRID;
@@ -215,7 +217,7 @@ export async function GET(request: Request) {
   summary.columns = [
     { width: 18 }, { width: 12 }, { width: 8 }, { width: 10 },
     ...opCodes.map(() => ({ width: 8 })),
-    { width: 9 }, { width: 12, style: { numFmt: FMT_ONE } },
+    { width: 9 }, { width: 12, style: { numFmt: FMT_MI } },
     { width: 10, style: { numFmt: FMT_ONE } },
     { width: 12, style: { numFmt: FMT_MONEY } }, { width: 13, style: { numFmt: FMT_MONEY } }
   ];
@@ -233,7 +235,7 @@ export async function GET(request: Request) {
     summary.addRow([
       r.trucks, r.full_name, DRIVER_TYPE_LABELS[r.driver_type], r.trip_days,
       ...opCodes.map(code => r.op_counts[code] ?? 0),
-      r.leg_count, Number(r.total_miles), fuelGal(r),
+      r.leg_count, Math.round(Number(r.total_miles)), fuelGal(r),
       Number(r.total_fuel_subsidy), Number(r.total_pay)
     ]);
   }
@@ -244,7 +246,7 @@ export async function GET(request: Request) {
     sum(r => r.trip_days),
     ...opCodes.map(code => sum(r => r.op_counts[code] ?? 0)),
     sum(r => r.leg_count),
-    sum(r => Number(r.total_miles)), sum(fuelGal),
+    sum(r => Math.round(Number(r.total_miles))), sum(fuelGal),
     sum(r => Number(r.total_fuel_subsidy)), sum(r => Number(r.total_pay))
   ]);
   totals.font = { bold: true };

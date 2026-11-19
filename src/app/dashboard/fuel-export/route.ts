@@ -5,7 +5,8 @@ import { defaultPeriod, periodLabel, periodOf } from "@/lib/period";
 import { listFuelByPeriod } from "@/lib/queries/fuel";
 
 const FMT_MONEY = '"$"#,##0.00';
-const FMT_ONE = "#,##0.0";
+// Miles round to integers in the export (matches the wage workbook)
+const FMT_MI = "#,##0";
 // Gallons carry three decimals (receipts read like 73.785)
 const FMT_GAL = "#,##0.000";
 
@@ -41,7 +42,7 @@ export async function GET(request: Request) {
 
   const sheet = workbook.addWorksheet("加油-按州");
   sheet.columns = [
-    { width: 12 }, { width: 10 }, { width: 12, style: { numFmt: FMT_ONE } },
+    { width: 12 }, { width: 10 }, { width: 12, style: { numFmt: FMT_MI } },
     { width: 12, style: { numFmt: FMT_GAL } }, { width: 12, style: { numFmt: FMT_MONEY } },
     { width: 28 }
   ];
@@ -73,18 +74,19 @@ export async function GET(request: Request) {
     let blockMiles = 0;
     let blockAmount = 0;
     rows.forEach((row, i) => {
+      const miles = Math.round(row.miles);
       gridify(
         sheet.addRow([
           i === 0 ? truckCode : "",
           row.stateCode,
-          row.miles,
+          miles,
           row.gallons,
           row.amount,
           row.note
         ])
       );
       blockGallons += row.gallons;
-      blockMiles += row.miles;
+      blockMiles += miles;
       blockAmount += row.amount;
     });
     gridify(
