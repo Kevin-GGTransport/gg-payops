@@ -23,7 +23,9 @@ for migration in "$ROOT"/prisma/migrations/*/migration.sql; do
   else
     echo "==> Applying $name"
     "$BIN_DIR/psql" -v ON_ERROR_STOP=1 "$URL" -f "$migration"
-    "$BIN_DIR/psql" -v ON_ERROR_STOP=1 "$URL" -c "INSERT INTO common._migrations(name) VALUES ('$name')"
+    # Migration files self-register inside their transaction; ON CONFLICT
+    # keeps this fallback insert a no-op instead of a duplicate-key failure
+    "$BIN_DIR/psql" -v ON_ERROR_STOP=1 "$URL" -c "INSERT INTO common._migrations(name) VALUES ('$name') ON CONFLICT DO NOTHING"
   fi
 done
 

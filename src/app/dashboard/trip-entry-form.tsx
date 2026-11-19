@@ -1,10 +1,15 @@
 "use client";
 
 import * as React from "react";
-import { CameraIcon, GripVerticalIcon, PlusIcon } from "lucide-react";
+import { CameraIcon, ChevronDownIcon, GripVerticalIcon, PlusIcon } from "lucide-react";
 import type { ColumnDef, Table as TanstackTable } from "@tanstack/react-table";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger
+} from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PeriodPicker } from "@/components/period-picker";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
@@ -57,6 +62,18 @@ export type OperationOption = {
   requires_load: boolean;
 };
 
+/** One USPS state of the fuel-section dropdown */
+export type StateOption = { code: string; name: string };
+
+/** One fuel-section row's initial values (saved week, draft or failed-submit refill) */
+export type FuelRowDefault = {
+  state: string;
+  gallons: string;
+  miles: string;
+  amount: string;
+  note: string;
+};
+
 /** One row's initial values (photo import or failed-submit refill) */
 export type RefillRow = {
   trip_date?: string;
@@ -65,7 +82,6 @@ export type RefillRow = {
   to: string;
   load_no: string;
   miles: string;
-  fuel_gallons?: string;
   pay_amount: string;
   notes: string;
 };
@@ -77,6 +93,8 @@ export type RefillGroup = {
   rows: RefillRow[];
   /** Serialized pkg state (计价 mode + manual package amounts) from the failed-submit refill */
   pkgState?: string;
+  /** Fuel-section rows from the failed-submit refill */
+  fuelRows?: FuelRowDefault[];
 };
 
 type TripEntryFormProps = {
@@ -87,6 +105,11 @@ type TripEntryFormProps = {
   operations: OperationOption[];
   /** The single ACTIVE wage-rule version; every row prices by it */
   wageRule: WageRuleData | null;
+  /** USPS dictionary (ACTIVE rows); the fuel-section state dropdown reads it */
+  states: StateOption[];
+  /** The cover period's saved fuel rows per driver, prefilling the fuel
+   *  sections when a week is reopened (edit-a-week = return to its period) */
+  fuelByDriver?: Record<string, FuelRowDefault[]>;
   defaultDriverId?: string;
   /** Present when redirected back after a validation error */
   refillGroups?: RefillGroup[];
@@ -97,6 +120,8 @@ type TripEntryFormProps = {
 };
 
 const INITIAL_ROWS = 10;
+/** Blank fuel rows a fresh fuel section opens with (a week is a few states) */
+const FUEL_INITIAL_ROWS = 2;
 
 /** Draft-restored groups take ids from here so they always mount fresh */
 const DRAFT_GROUP_ID_BASE = 1_000;
@@ -130,7 +155,6 @@ const SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
   { id: "operation", header: "操作", size: 72, minSize: 64 },
   { id: "load_no", header: "Load#", size: 90, minSize: 76 },
   { id: "miles", header: "里程 (mi)", size: 92, minSize: 80 },
-  { id: "fuel_gallons", header: "加油 (gal)", size: 84, minSize: 72 },
   { id: "pay_amount", header: "本趟工资 ($)", size: 100, minSize: 92 },
   { id: "notes", header: "备注", size: 182, minSize: 100 },
   { id: "delete", header: "操作", size: 40, enableResizing: false, meta: { headerClass: "px-1.5" } }
@@ -407,9 +431,6 @@ const EntryRow = React.memo(function EntryRow({
   );
   const [toValue, setToValue] = React.useState(defaults?.to || "");
   const [milesValue, setMilesValue] = React.useState(defaults?.miles || "0");
-  // Fuel-up log (US gallons): optional ledger field, never priced - most legs
-  // stay empty and submit as 0
-  const [fuelValue, setFuelValue] = React.useState(defaults?.fuel_gallons || "");
   const [status, setStatus] = React.useState<CalcStatus>("loading");
   const [manual, setManual] = React.useState(false);
   // Ignore stale responses after a quick endpoint re-pick
@@ -669,19 +690,6 @@ const EntryRow = React.memo(function EntryRow({
         )}
       </td>
       <td className="px-1.5">
-        <Input
-          type="number"
-          name={`${prefix}fuel_gallons`}
-          min={0}
-          step={0.1}
-          value={fuelValue}
-          onChange={e => setFuelValue(e.target.value)}
-          placeholder="—"
-          aria-label={`${legLabel}加油量`}
-          className={`${cellInput} font-mono`}
-        />
-      </td>
-      <td className="px-1.5">
         {packageId && (
           <input type="hidden" name={`${prefix}package_id`} value={packageId} />
         )}
@@ -748,6 +756,133 @@ const EntryRow = React.memo(function EntryRow({
 /** A row slot: stable id (React key, never reused) plus its one-shot defaults */
 type RowSlot = { id: number; defaults?: RefillRow };
 
+/**
+ * One fuel-by-state row of the group's fuel section: state dropdown plus
+ * gallons / state-miles / amount and a note. Values are group-held (the
+ * section totals and dup hints derive from them in the group's render, one
+ * frame); field names are positional like the trip rows so deleting a middle
+ * row only shifts names, never values. Memoized for the same reason as
+ * EntryRow - every tab stays mounted.
+ */
+const FuelRow = React.memo(function FuelRow({
+  rowId,
+  groupIndex,
+  rowIndex,
+  states,
+  value,
+  removable,
+  /** Display row number of the first row sharing this state (dup hint), if any */
+  dupOf,
+  onRemove,
+  onChange,
+  onDirty
+}: {
+  rowId: number;
+  groupIndex: number;
+  rowIndex: number;
+  states: StateOption[];
+  value: FuelRowDefault;
+  removable: boolean;
+  dupOf: number | null;
+  onRemove: (rowId: number) => void;
+  onChange: (rowId: number, patch: Partial<FuelRowDefault>) => void;
+  /** Picker fields write their hidden inputs programmatically (no change
+   *  event bubbles), so every non-typing change reports through here */
+  onDirty: () => void;
+}) {
+  const prefix = `g_${groupIndex}_fuel_row_${rowIndex}_`;
+  const label = `第 ${groupIndex + 1} 组加油第 ${rowIndex + 1} 行`;
+  return (
+    <tr>
+      <td className="ctr px-1.5 font-mono text-[12px] tabular-nums text-muted-foreground">
+        {rowIndex + 1}
+      </td>
+      <td className="px-1.5">
+        <ComboboxField
+          name={`${prefix}state_code`}
+          value={value.state}
+          placeholder="州"
+          searchPlaceholder="搜索缩写 / 州名"
+          mono
+          triggerLabelOnly
+          triggerClassName="h-8 w-full px-2"
+          aria-label={`${label}州`}
+          onValueChange={next => {
+            onChange(rowId, { state: next });
+            onDirty();
+          }}
+          options={states.map(s => ({ value: s.code, label: s.code, description: s.name }))}
+        />
+        {dupOf !== null && (
+          <span className={`${cellHint} text-amber-600`}>
+            与第 {dupOf + 1} 行重复，保存时合并
+          </span>
+        )}
+      </td>
+      <td className="px-1.5">
+        <Input
+          type="number"
+          name={`${prefix}gallons`}
+          min={0}
+          step={0.001}
+          value={value.gallons}
+          onChange={e => onChange(rowId, { gallons: e.target.value })}
+          placeholder="—"
+          aria-label={`${label}加仑`}
+          className={`${cellInput} font-mono`}
+        />
+      </td>
+      <td className="px-1.5">
+        <Input
+          type="number"
+          name={`${prefix}miles`}
+          min={0}
+          step={0.1}
+          value={value.miles}
+          onChange={e => onChange(rowId, { miles: e.target.value })}
+          placeholder="—"
+          aria-label={`${label}里程`}
+          className={`${cellInput} font-mono`}
+        />
+      </td>
+      <td className="px-1.5">
+        <Input
+          type="number"
+          name={`${prefix}amount`}
+          min={0}
+          step={0.01}
+          value={value.amount}
+          onChange={e => onChange(rowId, { amount: e.target.value })}
+          placeholder="—"
+          aria-label={`${label}金额`}
+          className={`${cellInput} font-mono`}
+        />
+      </td>
+      <td className="px-1.5">
+        <Input
+          name={`${prefix}note`}
+          value={value.note}
+          maxLength={200}
+          placeholder="选填"
+          aria-label={`${label}备注`}
+          className={cellInput}
+          onChange={e => onChange(rowId, { note: e.target.value })}
+        />
+      </td>
+      <td className="actions px-1.5">
+        {removable && (
+          <button type="button" className="linklike danger" onClick={() => onRemove(rowId)}>
+            删除
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+});
+
+/** A fuel-section slot: stable id plus its current values (group-held state) */
+type FuelSlot = { id: number; value: FuelRowDefault };
+
 /** A group slot: stable id + one-shot initial driver/truck/rows */
 type GroupSlot = {
   id: number;
@@ -756,7 +891,29 @@ type GroupSlot = {
   rows: RowSlot[];
   /** Restored pricing state (draft/refill); a fresh group starts undefined */
   pkg?: PkgState;
+  /** Fuel-section initial rows (saved week, draft or failed-submit refill);
+   *  absent = seed empty rows (or the saved set once a driver is picked) */
+  fuelDefaults?: FuelRowDefault[];
 };
+
+/** Seed the fuel slots from defaults, or open with blank reserve rows */
+function toFuelSlots(defaults: FuelRowDefault[] | undefined): FuelSlot[] {
+  const source = defaults && defaults.length > 0 ? defaults : [];
+  const rows = source.map((value, i) => ({ id: i + 1, value: { ...value } }));
+  if (rows.length === 0) {
+    return Array.from({ length: FUEL_INITIAL_ROWS }, (_, i) => ({
+      id: i + 1,
+      value: { state: "", gallons: "", miles: "", amount: "", note: "" }
+    }));
+  }
+  return rows;
+}
+
+/** Rows that carry anything a submission would keep */
+function fuelSlotHasContent(slot: FuelSlot) {
+  const v = slot.value;
+  return Boolean(v.state || v.gallons || v.miles || v.amount || v.note);
+}
 
 /**
  * One driver group as a tab panel: a navy-ruled driver band (driver/truck
@@ -777,6 +934,8 @@ const GroupSection = React.memo(function GroupSection({
   locations,
   operations,
   wageRule,
+  states,
+  fuelByDriver,
   sheetTable,
   removable,
   onRemove,
@@ -800,6 +959,10 @@ const GroupSection = React.memo(function GroupSection({
   locations: LocationOption[];
   operations: OperationOption[];
   wageRule: WageRuleData | null;
+  /** USPS dictionary for the fuel-section state dropdown */
+  states: StateOption[];
+  /** Cover-period saved fuel rows per driver (week prefill on driver pick) */
+  fuelByDriver?: Record<string, FuelRowDefault[]>;
   /** Shared columns-only TanStack instance (thead + colgroup for this sheet) */
   sheetTable: TanstackTable<unknown>;
   removable: boolean;
@@ -821,6 +984,9 @@ const GroupSection = React.memo(function GroupSection({
   subsidyAmount: number;
 }) {
   const [driverId, setDriverId] = React.useState(group.driverId);
+  // Current truck pick mirrors the uncontrolled combobox so the fuel section
+  // can hint when rows exist without a truck to snapshot
+  const [truckId, setTruckId] = React.useState(group.truckId);
   const [rows, setRows] = React.useState<RowSlot[]>(group.rows);
   const [nextRowId, setNextRowId] = React.useState(
     group.rows.reduce((max, r) => Math.max(max, r.id), 0) + 1
@@ -849,6 +1015,14 @@ const GroupSection = React.memo(function GroupSection({
   const [armedRow, setArmedRow] = React.useState<number | null>(null);
   // Insertion point while a same-group drag hovers this sheet
   const [dropAt, setDropAt] = React.useState<{ id: number; before: boolean } | null>(null);
+  // Fuel section: explicit defaults (saved week / draft / refill) win at
+  // mount, else the saved rows of the group's opening driver, else blanks.
+  // Driver switches re-load the picked driver's saved set (mirroring the
+  // pkg-mode reset above) - the section always shows the week's truth
+  const [fuelSlots, setFuelSlots] = React.useState<FuelSlot[]>(() =>
+    toFuelSlots(group.fuelDefaults ?? (group.driverId ? fuelByDriver?.[group.driverId] : undefined))
+  );
+  const [fuelOpen, setFuelOpen] = React.useState(false);
   const dragActive = dragging?.groupId === group.id;
   const driverRecord = drivers.find(d => d.id === driverId);
   const driverType = driverRecord?.driver_type;
@@ -1083,6 +1257,60 @@ const GroupSection = React.memo(function GroupSection({
     [group.id, onMilesChange]
   );
 
+  /** Patch one fuel row's values (group-held; typing also bubbles a change
+   *  event to the form's draft save, pickers report through onDirty) */
+  const handleFuelChange = React.useCallback((rowId: number, patch: Partial<FuelRowDefault>) => {
+    setFuelSlots(current =>
+      current.map(slot => (slot.id === rowId ? { ...slot, value: { ...slot.value, ...patch } } : slot))
+    );
+  }, []);
+
+  const removeFuelRow = React.useCallback(
+    (rowId: number) => {
+      onDirty();
+      setFuelSlots(current => current.filter(slot => slot.id !== rowId));
+    },
+    [onDirty]
+  );
+
+  function addFuelRow() {
+    onDirty();
+    // Fresh slot id = above every existing one (stable keys, never reused)
+    const id = fuelSlots.reduce((max, slot) => Math.max(max, slot.id), 0) + 1;
+    setFuelSlots(current => [
+      ...current,
+      { id, value: { state: "", gallons: "", miles: "", amount: "", note: "" } }
+    ]);
+  }
+
+  // Fuel dup hints and totals derive straight off the slots in this render -
+  // one frame, no report-back round-trips. Content rows only.
+  const fuelContent = fuelSlots.filter(fuelSlotHasContent);
+  const fuelDupOf = React.useMemo(() => {
+    const firstByState = new Map<string, number>();
+    const dupOf = new Map<number, number>();
+    fuelSlots.forEach((slot, i) => {
+      const state = slot.value.state;
+      if (!state) return;
+      const first = firstByState.get(state);
+      if (first === undefined) firstByState.set(state, i);
+      else dupOf.set(slot.id, first);
+    });
+    return dupOf;
+  }, [fuelSlots]);
+  const fuelTotals = React.useMemo(
+    () =>
+      fuelContent.reduce(
+        (acc, slot) => ({
+          gallons: acc.gallons + (Number(slot.value.gallons) || 0),
+          miles: acc.miles + (Number(slot.value.miles) || 0),
+          amount: acc.amount + (Number(slot.value.amount) || 0)
+        }),
+        { gallons: 0, miles: 0, amount: 0 }
+      ),
+    [fuelContent]
+  );
+
   const armDrag = React.useCallback((rowId: number, armed: boolean) => {
     setArmedRow(armed ? rowId : null);
   }, []);
@@ -1149,6 +1377,11 @@ const GroupSection = React.memo(function GroupSection({
             // a driver switch, so they reset with the mode
             setPkgUnit(drivers.find(d => d.id === value)?.pricing_mode ?? "LEG");
             setPkgAmounts({});
+            // Fuel follows the driver too: their saved rows for this cover
+            // week load in (empty when none) so the section always shows the
+            // week's truth before it is submitted
+            const loadedFuel = toFuelSlots(fuelByDriver?.[value]);
+            setFuelSlots(loadedFuel);
             onDirty();
           }}
           options={drivers.map(d => ({
@@ -1168,7 +1401,10 @@ const GroupSection = React.memo(function GroupSection({
           clearable={false}
           className="w-44"
           triggerClassName="h-10"
-          onValueChange={() => onDirty()}
+          onValueChange={value => {
+            setTruckId(value);
+            onDirty();
+          }}
           options={trucks.map(t => ({
             value: t.id,
             label: t.truck_code,
@@ -1213,6 +1449,7 @@ const GroupSection = React.memo(function GroupSection({
           </select>
         </div>
         <input type="hidden" name={`${prefix}_row_count`} value={rows.length} />
+        <input type="hidden" name={`${prefix}_fuel_row_count`} value={fuelSlots.length} />
         {/* Pricing state rides the form so the draft collector and the
             failed-submit refill both round-trip it across remounts */}
         <input
@@ -1375,6 +1612,108 @@ const GroupSection = React.memo(function GroupSection({
         <PlusIcon className="size-3.5" />
         添加行程
       </button>
+
+      {/* Fuel-by-state rollup of this group's week: one collapsible section
+          per driver group, submitted with the trips onto the statement's
+          fuel_detail. Collapsed by default - most weeks it opens once at
+          receipt-tally time. */}
+      <Collapsible
+        open={fuelOpen}
+        onOpenChange={setFuelOpen}
+        className="mt-3 border-t border-line"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex items-center gap-1.5 text-[13px] font-medium text-foreground"
+              aria-label={`展开第 ${index + 1} 组加油`}
+            >
+              <ChevronDownIcon
+                className={`size-3.5 text-muted-foreground transition-transform ${fuelOpen ? "" : "-rotate-90"}`}
+              />
+              加油 · 按州
+              {fuelContent.length > 0 && (
+                <span className="rounded-full bg-route/15 px-1.5 font-mono text-[10px] leading-4 tabular-nums text-route">
+                  {fuelContent.length}
+                </span>
+              )}
+            </button>
+          </CollapsibleTrigger>
+          <span className="flex items-center gap-3 font-mono text-[12px] text-muted-foreground">
+            {fuelContent.length > 0 ? (
+              <>
+                <span>{fuelTotals.gallons.toLocaleString("en-US", { maximumFractionDigits: 3 })} gal</span>
+                <span>{fuelTotals.miles.toLocaleString("en-US", { maximumFractionDigits: 1 })} mi</span>
+                <span>${fuelTotals.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </>
+            ) : (
+              <span className="font-sans">按州汇总本周加油小票，随行程一起记入工资单</span>
+            )}
+          </span>
+        </div>
+        {/* forceMount: collapsed content stays in the DOM (Radix hides it
+            with the hidden attribute) so the named fuel inputs always ride
+            the form submit and the draft collector - a collapsed section
+            must never drop the week's fuel */}
+        <CollapsibleContent forceMount>
+          <div className="px-3 pb-3">
+            <table className="w-full max-w-4xl table-fixed border-collapse">
+              <colgroup>
+                <col style={{ width: 44 }} />
+                <col style={{ width: 150 }} />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 110 }} />
+                <col />
+                <col style={{ width: 48 }} />
+              </colgroup>
+              <thead>
+                <tr className="border-b border-line text-left text-[11px] font-medium text-muted-foreground">
+                  <th className="ctr px-1.5 py-1.5">#</th>
+                  <th className="px-1.5 py-1.5">州</th>
+                  <th className="px-1.5 py-1.5">加仑 (gal)</th>
+                  <th className="px-1.5 py-1.5">里程 (mi)</th>
+                  <th className="px-1.5 py-1.5">金额 ($)</th>
+                  <th className="px-1.5 py-1.5">备注</th>
+                  <th className="px-1.5 py-1.5" />
+                </tr>
+              </thead>
+              <tbody className="tb-group">
+                {fuelSlots.map((slot, i) => {
+                  const dup = fuelDupOf.get(slot.id);
+                  return (
+                    <FuelRow
+                      key={slot.id}
+                      rowId={slot.id}
+                      groupIndex={index}
+                      rowIndex={i}
+                      states={states}
+                      value={slot.value}
+                      removable={fuelSlots.length > 1}
+                      dupOf={dup === undefined ? null : dup}
+                      onRemove={removeFuelRow}
+                      onChange={handleFuelChange}
+                      onDirty={onDirty}
+                    />
+                  );
+                })}
+              </tbody>
+            </table>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <button type="button" className="linklike" onClick={addFuelRow}>
+                <PlusIcon className="mr-1 inline size-3.5" />
+                添加州
+              </button>
+              {fuelContent.length > 0 && !truckId && (
+                <span className="text-[11px] font-medium text-amber-600">
+                  录了加油必须选车号（车号随行快照进加油记录）
+                </span>
+              )}
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   );
 });
@@ -1392,6 +1731,8 @@ export function TripEntryForm({
   locations,
   operations,
   wageRule,
+  states,
+  fuelByDriver,
   defaultDriverId = "",
   refillGroups,
   initialActiveIndex,
@@ -1417,7 +1758,9 @@ export function TripEntryForm({
         driverId: g.driverId,
         truckId: g.truckId,
         rows: g.rows.map((row, j) => ({ id: j + 1, defaults: row })),
-        pkg: parsePkgState(g.pkgState ?? "")
+        pkg: parsePkgState(g.pkgState ?? ""),
+        fuelDefaults:
+          g.fuelRows && g.fuelRows.length > 0 ? g.fuelRows.map(row => ({ ...row })) : undefined
       }))
     : [
         {
@@ -1579,7 +1922,13 @@ export function TripEntryForm({
       driverId: g.driverId,
       truckId: g.truckId,
       rows: g.rows.map((row, j) => ({ id: j + 1, defaults: row })),
-      pkg: parsePkgState(g.pkg ?? "")
+      pkg: parsePkgState(g.pkg ?? ""),
+      fuelDefaults:
+        g.fuelRows && g.fuelRows.length > 0
+          ? g.fuelRows.map(row => ({ ...row }))
+          : fuelByDriver?.[g.driverId]
+            ? fuelByDriver[g.driverId].map(row => ({ ...row }))
+            : undefined
     }));
     setGroups(restored);
     nextGroupId.current = DRAFT_GROUP_ID_BASE + restored.length + 1;
@@ -1605,11 +1954,30 @@ export function TripEntryForm({
     window.location.reload();
   }
 
-  /** Period picks are pure button/popover state (no change event) - route them
-   *  through the draft save so the cover restores with the sheet */
+  /**
+   * Period picks navigate instead of flipping client state: the server then
+   * refetches the new week's saved fuel (the fuel sections prefill from it),
+   * while the in-progress sheet travels along as a draft - its periodStart is
+   * rewritten to the target week right before the redirect so the cover and
+   * the restored draft agree. The restore effect re-runs on the remount.
+   */
   function changePeriod(next: string) {
-    handleDirty();
-    setPeriodStart(next);
+    const form = formRef.current;
+    if (form) {
+      const activeIndex = groupsRef.current.findIndex(g => String(g.id) === activeIdRef.current);
+      writeEntryDraft(
+        collectDraftFromDOM(form, {
+          activeIndex: activeIndex < 0 ? 0 : activeIndex,
+          periodStart: next
+        })
+      );
+    }
+    // Full reload on purpose: the server component must refetch the new
+    // week's saved fuel and the form must remount for the one-shot draft
+    // restore - a client-side router.push keeps this instance alive and
+    // skips both
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.assign(`/dashboard?period=${next}`);
   }
 
   const removeGroup = React.useCallback((id: number) => {
@@ -1852,6 +2220,8 @@ export function TripEntryForm({
                   locations={locations}
                   operations={operations}
                   wageRule={wageRule}
+                  states={states}
+                  fuelByDriver={fuelByDriver}
                   sheetTable={sheetTable}
                   removable={groups.length > 1}
                   onRemove={removeGroup}
@@ -1874,6 +2244,9 @@ export function TripEntryForm({
         </Tabs>
 
         <input type="hidden" name="group_count" value={groups.length} />
+        {/* Cover period rides the form so the action's redirects (success,
+            error refill) restore the week being entered instead of the default */}
+        <input type="hidden" name="sheet_period" value={periodStart} />
         {/* Bottom bar: running totals + the current tab's secondary submit.
             The page-wide primary submit lives in the top tab strip. */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3">

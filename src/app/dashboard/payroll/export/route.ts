@@ -218,11 +218,15 @@ export async function GET(request: Request) {
   summary.addRow([]);
   const header = summary.addRow(headerCells);
   header.font = { bold: true };
+  // 加油(gal): the by-state rollup is the live source; the per-leg ledger sum
+  // only covers historical weeks entered before the fuel section existed
+  const fuelGal = (r: (typeof rows)[number]) =>
+    Number(r.fuel_gal) > 0 ? Number(r.fuel_gal) : Number(r.total_fuel);
   for (const r of rows) {
     summary.addRow([
       r.trucks, r.full_name, DRIVER_TYPE_LABELS[r.driver_type], r.trip_days,
       ...opCodes.map(code => r.op_counts[code] ?? 0),
-      r.leg_count, Number(r.total_miles), Number(r.total_fuel),
+      r.leg_count, Number(r.total_miles), fuelGal(r),
       Number(r.total_fuel_subsidy), Number(r.total_pay)
     ]);
   }
@@ -233,7 +237,7 @@ export async function GET(request: Request) {
     sum(r => r.trip_days),
     ...opCodes.map(code => sum(r => r.op_counts[code] ?? 0)),
     sum(r => r.leg_count),
-    sum(r => Number(r.total_miles)), sum(r => Number(r.total_fuel)),
+    sum(r => Number(r.total_miles)), sum(fuelGal),
     sum(r => Number(r.total_fuel_subsidy)), sum(r => Number(r.total_pay))
   ]);
   totals.font = { bold: true };

@@ -18,6 +18,7 @@ import { activeLocationOptions } from "@/lib/queries/locations";
 import { currentWageRule } from "@/lib/queries/wage-rules";
 import { driverPeriodTrips, periodPayTotals, type DriverPeriodTripRow } from "@/lib/queries/trips";
 import { getStatementByDriverPeriod } from "@/lib/queries/statements";
+import { statementFuelDetail } from "@/lib/queries/fuel";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeTruckOptions } from "@/lib/queries/trucks";
 import { verifyStatement } from "../../payroll/actions";
@@ -96,11 +97,13 @@ export default async function DriverPeriodPage({
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
 
-  const [legs, periodTotals, statement, locations, wageRule, operationOptions, driverOptions, truckOptions] =
+  const [legs, periodTotals, statement, fuelDetail, locations, wageRule, operationOptions, driverOptions, truckOptions] =
     await Promise.all([
       driverPeriodTrips(period, driver.id),
       periodPayTotals(),
       getStatementByDriverPeriod(driver.id, period.start),
+      // Fuel-by-state rollup off the statement (frozen once verified)
+      statementFuelDetail(driver.id, period.start),
       // Edit-dialog dictionaries (in-page client dialog, always mounted)
       activeLocationOptions(),
       currentWageRule(),
@@ -118,6 +121,16 @@ export default async function DriverPeriodPage({
       subsidy: acc.subsidy + Number(leg.fuel_subsidy)
     }),
     { miles: 0, fuel: 0, pay: 0, subsidy: 0 }
+  );
+  // Fuel rollup totals off the statement's by-state rows (the stored week
+  // truth); the per-leg ledger sum only shows when none were entered
+  const fuelRollup = fuelDetail.reduce(
+    (acc, row) => ({
+      gallons: acc.gallons + row.gallons,
+      miles: acc.miles + row.miles,
+      amount: acc.amount + row.amount
+    }),
+    { gallons: 0, miles: 0, amount: 0 }
   );
 
   // Full-path return so verify / per-row delete stays on this sheet
@@ -197,6 +210,9 @@ export default async function DriverPeriodPage({
             <Link className="button button-quiet" href={`/dashboard/payroll?period=${period.start}`}>
               返回工资单
             </Link>
+            <Link className="button button-quiet" href={`/dashboard/fuel-export?period=${period.start}`}>
+              导出加油
+            </Link>
             <Link className="button button-dark" href={`/dashboard/payroll/export?period=${period.start}`}>
               导出工资表
             </Link>
@@ -247,8 +263,12 @@ export default async function DriverPeriodPage({
           </div>
           <div className="gauge-cell">
             <span className="gauge-label">加油量</span>
-            <strong className="gauge-value">{fmtFuel(totals.fuel)}<em>gal</em></strong>
-            <span className="gauge-sub">录入时登记的加油量</span>
+            <strong className="gauge-value">
+              {fmtFuel(fuelDetail.length > 0 ? String(fuelRollup.gallons) : totals.fuel)}<em>gal</em>
+            </strong>
+            <span className="gauge-sub">
+              {fuelDetail.length > 0 ? "按州汇总 · 随工资单冻结" : "录入时登记的加油量"}
+            </span>
           </div>
           <div className="gauge-cell gauge-hot">
             <span className="gauge-label">本期应付</span>
@@ -288,6 +308,63 @@ export default async function DriverPeriodPage({
           )}
         </LedgerPanel>
       </section>
+
+      {fuelDetail.length > 0 && (
+        <section aria-label="加油按州汇总" className="mt-4">
+          <LedgerPanel
+            label={
+              <>
+                加油 · 按州
+                <b>
+                  {fuelDetail.length} 州 · {fmtFuel(fuelRollup.gallons)} gal ·{" "}
+                  {fmtMiles(fuelRollup.miles)} mi · {money(fuelRollup.amount)}
+                </b>
+              </>
+            }
+          >
+            <table className="w-full max-w-3xl table-fixed border-collapse text-[13px]">
+              <colgroup>
+                <col style={{ width: 72 }} />
+                <col style={{ width: 120 }} />
+                <col style={{ width: 120 }} />
+                <col style={{ width: 120 }} />
+                <col />
+              </colgroup>
+              <thead>
+                <tr className="border-b border-line text-left text-[11px] font-medium text-muted-foreground">
+                  <th className="px-3 py-2">州</th>
+                  <th className="px-3 py-2 text-right">MILES</th>
+                  <th className="px-3 py-2 text-right">Gallon</th>
+                  <th className="px-3 py-2 text-right">金额</th>
+                  <th className="px-3 py-2">备注</th>
+                </tr>
+              </thead>
+              <tbody>
+                {fuelDetail.map(row => (
+                  <tr key={row.stateCode} className="border-b border-line/60">
+                    <td className="px-3 py-2 font-mono">{row.stateCode}</td>
+                    <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtMiles(row.miles)}</td>
+                    <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtFuel(row.gallons)}</td>
+                    <td className="px-3 py-2 text-right font-mono tabular-nums">{money(row.amount)}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{row.note || "—"}</td>
+                  </tr>
+                ))}
+                <tr className="font-medium">
+                  <td className="px-3 py-2">合计</td>
+                  <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtMiles(fuelRollup.miles)}</td>
+                  <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtFuel(fuelRollup.gallons)}</td>
+                  <td className="px-3 py-2 text-right font-mono tabular-nums">{money(fuelRollup.amount)}</td>
+                  <td />
+                </tr>
+              </tbody>
+            </table>
+            <p className="mt-2 text-xs text-muted-foreground">
+              录入页本周期回看可改（随行程一起重新提交）；核对后修改会计入标红。
+              {fuelDetail[0].truckCode && ` 车号快照：${fuelDetail[0].truckCode}。`}
+            </p>
+          </LedgerPanel>
+        </section>
+      )}
     </>
   );
 }

@@ -14,6 +14,7 @@ const DRAFT_KEY = "payops.entry.draft.v1";
 /** Server-side caps mirrored here so a corrupted draft can't balloon the form */
 const MAX_GROUPS = 20;
 const MAX_ROWS_PER_GROUP = 50;
+const MAX_FUEL_ROWS_PER_GROUP = 50;
 
 export type DraftRow = {
   trip_date?: string;
@@ -22,10 +23,18 @@ export type DraftRow = {
   to: string;
   load_no: string;
   miles: string;
-  fuel_gallons?: string;
   /** Only kept for hand-edited wages (data-manual-pay rows); auto-priced rows restore empty and recalc */
   pay_amount: string;
   notes: string;
+};
+
+/** One fuel-by-state row of a group's fuel section (weekly rollup) */
+export type DraftFuelRow = {
+  state: string;
+  gallons: string;
+  miles: string;
+  amount: string;
+  note: string;
 };
 
 export type DraftGroup = {
@@ -34,6 +43,8 @@ export type DraftGroup = {
   rows: DraftRow[];
   /** Serialized group pkg state (计价 mode + manual package amounts); opaque here */
   pkg?: string;
+  /** Fuel-section rows with any content (pure data - no carry semantics) */
+  fuelRows: DraftFuelRow[];
 };
 
 export type EntryDraft = {
@@ -52,7 +63,7 @@ function field(form: HTMLFormElement, name: string): string {
 
 /** A row carries user content when anything beyond the auto-filled date is set */
 function rowHasContent(row: DraftRow): boolean {
-  return Boolean(row.to || row.from || row.load_no || row.notes || row.fuel_gallons || row.trip_date);
+  return Boolean(row.to || row.from || row.load_no || row.notes || row.trip_date);
 }
 
 /**
@@ -88,7 +99,6 @@ export function collectDraftFromDOM(
         to: field(form, `${p}to_location`),
         load_no: field(form, `${p}load_no`),
         miles: field(form, `${p}miles`) || "0",
-        fuel_gallons: field(form, `${p}fuel_gallons`),
         pay_amount: isManual ? field(form, `${p}pay_amount`) : "",
         notes: field(form, `${p}notes`)
       };
@@ -99,7 +109,7 @@ export function collectDraftFromDOM(
       // drop it so the restore re-derives it from the chain
       const prev = rows[rows.length - 1];
       if (prev) {
-        const hasOwn = Boolean(row.to || row.load_no || row.notes || row.fuel_gallons);
+        const hasOwn = Boolean(row.to || row.load_no || row.notes);
         if (!hasOwn && row.trip_date && row.trip_date === chainDate) row.trip_date = undefined;
         if (!hasOwn && row.from && row.from === prev.to) row.from = "";
       }
@@ -110,8 +120,33 @@ export function collectDraftFromDOM(
     const driverId = field(form, `g_${g}_driver_id`);
     const truckId = field(form, `g_${g}_truck_id`);
     if (driverId || truckId) anyContent = true;
+    // Fuel-section rows are plain named inputs under the same group prefix;
+    // untouched reserve rows are dropped (restore reseeds the empty rows)
+    const fuelRowCount =
+      Number.parseInt(field(form, `g_${g}_fuel_row_count`), 10) || 0;
+    const fuelRows: DraftFuelRow[] = [];
+    for (let i = 0; i < fuelRowCount && i < MAX_FUEL_ROWS_PER_GROUP; i++) {
+      const p = `g_${g}_fuel_row_${i}_`;
+      const fuelRow: DraftFuelRow = {
+        state: field(form, `${p}state_code`),
+        gallons: field(form, `${p}gallons`),
+        miles: field(form, `${p}miles`),
+        amount: field(form, `${p}amount`),
+        note: field(form, `${p}note`)
+      };
+      if (
+        fuelRow.state ||
+        fuelRow.gallons ||
+        fuelRow.miles ||
+        fuelRow.amount ||
+        fuelRow.note
+      ) {
+        fuelRows.push(fuelRow);
+      }
+    }
+    if (fuelRows.length > 0) anyContent = true;
     const pkg = field(form, `g_${g}_pkg_state`);
-    groups.push({ driverId, truckId, rows, pkg: pkg || undefined });
+    groups.push({ driverId, truckId, rows, pkg: pkg || undefined, fuelRows });
   }
 
   if (!anyContent) return null;
@@ -160,12 +195,28 @@ export function readEntryDraft(): EntryDraft | null {
           to: str(r.to),
           load_no: str(r.load_no),
           miles: str(r.miles) || "0",
-          fuel_gallons: str(r.fuel_gallons),
           pay_amount: str(r.pay_amount),
           notes: str(r.notes)
         };
       });
-      return { driverId: str(g.driverId), truckId: str(g.truckId), rows, pkg: str(g.pkg) || undefined };
+      const rawFuel = Array.isArray(g.fuelRows) ? g.fuelRows : [];
+      const fuelRows = rawFuel.slice(0, MAX_FUEL_ROWS_PER_GROUP).map(rawFuelRow => {
+        const f = (rawFuelRow ?? {}) as Record<string, unknown>;
+        return {
+          state: str(f.state),
+          gallons: str(f.gallons),
+          miles: str(f.miles),
+          amount: str(f.amount),
+          note: str(f.note)
+        };
+      });
+      return {
+        driverId: str(g.driverId),
+        truckId: str(g.truckId),
+        rows,
+        pkg: str(g.pkg) || undefined,
+        fuelRows
+      };
     });
 
     if (groups.length === 0) return null;

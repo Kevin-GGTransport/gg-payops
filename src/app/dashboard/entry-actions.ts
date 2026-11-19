@@ -15,6 +15,7 @@ import { todayIso } from "@/lib/format";
 const MAX_GROUPS = 20;
 const MAX_ROWS_PER_GROUP = 50;
 const MAX_ROWS_TOTAL = 200;
+const MAX_FUEL_ROWS_PER_GROUP = 50;
 
 type ParsedRow = {
   tripDate: string;
@@ -23,7 +24,6 @@ type ParsedRow = {
   from: string;
   to: string;
   milesNum: number;
-  fuelNum: number;
   payNum: number;
   notes: string;
   /** Shared marker for legs of one priced package (first leg carries the amount) */
@@ -31,11 +31,24 @@ type ParsedRow = {
   packageNote: string | null;
 };
 
+/** One fuel-by-state row of a group's fuel section (weekly rollup) */
+type ParsedFuelRow = {
+  /** Display row number as the sheet shows it (for error positions) */
+  no: number;
+  stateCode: string;
+  gallons: number;
+  miles: number;
+  amount: number;
+  note: string;
+};
+
 type ParsedGroup = {
   driverId: string;
   /** Group-level truck (车号): snapshotted at submit, not a stored FK */
   truckId: string;
   rows: ParsedRow[];
+  /** Fuel-by-state rows of this group's fuel section; empty rows skipped */
+  fuelRows: ParsedFuelRow[];
 };
 
 function str(formData: FormData, key: string) {
@@ -65,10 +78,11 @@ const ROW_FIELDS = [
   "from_location",
   "to_location",
   "miles",
-  "fuel_gallons",
   "pay_amount",
   "notes"
 ] as const;
+
+const FUEL_ROW_FIELDS = ["state_code", "gallons", "miles", "amount", "note"] as const;
 
 /**
  * Pack every group's raw input as refill params. Groups are renumbered 0..n
@@ -98,6 +112,21 @@ function packRefill(
         if (value) params.set(`f_g_${kept}_row_${i}_${field}`, value);
       }
     }
+    // Fuel-by-state rows ride the same refill (renumbered over content rows)
+    const fuelCount = clampCount(str(formData, `g_${g}_fuel_row_count`), MAX_FUEL_ROWS_PER_GROUP);
+    let fuelKept = 0;
+    for (let i = 0; i < fuelCount; i++) {
+      let any = false;
+      for (const field of FUEL_ROW_FIELDS) {
+        const value = str(formData, `g_${g}_fuel_row_${i}_${field}`);
+        if (value) {
+          params.set(`f_g_${kept}_fuel_row_${fuelKept}_${field}`, value);
+          any = true;
+        }
+      }
+      if (any) fuelKept++;
+    }
+    if (fuelKept > 0) params.set(`f_g_${kept}_fuel_row_count`, String(fuelKept));
     kept++;
   }
   params.set("f_group_count", String(kept));
@@ -105,22 +134,47 @@ function packRefill(
 }
 
 /**
- * Redirect back to the entry page with the error code, the failing group,
- * and every group's input refilled (the failing group's tab opens).
+ * Redirect back to the entry page with the error code, the failing group
+ * (and fuel-row position when the error is a fuel one), and every group's
+ * input refilled (the failing group's tab opens). The sheet's cover period
+ * rides along so backfilling a historical week doesn't snap back to the
+ * default week on a validation error.
  */
 function backWithError(
   error: string,
   formData: FormData,
   groups: ParsedGroup[],
-  grp?: number
+  grp?: number,
+  fuel?: number
 ): never {
   const params = new URLSearchParams({ error });
   if (grp !== undefined) {
     params.set("grp", String(grp));
     params.set("tab", String(grp - 1));
+    if (fuel !== undefined) params.set("fuel", String(fuel));
   }
+  const sheetPeriod = str(formData, "sheet_period");
+  if (isIsoDate(sheetPeriod)) params.set("period", periodOf(sheetPeriod).start);
   packRefill(params, formData, groups);
   redirect(`/dashboard?${params.toString()}`);
+}
+
+/**
+ * Merge fuel rows into `target` by state (dup states within a group or across
+ * two groups sharing one driver sum up; the first non-empty note wins).
+ */
+function mergeFuelRows(target: ParsedFuelRow[], incoming: ParsedFuelRow[]) {
+  for (const row of incoming) {
+    const dup = target.find(r => r.stateCode === row.stateCode);
+    if (dup) {
+      dup.gallons += row.gallons;
+      dup.miles += row.miles;
+      dup.amount += row.amount;
+      if (!dup.note) dup.note = row.note;
+    } else {
+      target.push({ ...row });
+    }
+  }
 }
 
 /**
@@ -154,6 +208,13 @@ export async function addTripsBatch(formData: FormData) {
   const fallbackOperation = operationRows[0].code;
   const validOperations = new Set(operationRows.map(o => o.code));
 
+  // USPS dictionary gates the fuel-state picks (a code outside it cannot have
+  // come from the dropdown - treat it as dirty input)
+  const stateRows = await prisma.$queryRaw<Array<{ code: string }>>`
+    SELECT code FROM ops.state_codes WHERE is_active
+  `;
+  const validStates = new Set(stateRows.map(s => s.code));
+
   const today = todayIso();
   const groups: ParsedGroup[] = [];
   let total = 0;
@@ -183,7 +244,6 @@ export async function addTripsBatch(formData: FormData) {
         from: str(formData, `${p}from_location`),
         to,
         milesNum: num0(str(formData, `${p}miles`)),
-        fuelNum: num0(str(formData, `${p}fuel_gallons`)),
         // Wage snapshot: trust the submitted amount (auto-calculated client-side or
         // hand-edited); no server-side recompute so manual overrides stick
         payNum: num0(str(formData, `${p}pay_amount`)),
@@ -193,10 +253,36 @@ export async function addTripsBatch(formData: FormData) {
       });
     }
     total += rows.length;
+    // Fuel-by-state section: untouched reserve rows are skipped the same way
+    // (no state, no numbers, no note); numbers stay lenient (a miles-only
+    // row is legal)
+    const fuelRowCount = clampCount(
+      str(formData, `g_${g}_fuel_row_count`),
+      MAX_FUEL_ROWS_PER_GROUP
+    );
+    const fuelRows: ParsedFuelRow[] = [];
+    for (let i = 0; i < fuelRowCount; i++) {
+      const p = `g_${g}_fuel_row_${i}_`;
+      const stateCode = str(formData, `${p}state_code`).toUpperCase().slice(0, 2);
+      const gallonsRaw = str(formData, `${p}gallons`);
+      const milesRaw = str(formData, `${p}miles`);
+      const amountRaw = str(formData, `${p}amount`);
+      const note = str(formData, `${p}note`).slice(0, 200);
+      if (!stateCode && !gallonsRaw && !milesRaw && !amountRaw && !note) continue;
+      fuelRows.push({
+        no: i + 1,
+        stateCode,
+        gallons: num0(gallonsRaw),
+        miles: num0(milesRaw),
+        amount: num0(amountRaw),
+        note
+      });
+    }
     groups.push({
       driverId: str(formData, `g_${g}_driver_id`),
       truckId: str(formData, `g_${g}_truck_id`),
-      rows
+      rows,
+      fuelRows
     });
   }
 
@@ -232,6 +318,20 @@ export async function addTripsBatch(formData: FormData) {
   for (const g of active) {
     if (!driverNames.has(groups[g].driverId)) {
       backWithError("missing_driver", formData, groups, g + 1);
+    }
+  }
+
+  // Fuel rows need both owners of the group: the statement (driver) and the
+  // truck snapshot (truckCode is baked into every stored fuel row)
+  for (const g of active) {
+    const group = groups[g];
+    if (group.fuelRows.length === 0) continue;
+    if (!group.truckId) backWithError("fuel_missing_truck", formData, groups, g + 1);
+    for (const row of group.fuelRows) {
+      if (!row.stateCode) backWithError("fuel_missing_state", formData, groups, g + 1, row.no);
+      if (!validStates.has(row.stateCode)) {
+        backWithError("fuel_bad_state", formData, groups, g + 1, row.no);
+      }
     }
   }
 
@@ -273,6 +373,8 @@ export async function addTripsBatch(formData: FormData) {
       })
     ])
   );
+  // Fuel rows snapshot the group truck's code (they outlive later truck edits)
+  const truckCodeById = new Map(truckRows.map(t => [t.id, t.truck_code]));
 
   // Resolve every distinct submitted endpoint once (free text may create a
   // new location); unresolvable ones simply store NULL
@@ -297,7 +399,6 @@ export async function addTripsBatch(formData: FormData) {
         operation: row.operation,
         loadNo: row.loadNo,
         milesNum: row.milesNum,
-        fuelNum: Math.round(row.fuelNum * 100) / 100,
         payNum: Math.round(row.payNum * 100) / 100,
         subsidyNum: calcFuelSubsidy({
           driverType: driverTypes.get(groups[gi].driverId),
@@ -314,16 +415,75 @@ export async function addTripsBatch(formData: FormData) {
 
   const values = insertRows.map(r => Prisma.sql`
     (${r.driverId}::bigint, ${r.tripDate}::date, ${r.operation}, ${r.loadNo},
-     ${r.fromId || null}::bigint, ${r.toId || null}::bigint, ${r.milesNum}, ${r.fuelNum}, ${r.payNum},
+     ${r.fromId || null}::bigint, ${r.toId || null}::bigint, ${r.milesNum}, ${r.payNum},
      ${r.subsidyNum}, ${r.notes}, ${r.driverName}, ${r.truckSnapshot ?? null}::jsonb,
      ${r.packageId}, ${r.packageNote})
   `);
   await prisma.$executeRaw`
     INSERT INTO pay.trips(driver_id, trip_date, operation, load_no,
-      from_location_id, to_location_id, miles, fuel_gallons, pay_amount, fuel_subsidy, notes,
+      from_location_id, to_location_id, miles, pay_amount, fuel_subsidy, notes,
       driver_name, truck_snapshot, package_id, package_note)
     VALUES ${Prisma.join(values)}
   `;
+
+  // Fuel-by-state rollup onto the statement of the sheet's cover week. Every
+  // active group writes its driver's whole fuel set (replace semantics): the
+  // sheet shows the week's saved rows on open, so what is submitted IS the
+  // week's truth - emptied rows mean the clerk cleared them. Two submitted
+  // groups sharing one driver merge (sums per state, first note wins); a
+  // non-submitted group's fuel is never touched.
+  const sheetPeriodStart = periodOf(
+    isIsoDate(str(formData, "sheet_period"))
+      ? str(formData, "sheet_period")
+      : insertRows[0].tripDate
+  );
+  const fuelSaves = new Map<string, { truckCode: string; rows: ParsedFuelRow[] }>();
+  for (const g of active) {
+    const group = groups[g];
+    const driverId = group.driverId;
+    const existing = fuelSaves.get(driverId);
+    if (existing) {
+      mergeFuelRows(existing.rows, group.fuelRows);
+      continue;
+    }
+    const rows: ParsedFuelRow[] = [];
+    mergeFuelRows(rows, group.fuelRows);
+    fuelSaves.set(driverId, {
+      truckCode: truckCodeById.get(group.truckId) ?? "",
+      rows
+    });
+  }
+  for (const [driverId, save] of fuelSaves) {
+    const payload = JSON.stringify(
+      save.rows.map(r => ({
+        truckCode: save.truckCode,
+        stateCode: r.stateCode,
+        gallons: Math.round(r.gallons * 1000) / 1000,
+        miles: Math.round(r.miles * 10) / 10,
+        amount: Math.round(r.amount * 100) / 100,
+        ...(r.note ? { note: r.note } : {})
+      }))
+    );
+    // DRAFT arm creates the statement when missing (aggregates arrive from
+    // syncStatements right after, which never touches fuel_detail); VERIFIED
+    // keeps its frozen numbers and only takes the fuel plus the permanent
+    // edited flag - the same red as a trip edit
+    await prisma.$executeRaw`
+      INSERT INTO pay.payroll_statements
+        (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay, fuel_detail)
+      VALUES (${driverId}::bigint, ${sheetPeriodStart.start}::date, ${sheetPeriodStart.end}::date,
+              0, 0, 0, 0, 0, ${payload}::jsonb)
+      ON CONFLICT (driver_id, period_start) DO UPDATE SET
+        fuel_detail = EXCLUDED.fuel_detail, updated_at = now()
+      WHERE pay.payroll_statements.status = 'DRAFT'
+    `;
+    await prisma.$executeRaw`
+      UPDATE pay.payroll_statements
+      SET fuel_detail = ${payload}::jsonb, edited_after_verify = true, updated_at = now()
+      WHERE driver_id = ${driverId}::bigint AND period_start = ${sheetPeriodStart.start}::date
+        AND status = 'VERIFIED'
+    `;
+  }
 
   // Entry IS generation: every touched (driver, period) gets its statement
   // synced - created as DRAFT if missing, recomputed otherwise

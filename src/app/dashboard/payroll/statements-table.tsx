@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { ConfirmAction } from "@/components/confirm-action";
 import { DriverTypeBadge, StatementStatusBadge } from "@/components/badges";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
-import { miles as fmtMiles, money } from "@/lib/format";
+import { fuel as fmtFuel, miles as fmtMiles, money } from "@/lib/format";
 import { isRedirectError } from "@/lib/action-result";
 import type { StatementRow } from "@/lib/queries/statements";
 import { verifyStatement } from "./actions";
@@ -137,6 +137,15 @@ export function StatementsTable({
       size: 96,
       meta: { cellClass: "mono num", headerClass: "num" },
       cell: ({ row }) => fmtMiles(row.original.total_miles)
+    },
+    {
+      id: "fuel_gal",
+      header: "加油 (gal)",
+      size: 88,
+      meta: { cellClass: "mono num", headerClass: "num" },
+      // By-state rollup off fuel_detail (0 reads as the muted dash)
+      cell: ({ row }) =>
+        Number(row.original.fuel_gal) > 0 ? fmtFuel(row.original.fuel_gal) : "—"
     },
     {
       id: "subsidy",

@@ -29,6 +29,8 @@ export type StatementRow = {
   op_counts: Record<string, number>;
   trucks: string;
   note: string | null;
+  /** Gallons summed off fuel_detail (the by-state rollup, not total_fuel) */
+  fuel_gal: string;
 };
 
 /** A stored statement: id/status always present (merged rows may lack them) */
@@ -51,7 +53,9 @@ const STATEMENT_SELECT = Prisma.sql`
          s.trip_days, s.leg_count,
          s.total_miles::text AS total_miles, s.total_fuel::text AS total_fuel,
          s.total_pay::text AS total_pay, s.total_fuel_subsidy::text AS total_fuel_subsidy,
-         s.op_counts, s.trucks, s.note
+         s.op_counts, s.trucks, s.note,
+         (SELECT COALESCE(sum((e->>'gallons')::numeric), 0)
+          FROM jsonb_array_elements(s.fuel_detail) e)::text AS fuel_gal
   FROM pay.payroll_statements s
   JOIN ops.drivers d ON d.id = s.driver_id
 `;
@@ -161,7 +165,8 @@ export async function mergedPeriodStatements(period: Period): Promise<StatementR
       total_fuel_subsidy: "0",
       op_counts: {},
       trucks: "",
-      note: null
+      note: null,
+      fuel_gal: "0"
     });
   }
   rows.sort((a, b) => a.full_name.localeCompare(b.full_name, "zh-Hans-CN"));

@@ -10,14 +10,18 @@ import { activeLocationOptions } from "@/lib/queries/locations";
 import { activeOperationOptions } from "@/lib/queries/operations";
 import { activeTruckOptions } from "@/lib/queries/trucks";
 import { currentWageRule } from "@/lib/queries/wage-rules";
-import { TripEntryForm, type RefillGroup } from "./trip-entry-form";
+import { activeStateOptions, fuelDetailByDriver } from "@/lib/queries/fuel";
+import { TripEntryForm, type FuelRowDefault, type RefillGroup } from "./trip-entry-form";
 
 export const metadata: Metadata = { title: "录入行程 · G&G PayOps" };
 
 const ERROR_MESSAGES: Record<string, string> = {
   missing_driver: "请选择司机 / 车主（行程必须记在一位司机名下）。",
   no_rows: "请至少录入一段行程。",
-  missing_operation: "操作类型字典为空，请先在「操作类型」页登记。"
+  missing_operation: "操作类型字典为空，请先在「操作类型」页登记。",
+  fuel_missing_truck: "该组录了加油但未选车号（加油记录随车号快照记入工资单）。",
+  fuel_missing_state: "该行加油未选择州。",
+  fuel_bad_state: "该行加油的州不在字典中，请重新选择。"
 };
 
 export default async function EntryPage({
@@ -33,6 +37,8 @@ export default async function EntryPage({
   const grp = Number.isFinite(grpParam) && grpParam >= 1 ? grpParam : undefined;
   const legParam = Number.parseInt(firstValue(sp.leg) ?? "", 10);
   const leg = Number.isFinite(legParam) && legParam >= 1 ? legParam : undefined;
+  const fuelParam = Number.parseInt(firstValue(sp.fuel) ?? "", 10);
+  const fuelRow = Number.isFinite(fuelParam) && fuelParam >= 1 ? fuelParam : undefined;
   const saved = Number.parseInt(firstValue(sp.saved) ?? "", 10);
   const savedCount = Number.isFinite(saved) && saved >= 1 ? saved : undefined;
   // Tab to open first (0-based group index; redirect sets it after a
@@ -64,35 +70,67 @@ export default async function EntryPage({
                   to: firstValue(sp[`f_g_${g}_row_${i}_to_location`]) ?? "",
                   load_no: firstValue(sp[`f_g_${g}_row_${i}_load_no`]) ?? "",
                   miles: firstValue(sp[`f_g_${g}_row_${i}_miles`]) ?? "",
-                  fuel_gallons: firstValue(sp[`f_g_${g}_row_${i}_fuel_gallons`]) ?? "",
                   pay_amount: firstValue(sp[`f_g_${g}_row_${i}_pay_amount`]) ?? "",
                   notes: firstValue(sp[`f_g_${g}_row_${i}_notes`]) ?? ""
+                }))
+              : [];
+          // Fuel-section rows of the failed submit (content rows, renumbered)
+          const fuelCount = Number.parseInt(
+            firstValue(sp[`f_g_${g}_fuel_row_count`]) ?? "",
+            10
+          );
+          const fuelRows: FuelRowDefault[] =
+            Number.isFinite(fuelCount) && fuelCount >= 1
+              ? Array.from({ length: fuelCount }, (_, i) => ({
+                  state: firstValue(sp[`f_g_${g}_fuel_row_${i}_state_code`]) ?? "",
+                  gallons: firstValue(sp[`f_g_${g}_fuel_row_${i}_gallons`]) ?? "",
+                  miles: firstValue(sp[`f_g_${g}_fuel_row_${i}_miles`]) ?? "",
+                  amount: firstValue(sp[`f_g_${g}_fuel_row_${i}_amount`]) ?? "",
+                  note: firstValue(sp[`f_g_${g}_fuel_row_${i}_note`]) ?? ""
                 }))
               : [];
           return {
             driverId: firstValue(sp[`f_g_${g}_driver_id`]) ?? "",
             truckId: firstValue(sp[`f_g_${g}_truck_id`]) ?? "",
             rows,
-            pkgState: firstValue(sp[`f_g_${g}_pkg_state`]) ?? ""
+            pkgState: firstValue(sp[`f_g_${g}_pkg_state`]) ?? "",
+            fuelRows: fuelRows.length > 0 ? fuelRows : undefined
           };
         })
       : undefined;
 
-  const [drivers, trucks, locations, operations, wageRule] = await Promise.all([
+  const [drivers, trucks, locations, operations, wageRule, states, fuelSaved] = await Promise.all([
     activeDriverOptions(),
     activeTruckOptions(),
     activeLocationOptions(),
     activeOperationOptions(),
-    currentWageRule()
+    currentWageRule(),
+    activeStateOptions(),
+    fuelDetailByDriver(initialPeriodStart)
   ]);
+  // Saved fuel rows become the fuel section's string-valued defaults
+  const fuelByDriver: Record<string, FuelRowDefault[]> = Object.fromEntries(
+    Object.entries(fuelSaved).map(([driverId, rows]) => [
+      driverId,
+      rows.map(r => ({
+        state: r.stateCode,
+        gallons: String(r.gallons),
+        miles: String(r.miles),
+        amount: String(r.amount),
+        note: r.note
+      }))
+    ])
+  );
 
   const errorMessage = errorCode
     ? errorCode in ERROR_MESSAGES
       ? grp && leg
         ? `第 ${grp} 组第 ${leg} 程：${ERROR_MESSAGES[errorCode]}`
-        : grp
-          ? `第 ${grp} 组：${ERROR_MESSAGES[errorCode]}`
-          : ERROR_MESSAGES[errorCode]
+        : grp && fuelRow
+          ? `第 ${grp} 组加油第 ${fuelRow} 行：${ERROR_MESSAGES[errorCode]}`
+          : grp
+            ? `第 ${grp} 组：${ERROR_MESSAGES[errorCode]}`
+            : ERROR_MESSAGES[errorCode]
       : "录入出错，请检查后重试。"
     : undefined;
 
@@ -122,6 +160,8 @@ export default async function EntryPage({
         locations={locations}
         operations={operations}
         wageRule={wageRule}
+        states={states}
+        fuelByDriver={fuelByDriver}
         defaultDriverId={preselectedDriver}
         refillGroups={refillGroups}
         initialActiveIndex={initialActiveIndex}

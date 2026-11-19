@@ -109,9 +109,14 @@ export default async function PayrollPage({
         actions={
           <div className="flex items-center gap-2">
             {view === "period" && shownPeriod && (
-              <Link className="button button-dark" href={`/dashboard/payroll/export?period=${shownPeriod.start}`}>
-                导出工资表
-              </Link>
+              <>
+                <Link className="button button-dark" href={`/dashboard/payroll/export?period=${shownPeriod.start}`}>
+                  导出工资表
+                </Link>
+                <Link className="button button-quiet" href={`/dashboard/fuel-export?period=${shownPeriod.start}`}>
+                  导出加油
+                </Link>
+              </>
             )}
             <Link className="button button-quiet" href="/dashboard/trips">
               行程台账

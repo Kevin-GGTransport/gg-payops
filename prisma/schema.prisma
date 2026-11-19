@@ -95,6 +95,10 @@ model PayrollStatement {
   opCounts     Json            @default("{}") @map("op_counts")
   trucks       String          @default("")
   note         String?
+  /// Weekly fuel-by-state rollup entered with the sheet: [{truckCode,
+  /// stateCode, gallons, miles, amount, note}]; frozen at verify like the
+  /// other numbers (raw-SQL access only)
+  fuelDetail   Json            @default("[]") @map("fuel_detail")
   generatedAt  DateTime        @default(now()) @map("generated_at") @db.Timestamptz(6)
   updatedAt    DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
