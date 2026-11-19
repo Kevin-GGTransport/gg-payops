@@ -160,22 +160,6 @@ function addDriverSheet(
     totalMiles, Number((totalPay + subsidy).toFixed(2))
   ]);
   gridify(total, true);
-
-  // VERIFIED statements freeze the numbers; when a verified sheet was flagged
-  // (trips changed after verification) the frozen pay no longer matches the
-  // leg sum - append the frozen row so the gap stays visible on the export
-  if (driver.id !== null && Math.abs(Number(driver.total_pay) - totalPay) >= 0.005) {
-    const frozen = sheet.addRow([
-      `工资单合计（核对冻结 ${driver.leg_count} 段）`, "", "", "", "",
-      Math.round(Number(driver.total_miles)), Number(driver.total_pay)
-    ]);
-    frozen.eachCell({ includeEmpty: true }, cell => {
-      cell.border = GRID;
-      cell.alignment = { horizontal: "center", vertical: "middle" };
-      cell.font = { bold: true, color: { argb: "FFB91C1C" } };
-    });
-    sheet.mergeCells(frozen.number, 1, frozen.number, 5);
-  }
 }
 
 /**
