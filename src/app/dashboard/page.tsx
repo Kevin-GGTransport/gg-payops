@@ -72,7 +72,8 @@ export default async function EntryPage({
           return {
             driverId: firstValue(sp[`f_g_${g}_driver_id`]) ?? "",
             truckId: firstValue(sp[`f_g_${g}_truck_id`]) ?? "",
-            rows
+            rows,
+            pkgState: firstValue(sp[`f_g_${g}_pkg_state`]) ?? ""
           };
         })
       : undefined;

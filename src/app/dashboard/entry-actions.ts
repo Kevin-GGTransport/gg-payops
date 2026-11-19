@@ -87,6 +87,10 @@ function packRefill(
     const group = groups[g];
     if (group.driverId) params.set(`f_g_${kept}_driver_id`, group.driverId);
     if (group.truckId) params.set(`f_g_${kept}_truck_id`, group.truckId);
+    // Pricing state (计价 mode + manual package amounts): opaque passthrough so
+    // hand-edited package prices survive the refill remount
+    const pkgState = str(formData, `g_${g}_pkg_state`);
+    if (pkgState) params.set(`f_g_${kept}_pkg_state`, pkgState);
     params.set(`f_g_${kept}_row_count`, String(group.rows.length));
     for (let i = 0; i < group.rows.length; i++) {
       for (const field of ROW_FIELDS) {

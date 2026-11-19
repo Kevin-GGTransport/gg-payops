@@ -32,6 +32,8 @@ export type DraftGroup = {
   driverId: string;
   truckId: string;
   rows: DraftRow[];
+  /** Serialized group pkg state (计价 mode + manual package amounts); opaque here */
+  pkg?: string;
 };
 
 export type EntryDraft = {
@@ -92,7 +94,8 @@ export function collectDraftFromDOM(
     const driverId = field(form, `g_${g}_driver_id`);
     const truckId = field(form, `g_${g}_truck_id`);
     if (driverId || truckId) anyContent = true;
-    groups.push({ driverId, truckId, rows });
+    const pkg = field(form, `g_${g}_pkg_state`);
+    groups.push({ driverId, truckId, rows, pkg: pkg || undefined });
   }
 
   if (!anyContent) return null;
@@ -146,7 +149,7 @@ export function readEntryDraft(): EntryDraft | null {
           notes: str(r.notes)
         };
       });
-      return { driverId: str(g.driverId), truckId: str(g.truckId), rows };
+      return { driverId: str(g.driverId), truckId: str(g.truckId), rows, pkg: str(g.pkg) || undefined };
     });
 
     if (groups.length === 0) return null;

@@ -75,6 +75,8 @@ export type RefillGroup = {
   driverId: string;
   truckId: string;
   rows: RefillRow[];
+  /** Serialized pkg state (计价 mode + manual package amounts) from the failed-submit refill */
+  pkgState?: string;
 };
 
 type TripEntryFormProps = {
@@ -151,6 +153,48 @@ type PkgUnit = PricingMode;
 
 /** One priced package planned from the sheet: legs share one amount */
 type PkgPlan = { id: string; date: string; rowIds: number[]; unit: Exclude<PkgUnit, "LEG"> };
+
+/** Pricing state of one group sheet: the hand-set 计价 mode plus manual
+ *  package-amount overrides keyed by plan id. Serialized into a hidden form
+ *  field so the draft and the failed-submit refill carry it across the
+ *  remounts that would otherwise silently drop it back to rule suggestions. */
+export type PkgState = { unit: PkgUnit; amounts: Record<string, string> };
+
+const PKG_STATE_KEY_MAX = 32;
+const PKG_STATE_VALUE_MAX = 16;
+const PKG_STATE_ENTRIES_MAX = 50;
+
+/** Validate a persisted pkg-state JSON string (draft or URL refill); anything
+ *  malformed drops to undefined so the sheet falls back to roster defaults */
+function parsePkgState(raw: string): PkgState | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const { unit, amounts } = parsed as { unit?: unknown; amounts?: unknown };
+    if (unit !== "LEG" && unit !== "DAY" && unit !== "ROUND_TRIP") return undefined;
+    const clean: Record<string, string> = {};
+    if (amounts !== undefined) {
+      if (typeof amounts !== "object" || amounts === null) return undefined;
+      for (const [key, value] of Object.entries(amounts as Record<string, unknown>).slice(
+        0,
+        PKG_STATE_ENTRIES_MAX
+      )) {
+        if (
+          key.length > PKG_STATE_KEY_MAX ||
+          typeof value !== "string" ||
+          value.length > PKG_STATE_VALUE_MAX
+        ) {
+          continue;
+        }
+        clean[key] = value;
+      }
+    }
+    return { unit, amounts: clean };
+  } catch {
+    return undefined;
+  }
+}
 
 const PKG_UNIT_OPTIONS: ReadonlyArray<{ value: PkgUnit; label: string }> = (
   Object.entries(PRICING_MODE_LABELS) as Array<[PkgUnit, string]>
@@ -744,7 +788,14 @@ const EntryRow = React.memo(function EntryRow({
 type RowSlot = { id: number; defaults?: RefillRow };
 
 /** A group slot: stable id + one-shot initial driver/truck/rows */
-type GroupSlot = { id: number; driverId: string; truckId: string; rows: RowSlot[] };
+type GroupSlot = {
+  id: number;
+  driverId: string;
+  truckId: string;
+  rows: RowSlot[];
+  /** Restored pricing state (draft/refill); a fresh group starts undefined */
+  pkg?: PkgState;
+};
 
 /**
  * One driver group as a tab panel: a navy-ruled driver band (driver/truck
@@ -823,11 +874,14 @@ const GroupSection = React.memo(function GroupSection({
   // roster setting of the group's initial driver and re-follows on every
   // driver switch. pkgAmounts holds only the clerk's manual overrides keyed
   // by package id - a package without an override prices at its rule
-  // suggestion (derived during render, no effect needed)
+  // suggestion (derived during render, no effect needed). Both restore from
+  // a persisted pkg state (draft/refill) when one rode in with the group
   const [pkgUnit, setPkgUnit] = React.useState<PkgUnit>(
-    () => drivers.find(d => d.id === group.driverId)?.pricing_mode ?? "LEG"
+    () => group.pkg?.unit ?? drivers.find(d => d.id === group.driverId)?.pricing_mode ?? "LEG"
   );
-  const [pkgAmounts, setPkgAmounts] = React.useState<Record<string, string>>({});
+  const [pkgAmounts, setPkgAmounts] = React.useState<Record<string, string>>(
+    () => group.pkg?.amounts ?? {}
+  );
   // Row ids that have at least one endpoint (what the buttons count)
   const [filledIds, setFilledIds] = React.useState<Set<number>>(new Set());
   // Grip pressed but drag not confirmed yet; only that row turns draggable
@@ -1167,6 +1221,13 @@ const GroupSection = React.memo(function GroupSection({
           </select>
         </div>
         <input type="hidden" name={`${prefix}_row_count`} value={rows.length} />
+        {/* Pricing state rides the form so the draft collector and the
+            failed-submit refill both round-trip it across remounts */}
+        <input
+          type="hidden"
+          name={`${prefix}_pkg_state`}
+          value={JSON.stringify({ unit: pkgUnit, amounts: pkgAmounts })}
+        />
       </div>
 
       {pkgUnit !== "LEG" && (
@@ -1363,7 +1424,8 @@ export function TripEntryForm({
         id: i + 1,
         driverId: g.driverId,
         truckId: g.truckId,
-        rows: g.rows.map((row, j) => ({ id: j + 1, defaults: row }))
+        rows: g.rows.map((row, j) => ({ id: j + 1, defaults: row })),
+        pkg: parsePkgState(g.pkgState ?? "")
       }))
     : [
         {
@@ -1524,7 +1586,8 @@ export function TripEntryForm({
       id: DRAFT_GROUP_ID_BASE + i + 1,
       driverId: g.driverId,
       truckId: g.truckId,
-      rows: g.rows.map((row, j) => ({ id: j + 1, defaults: row }))
+      rows: g.rows.map((row, j) => ({ id: j + 1, defaults: row })),
+      pkg: parsePkgState(g.pkg ?? "")
     }));
     setGroups(restored);
     nextGroupId.current = DRAFT_GROUP_ID_BASE + restored.length + 1;
