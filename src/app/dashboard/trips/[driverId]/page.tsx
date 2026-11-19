@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
 import { FlashToast } from "@/components/flash-toast";
+import { FormError } from "@/components/form-fields";
 import { LedgerPanel } from "@/components/ledger";
 import { SubmitButton } from "@/components/submit-button";
 import { DriverTypeBadge, StatementStatusBadge } from "@/components/badges";
@@ -18,7 +19,8 @@ import { activeLocationOptions } from "@/lib/queries/locations";
 import { currentWageRule } from "@/lib/queries/wage-rules";
 import { driverPeriodTrips, periodPayTotals, type DriverPeriodTripRow } from "@/lib/queries/trips";
 import { getStatementByDriverPeriod } from "@/lib/queries/statements";
-import { statementFuelDetail } from "@/lib/queries/fuel";
+import { activeStateOptions, statementFuelDetail } from "@/lib/queries/fuel";
+import { FuelEditor, type FuelEditRow } from "./fuel-editor";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeTruckOptions } from "@/lib/queries/trucks";
 import { verifyStatement } from "../../payroll/actions";
@@ -27,6 +29,12 @@ import { ChangeTruckButton } from "../../payroll/change-truck-dialog";
 import { PayrollLegsTable } from "../payroll-legs-table";
 
 export const metadata: Metadata = { title: "周期工资单 · G&G PayOps" };
+
+/** Fuel-editor error copy (the action redirects back with these codes) */
+const FUEL_ERRORS: Record<string, string> = {
+  fuel_missing_state: "该行加油未选择州。",
+  fuel_bad_state: "该行加油的州不在字典中，请重新选择。"
+};
 
 const arrowClass =
   "grid h-9.5 w-8 shrink-0 place-items-center rounded-md border border-line bg-card font-mono text-base text-route no-underline transition-colors hover:border-route hover:bg-muted/40";
@@ -97,13 +105,15 @@ export default async function DriverPeriodPage({
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
 
-  const [legs, periodTotals, statement, fuelDetail, locations, wageRule, operationOptions, driverOptions, truckOptions] =
+  const [legs, periodTotals, statement, fuelDetail, stateOptions, locations, wageRule, operationOptions, driverOptions, truckOptions] =
     await Promise.all([
       driverPeriodTrips(period, driver.id),
       periodPayTotals(),
       getStatementByDriverPeriod(driver.id, period.start),
       // Fuel-by-state rollup off the statement (frozen once verified)
       statementFuelDetail(driver.id, period.start),
+      // Fuel-editor state dictionary
+      activeStateOptions(),
       // Edit-dialog dictionaries (in-page client dialog, always mounted)
       activeLocationOptions(),
       currentWageRule(),
@@ -133,6 +143,43 @@ export default async function DriverPeriodPage({
     { gallons: 0, miles: 0, amount: 0 }
   );
 
+  // Fuel editor feed: a failed save's URL refill wins over the stored rows
+  const fuelRefillCount = Number.parseInt(firstValue(sp.f_fuel_row_count) ?? "", 10);
+  const fuelRefillRows: FuelEditRow[] =
+    Number.isFinite(fuelRefillCount) && fuelRefillCount >= 1
+      ? Array.from({ length: fuelRefillCount }, (_, i) => ({
+          state: firstValue(sp[`f_fuel_row_${i}_state_code`]) ?? "",
+          gallons: firstValue(sp[`f_fuel_row_${i}_gallons`]) ?? "",
+          miles: firstValue(sp[`f_fuel_row_${i}_miles`]) ?? "",
+          amount: firstValue(sp[`f_fuel_row_${i}_amount`]) ?? "",
+          note: firstValue(sp[`f_fuel_row_${i}_note`]) ?? "",
+          truckCode: firstValue(sp[`f_fuel_row_${i}_truck_code`]) ?? ""
+        }))
+      : [];
+  const fuelEditRows: FuelEditRow[] =
+    fuelRefillRows.length > 0
+      ? fuelRefillRows
+      : fuelDetail.map(r => ({
+          state: r.stateCode,
+          gallons: String(r.gallons),
+          miles: String(r.miles),
+          amount: String(r.amount),
+          note: r.note,
+          truckCode: r.truckCode
+        }));
+  // Truck snapshot for new editor rows: the stored rows' code, else the
+  // statement's truck annotation
+  const fuelDefaultTruck =
+    fuelDetail[0]?.truckCode || (statement?.trucks ?? "").split(",")[0]?.trim() || "";
+  const fuelSavedParam = Number.parseInt(firstValue(sp.fuel_saved) ?? "", 10);
+  const fuelSaved = Number.isFinite(fuelSavedParam) && fuelSavedParam >= 0 ? fuelSavedParam : undefined;
+  const fuelErrorCode = firstValue(sp.error);
+  const fuelRowNo = Number.parseInt(firstValue(sp.fuel) ?? "", 10);
+  const fuelError =
+    fuelErrorCode && fuelErrorCode in FUEL_ERRORS
+      ? `${Number.isFinite(fuelRowNo) && fuelRowNo >= 1 ? `第 ${fuelRowNo} 行：` : ""}${FUEL_ERRORS[fuelErrorCode]}`
+      : undefined;
+
   // Full-path return so verify / per-row delete stays on this sheet
   const returnTo = `/dashboard/trips/${driver.id}?period=${period.start}`;
   const navHref = (p: { start: string }) => `/dashboard/trips/${driver.id}?period=${p.start}`;
@@ -153,6 +200,13 @@ export default async function DriverPeriodPage({
   return (
     <>
       {saved && <FlashToast message="修改已保存" param="saved" />}
+      {fuelSaved !== undefined && (
+        <FlashToast
+          message={fuelSaved > 0 ? `已保存 ${fuelSaved} 州加油` : "已清空本周期加油"}
+          param="fuel_saved"
+        />
+      )}
+      {fuelError && <FormError message={fuelError} />}
       <PageHeader
         title={
           <>
@@ -309,62 +363,25 @@ export default async function DriverPeriodPage({
         </LedgerPanel>
       </section>
 
-      {fuelDetail.length > 0 && (
-        <section aria-label="加油按州汇总" className="mt-4">
-          <LedgerPanel
-            label={
-              <>
-                加油 · 按州
-                <b>
-                  {fuelDetail.length} 州 · {fmtFuel(fuelRollup.gallons)} gal ·{" "}
-                  {fmtMiles(fuelRollup.miles)} mi · {money(fuelRollup.amount)}
-                </b>
-              </>
-            }
-          >
-            <table className="w-full max-w-3xl table-fixed border-collapse text-[13px]">
-              <colgroup>
-                <col style={{ width: 72 }} />
-                <col style={{ width: 120 }} />
-                <col style={{ width: 120 }} />
-                <col style={{ width: 120 }} />
-                <col />
-              </colgroup>
-              <thead>
-                <tr className="border-b border-line text-left text-[11px] font-medium text-muted-foreground">
-                  <th className="px-3 py-2">州</th>
-                  <th className="px-3 py-2 text-right">MILES</th>
-                  <th className="px-3 py-2 text-right">Gallon</th>
-                  <th className="px-3 py-2 text-right">金额</th>
-                  <th className="px-3 py-2">备注</th>
-                </tr>
-              </thead>
-              <tbody>
-                {fuelDetail.map(row => (
-                  <tr key={row.stateCode} className="border-b border-line/60">
-                    <td className="px-3 py-2 font-mono">{row.stateCode}</td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtMiles(row.miles)}</td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtFuel(row.gallons)}</td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums">{money(row.amount)}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{row.note || "—"}</td>
-                  </tr>
-                ))}
-                <tr className="font-medium">
-                  <td className="px-3 py-2">合计</td>
-                  <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtMiles(fuelRollup.miles)}</td>
-                  <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtFuel(fuelRollup.gallons)}</td>
-                  <td className="px-3 py-2 text-right font-mono tabular-nums">{money(fuelRollup.amount)}</td>
-                  <td />
-                </tr>
-              </tbody>
-            </table>
-            <p className="mt-2 text-xs text-muted-foreground">
-              录入页本周期回看可改（随行程一起重新提交）；核对后修改会计入标红。
-              {fuelDetail[0].truckCode && ` 车号快照：${fuelDetail[0].truckCode}。`}
-            </p>
-          </LedgerPanel>
-        </section>
-      )}
+      <section aria-label="加油按州汇总" className="mt-4">
+        <LedgerPanel
+          label={
+            <>
+              加油 · 按州
+              <b>{fuelDetail.length > 0 ? `${fuelDetail.length} 州 · ${fmtFuel(fuelRollup.gallons)} gal` : "未录入"}</b>
+            </>
+          }
+        >
+          <FuelEditor
+            driverId={driver.id}
+            periodStart={period.start}
+            states={stateOptions}
+            rows={fuelEditRows}
+            defaultTruckCode={fuelDefaultTruck}
+            frozen={statementFrozen}
+          />
+        </LedgerPanel>
+      </section>
     </>
   );
 }

@@ -163,6 +163,18 @@ const SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
 /** Columns-only instance has no rows; keep the reference stable across renders */
 const NO_ROWS: unknown[] = [];
 
+/** Column layout of the per-group fuel section, fed to the same shared TanStack
+ *  shell the trip sheet uses so both tables read as one family */
+export const FUEL_SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
+  { id: "seq", header: "#", size: 44, enableResizing: false, meta: { headerClass: "ctr" } },
+  { id: "state", header: "州", size: 132, minSize: 100 },
+  { id: "gallons", header: "加仑 (gal)", size: 104, minSize: 84 },
+  { id: "miles", header: "里程 (mi)", size: 104, minSize: 84 },
+  { id: "amount", header: "金额 ($)", size: 104, minSize: 84 },
+  { id: "note", header: "备注", size: 200, minSize: 120 },
+  { id: "delete", header: "操作", size: 56, enableResizing: false, meta: { headerClass: "px-1.5" } }
+];
+
 /** Weekday suffix of a day-separator band (same rendering as the payroll ledger) */
 const DOW = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -1023,6 +1035,12 @@ const GroupSection = React.memo(function GroupSection({
     toFuelSlots(group.fuelDefaults ?? (group.driverId ? fuelByDriver?.[group.driverId] : undefined))
   );
   const [fuelOpen, setFuelOpen] = React.useState(false);
+  // Fuel sheet's own columns-only TanStack instance (widths persist per key)
+  const fuelTable = useRosterTable({
+    data: NO_ROWS,
+    columns: FUEL_SHEET_COLUMNS,
+    storageKey: "payops.entry.fuel.cols"
+  });
   const dragActive = dragging?.groupId === group.id;
   const driverRecord = drivers.find(d => d.id === driverId);
   const driverType = driverRecord?.driver_type;
@@ -1641,44 +1659,23 @@ const GroupSection = React.memo(function GroupSection({
             </button>
           </CollapsibleTrigger>
           <span className="flex items-center gap-3 font-mono text-[12px] text-muted-foreground">
-            {fuelContent.length > 0 ? (
+            {fuelContent.length > 0 && (
               <>
                 <span>{fuelTotals.gallons.toLocaleString("en-US", { maximumFractionDigits: 3 })} gal</span>
                 <span>{fuelTotals.miles.toLocaleString("en-US", { maximumFractionDigits: 1 })} mi</span>
                 <span>${fuelTotals.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </>
-            ) : (
-              <span className="font-sans">按州汇总本周加油小票，随行程一起记入工资单</span>
             )}
           </span>
         </div>
-        {/* forceMount: collapsed content stays in the DOM (Radix hides it
-            with the hidden attribute) so the named fuel inputs always ride
-            the form submit and the draft collector - a collapsed section
-            must never drop the week's fuel */}
-        <CollapsibleContent forceMount>
-          <div className="px-3 pb-3">
-            <table className="w-full max-w-4xl table-fixed border-collapse">
-              <colgroup>
-                <col style={{ width: 44 }} />
-                <col style={{ width: 150 }} />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 110 }} />
-                <col />
-                <col style={{ width: 48 }} />
-              </colgroup>
-              <thead>
-                <tr className="border-b border-line text-left text-[11px] font-medium text-muted-foreground">
-                  <th className="ctr px-1.5 py-1.5">#</th>
-                  <th className="px-1.5 py-1.5">州</th>
-                  <th className="px-1.5 py-1.5">加仑 (gal)</th>
-                  <th className="px-1.5 py-1.5">里程 (mi)</th>
-                  <th className="px-1.5 py-1.5">金额 ($)</th>
-                  <th className="px-1.5 py-1.5">备注</th>
-                  <th className="px-1.5 py-1.5" />
-                </tr>
-              </thead>
+        {/* forceMount keeps the collapsed content in the DOM so the named
+            fuel inputs always ride the form submit and the draft collector;
+            this radix-ui build does not set the hidden attribute on a forced
+            content, so the tailwind class does the hiding (display:none
+            inputs still submit) */}
+        <CollapsibleContent forceMount className={fuelOpen ? "" : "hidden"}>
+          <div className="pb-1">
+            <RosterTable table={fuelTable}>
               <tbody className="tb-group">
                 {fuelSlots.map((slot, i) => {
                   const dup = fuelDupOf.get(slot.id);
@@ -1699,7 +1696,7 @@ const GroupSection = React.memo(function GroupSection({
                   );
                 })}
               </tbody>
-            </table>
+            </RosterTable>
             <div className="mt-2 flex flex-wrap items-center gap-3">
               <button type="button" className="linklike" onClick={addFuelRow}>
                 <PlusIcon className="mr-1 inline size-3.5" />
@@ -1707,7 +1704,7 @@ const GroupSection = React.memo(function GroupSection({
               </button>
               {fuelContent.length > 0 && !truckId && (
                 <span className="text-[11px] font-medium text-amber-600">
-                  录了加油必须选车号（车号随行快照进加油记录）
+                  录了加油需选车号
                 </span>
               )}
             </div>

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { syncStatements } from "@/lib/statements";
+import { periodOf } from "@/lib/period";
 
 function str(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
@@ -14,6 +15,142 @@ function revalidateStatementViews() {
   revalidatePath("/dashboard/payroll");
   revalidatePath("/dashboard/trips");
   revalidatePath("/dashboard");
+}
+
+function isIsoDate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(value).toString() !== "Invalid Date";
+}
+
+/** Bad or negative numbers fall back to 0 - same lenient rule as the sheet */
+function num0(value: string) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+const MAX_FUEL_ROWS = 50;
+
+/**
+ * Save the statement detail sheet's fuel-by-state editor. Same storage and
+ * lifecycle rules as the entry sheet's fuel section (replace semantics per
+ * (driver, period), same-state rows merge, DRAFT takes the payload while
+ * VERIFIED keeps frozen numbers and only takes fuel + the permanent red
+ * flag) - this is the in-place fix surface, the entry sheet is the capture
+ * surface. An all-empty submit is a legitimate clear here (no trips are
+ * required to ride along).
+ */
+export async function saveStatementFuel(formData: FormData) {
+  await requireUser();
+
+  const driverId = str(formData, "driver_id");
+  const periodRaw = str(formData, "period");
+  if (!driverId || !isIsoDate(periodRaw)) redirect("/dashboard/payroll");
+  const period = periodOf(periodRaw);
+  const base = `/dashboard/trips/${driverId}`;
+
+  const rowCount = Math.min(
+    Number.parseInt(str(formData, "f_fuel_row_count"), 10) || 0,
+    MAX_FUEL_ROWS
+  );
+  type Row = {
+    no: number;
+    stateCode: string;
+    truckCode: string;
+    gallons: number;
+    miles: number;
+    amount: number;
+    note: string;
+  };
+  const rows: Row[] = [];
+  for (let i = 0; i < rowCount; i++) {
+    const p = `f_fuel_row_${i}_`;
+    const stateCode = str(formData, `${p}state_code`).toUpperCase().slice(0, 2);
+    const gallonsRaw = str(formData, `${p}gallons`);
+    const milesRaw = str(formData, `${p}miles`);
+    const amountRaw = str(formData, `${p}amount`);
+    const note = str(formData, `${p}note`).slice(0, 200);
+    if (!stateCode && !gallonsRaw && !milesRaw && !amountRaw && !note) continue;
+    rows.push({
+      no: i + 1,
+      stateCode,
+      truckCode: str(formData, `${p}truck_code`).slice(0, 32),
+      gallons: num0(gallonsRaw),
+      miles: num0(milesRaw),
+      amount: num0(amountRaw),
+      note
+    });
+  }
+
+  const backWithError = (error: string, fuelNo: number): never => {
+    const params = new URLSearchParams({ error, fuel: String(fuelNo), period: period.start });
+    let kept = 0;
+    for (let i = 0; i < rowCount; i++) {
+      let any = false;
+      for (const field of ["state_code", "gallons", "miles", "amount", "note", "truck_code"]) {
+        const value = str(formData, `f_fuel_row_${i}_${field}`);
+        if (value) {
+          params.set(`f_fuel_row_${kept}_${field}`, value);
+          any = true;
+        }
+      }
+      if (any) kept++;
+    }
+    if (kept > 0) params.set("f_fuel_row_count", String(kept));
+    redirect(`${base}?${params.toString()}`);
+  };
+
+  const stateRows = await prisma.$queryRaw<Array<{ code: string }>>`
+    SELECT code FROM ops.state_codes WHERE is_active
+  `;
+  const validStates = new Set(stateRows.map(s => s.code));
+  for (const row of rows) {
+    if (!row.stateCode) backWithError("fuel_missing_state", row.no);
+    if (!validStates.has(row.stateCode)) backWithError("fuel_bad_state", row.no);
+  }
+
+  // Merge same states (sums per column, first note wins) - the editor may
+  // legitimately hold two rows for one state
+  const merged = new Map<string, Row>();
+  for (const row of rows) {
+    const dup = merged.get(row.stateCode);
+    if (dup) {
+      dup.gallons += row.gallons;
+      dup.miles += row.miles;
+      dup.amount += row.amount;
+      if (!dup.note) dup.note = row.note;
+    } else {
+      merged.set(row.stateCode, { ...row });
+    }
+  }
+  const payload = JSON.stringify(
+    [...merged.values()].map(r => ({
+      truckCode: r.truckCode,
+      stateCode: r.stateCode,
+      gallons: Math.round(r.gallons * 1000) / 1000,
+      miles: Math.round(r.miles * 10) / 10,
+      amount: Math.round(r.amount * 100) / 100,
+      ...(r.note ? { note: r.note } : {})
+    }))
+  );
+
+  await prisma.$executeRaw`
+    INSERT INTO pay.payroll_statements
+      (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay, fuel_detail)
+    VALUES (${driverId}::bigint, ${period.start}::date, ${period.end}::date,
+            0, 0, 0, 0, 0, ${payload}::jsonb)
+    ON CONFLICT (driver_id, period_start) DO UPDATE SET
+      fuel_detail = EXCLUDED.fuel_detail, updated_at = now()
+    WHERE pay.payroll_statements.status = 'DRAFT'
+  `;
+  await prisma.$executeRaw`
+    UPDATE pay.payroll_statements
+    SET fuel_detail = ${payload}::jsonb, edited_after_verify = true, updated_at = now()
+    WHERE driver_id = ${driverId}::bigint AND period_start = ${period.start}::date
+      AND status = 'VERIFIED'
+  `;
+
+  revalidateStatementViews();
+  revalidatePath(`/dashboard/trips/${driverId}`);
+  redirect(`${base}?period=${period.start}&fuel_saved=${merged.size}`);
 }
 
 /**
