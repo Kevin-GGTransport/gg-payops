@@ -85,8 +85,9 @@ async function applyTripUpdate(
   ]);
 
   // Owner fuel subsidy re-snapshots on every edit (miles x the ACTIVE rate;
-  // plain drivers stay 0 - driver type itself never changes on an edit)
-  const milesNum = num0(str(formData, `${prefix}miles`));
+  // plain drivers stay 0 - driver type itself never changes on an edit).
+  // Miles ledger as integers: typed decimals round on save, same as entry
+  const milesNum = Math.round(num0(str(formData, `${prefix}miles`)));
   const newDate = isIsoDate(str(formData, `${prefix}trip_date`))
     ? str(formData, `${prefix}trip_date`)
     : current.trip_date;

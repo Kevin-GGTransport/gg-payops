@@ -41,6 +41,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "missing_address" }, { status: 422 });
   }
 
-  const miles = await drivingMiles(origin, destination);
+  // Miles are ledgered as integers: round the measured distance so both the
+  // entry sheet and the detail editor display exactly what gets stored
+  const rawMiles = await drivingMiles(origin, destination);
+  const miles = rawMiles === null ? null : Math.round(rawMiles);
   return NextResponse.json({ miles });
 }

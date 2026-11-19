@@ -335,7 +335,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           type="number"
           name={`${prefix}miles`}
           min={0}
-          step={0.1}
+          step="any"
           value={milesValue}
           onChange={e => {
             setMilesValue(e.target.value);

@@ -243,7 +243,9 @@ export async function addTripsBatch(formData: FormData) {
         loadNo,
         from: str(formData, `${p}from_location`),
         to,
-        milesNum: num0(str(formData, `${p}miles`)),
+        // Miles ledger as integers: hand-typed decimals round on save (the
+        // sheet text stays untouched while typing)
+        milesNum: Math.round(num0(str(formData, `${p}miles`))),
         // Wage snapshot: trust the submitted amount (auto-calculated client-side or
         // hand-edited); no server-side recompute so manual overrides stick
         payNum: num0(str(formData, `${p}pay_amount`)),

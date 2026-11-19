@@ -296,7 +296,7 @@ function EditForm({
             type="number"
             name="miles"
             min={0}
-            step={0.1}
+            step="any"
             value={milesValue}
             onChange={e => {
               setMilesValue(e.target.value);
