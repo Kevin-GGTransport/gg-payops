@@ -47,6 +47,10 @@ function planPayRuns(legs: Array<{ package_id: string | null; package_note: stri
   const runs = new Map<number, number>();
   const folded = new Set<number>();
   for (let i = 0; i < legs.length; i++) {
+    // A member already covered by an earlier run must not open its own run:
+    // with 3+ legs in one package it would overlap the carrier's merge and
+    // exceljs throws "Cannot merge already merged cells"
+    if (folded.has(i)) continue;
     const leg = legs[i];
     if (!leg.package_id || !leg.package_note) continue;
     let k = i + 1;
@@ -141,10 +145,13 @@ function addDriverSheet(
     }
   }
 
-  // Fuel-subsidy settlement line for every driver (and owner): label sits
-  // under Load#, amount in the Driver column
-  const fuel = sheet.addRow(["", "燃油补助", "", "", "", "", null, Number(subsidy.toFixed(2))]);
-  gridify(fuel, true);
+  // Fuel-subsidy settlement line: owners only (drivers earn none at entry,
+  // the $0.00 line was noise under their sheets); label sits under Load#,
+  // amount in the Driver column
+  if (driver.driver_type === "OWNER") {
+    const fuel = sheet.addRow(["", "燃油补助", "", "", "", "", null, Number(subsidy.toFixed(2))]);
+    gridify(fuel, true);
+  }
 
   const total = sheet.addRow([
     "Total", "", "", "", "", "",
