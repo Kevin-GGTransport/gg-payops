@@ -9,7 +9,10 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: "bg-navy text-white shadow-xs hover:bg-navy/90",
-        outline: "border border-line bg-background shadow-xs hover:bg-accent hover:text-accent-foreground",
+        // Filled secondary style: borderless gray fill matching the input
+        // family (this variant hosts the combobox triggers); hover deepens
+        // the fill one step, focus keeps the route ring
+        outline: "border border-transparent bg-muted hover:bg-foreground/10 hover:text-foreground",
         secondary: "bg-muted text-muted-foreground shadow-xs hover:bg-muted/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         destructive: "bg-destructive text-white shadow-xs hover:bg-destructive/90"

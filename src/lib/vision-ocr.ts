@@ -61,19 +61,33 @@ Extract EVERY trip row, top to bottom, following the sheet's own order:
 - nature: the From-To codes as written, e.g. "HW - MCE1".
 - operation guess: only use codes from this list: {OPERATIONS}. Picking up / 提货 (general freight pickup) -> PU; 提柜 (container pickup at a terminal) -> CNTRPU; delivering / 卸货 (general delivery) -> DEL; 还柜 (returning a container to a terminal) -> CNTRDEL; 空车 / 空木柜 / 车架 (no container, chassis only) -> BOBTAIL; 带空柜 (empty container reposition) -> EMPTY. Default DEL.
 - note: extra marks like 等卸/detention time ranges (14:30-18:30), 还柜, 提货; empty string if none.
-driver_name = the handwritten name in the 司机/Driver header; truck_code = the handwritten 车号 (truck number, e.g. 0608). Use "" when a value is unreadable.`;;
+driver_name = the handwritten name in the 司机/Driver header; truck_code = the handwritten 车号 (truck number, e.g. 0608). Use "" when a value is unreadable.`;
 
-type ChatCompletionResponse = {
-  choices?: Array<{ message?: { content?: string | null } }>;
-};
+/** Narrow the upstream envelope without trusting its shape */
+function contentOf(data: unknown): string | null {
+  if (typeof data !== "object" || data === null) return null;
+  const choices = (data as { choices?: unknown }).choices;
+  if (!Array.isArray(choices) || choices.length === 0) return null;
+  const first = choices[0];
+  if (typeof first !== "object" || first === null) return null;
+  const message = (first as { message?: unknown }).message;
+  if (typeof message !== "object" || message === null) return null;
+  const content = (message as { content?: unknown }).content;
+  return typeof content === "string" ? content : null;
+}
 
-function isValidRow(row: OcrTripRow, operations: string[]): boolean {
+/** Row shape guard: the model output is external input, never trust the cast */
+function isValidRow(row: unknown, operations: string[]): row is OcrTripRow {
+  if (typeof row !== "object" || row === null) return false;
+  const r = row as Record<string, unknown>;
   return (
-    /^\d{4}-\d{2}-\d{2}$/.test(row.date) &&
-    typeof row.load_no === "string" &&
-    typeof row.from_zip === "string" &&
-    typeof row.to_zip === "string" &&
-    operations.includes(row.operation)
+    typeof r.date === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(r.date) &&
+    typeof r.load_no === "string" &&
+    typeof r.from_zip === "string" &&
+    typeof r.to_zip === "string" &&
+    typeof r.operation === "string" &&
+    operations.includes(r.operation)
   );
 }
 
@@ -122,20 +136,23 @@ export async function recognizeTripPhoto(file: File, operations: string[]): Prom
     throw new Error(`upstream_${res.status}${body.slice(0, 120) ? `: ${body.slice(0, 120)}` : ""}`);
   }
 
-  const data = (await res.json()) as ChatCompletionResponse;
-  const content = data.choices?.[0]?.message?.content;
+  const content = contentOf(await res.json());
   if (!content) throw new Error("empty_response");
 
-  let parsed: OcrSheet;
+  let raw: unknown;
   try {
-    parsed = JSON.parse(content) as OcrSheet;
+    raw = JSON.parse(content);
   } catch {
     throw new Error("bad_json");
   }
-  if (!Array.isArray(parsed.rows)) throw new Error("bad_shape");
+  if (typeof raw !== "object" || raw === null) throw new Error("bad_shape");
+  const sheet = raw as Record<string, unknown>;
+  if (!Array.isArray(sheet.rows)) throw new Error("bad_shape");
 
-  parsed.rows = parsed.rows.filter(row => isValidRow(row, operations));
-  parsed.driver_name ??= "";
-  parsed.truck_code = String(parsed.truck_code ?? "").trim();
-  return parsed;
+  // Rebuild from checked fields only - the raw object never passes through
+  return {
+    driver_name: typeof sheet.driver_name === "string" ? sheet.driver_name : "",
+    truck_code: typeof sheet.truck_code === "string" ? sheet.truck_code.trim() : "",
+    rows: sheet.rows.filter(row => isValidRow(row, operations))
+  };
 }

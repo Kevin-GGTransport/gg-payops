@@ -83,7 +83,7 @@ export function SelectField({
       <select
         name={name}
         defaultValue={defaultValue}
-        className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm font-normal text-foreground shadow-xs outline-none focus-visible:border-route focus-visible:ring-2 focus-visible:ring-route/30"
+        className="h-9 w-full rounded-md border border-transparent bg-muted px-3 py-1 text-sm font-normal text-foreground outline-none focus-visible:border-route focus-visible:bg-card"
       >
         {options.map(option => (
           <option key={option.value} value={option.value}>

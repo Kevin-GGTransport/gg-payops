@@ -60,7 +60,15 @@ export function useRosterTable<TData>(options: {
   React.useEffect(() => {
     try {
       const parsed: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? "");
-      if (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0) {
+      // LocalStorage is corruptible input: accept a plain object of finite
+      // numbers only (columnId -> px width), everything else falls to defaults
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed) &&
+        Object.keys(parsed).length > 0 &&
+        Object.values(parsed).every(v => typeof v === "number" && Number.isFinite(v))
+      ) {
         setColumnSizing(parsed as ColumnSizingState);
       }
     } catch {

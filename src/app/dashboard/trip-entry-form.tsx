@@ -129,8 +129,8 @@ const SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
   { id: "to_location", header: "终点", size: 130, minSize: 100 },
   { id: "operation", header: "操作", size: 72, minSize: 64 },
   { id: "load_no", header: "Load#", size: 90, minSize: 76 },
-  { id: "miles", header: "里程 (mi)", size: 82, minSize: 72 },
-  { id: "fuel_gallons", header: "加油 (gal)", size: 78, minSize: 68 },
+  { id: "miles", header: "里程 (mi)", size: 92, minSize: 80 },
+  { id: "fuel_gallons", header: "加油 (gal)", size: 84, minSize: 72 },
   { id: "pay_amount", header: "本趟工资 ($)", size: 100, minSize: 92 },
   { id: "notes", header: "备注", size: 182, minSize: 100 },
   { id: "delete", header: "操作", size: 40, enableResizing: false, meta: { headerClass: "px-1.5" } }
@@ -217,8 +217,8 @@ const PKG_UNIT_OPTIONS: ReadonlyArray<{ value: PkgUnit; label: string }> = (
 function planPackages(
   unit: Exclude<PkgUnit, "LEG">,
   slots: { id: number }[],
-  dateByRow: Record<number, string>,
-  fromByRow: Record<number, string>,
+  effDateByRow: Record<number, string>,
+  effFromByRow: Record<number, string>,
   toByRow: Record<number, string>,
   codeByLocId: Map<string, string>
 ): PkgPlan[] {
@@ -236,13 +236,13 @@ function planPackages(
   const fromKey = new Map<number, string>();
   const toKey = new Map<number, string>();
   for (const slot of slots) {
-    fromKey.set(slot.id, keyOf(fromByRow[slot.id]));
+    fromKey.set(slot.id, keyOf(effFromByRow[slot.id]));
     toKey.set(slot.id, keyOf(toByRow[slot.id]));
   }
   const byDate = new Map<string, number[]>();
   for (const slot of slots) {
     const to = toByRow[slot.id];
-    const date = dateByRow[slot.id];
+    const date = effDateByRow[slot.id];
     if (!to || !date) continue;
     const list = byDate.get(date) ?? [];
     list.push(slot.id);
@@ -285,6 +285,12 @@ function planPackages(
  * names are positional (g_<group>_row_<index>_) so deleting a middle row only
  * shifts names, never values.
  *
+ * Date and start arrive as CONTROLLED effective values: the group derives the
+ * carry chain top-down in one render (previous leg's date/to fills an untouched
+ * row) instead of each row accepting a carry in an effect and reporting back -
+ * that round-trip re-rendered the whole sheet once per row down the chain.
+ * A hand edit reports upward and sticks (the group keeps it as the row's own).
+ *
  * Memoized: every tab's rows stay mounted (forceMount), so one keystroke in
  * one group must not reconcile every row of every group. All callbacks are
  * group-level and take the row id; GroupSection memoizes them.
@@ -301,8 +307,8 @@ const EntryRow = React.memo(function EntryRow({
   wageRule,
   defaults,
   removable,
-  carryFrom,
-  carryDate,
+  dateValue,
+  fromValue,
   onRemove,
   /** Marks the sheet dirty + schedules a draft save; picker fields write their
    *  hidden inputs programmatically (no change event bubbles), so every
@@ -343,10 +349,10 @@ const EntryRow = React.memo(function EntryRow({
   wageRule: WageRuleData | null;
   defaults?: RefillRow;
   removable: boolean;
-  /** Current to-value of the previous leg in this group ("" when none yet) */
-  carryFrom: string;
-  /** Current date of the previous leg ("" when none yet) - sticky follow */
-  carryDate: string;
+  /** Effective date (own, else carried from the previous leg) - group-derived */
+  dateValue: string;
+  /** Effective start (own, else the previous leg's to) - group-derived */
+  fromValue: string;
   onRemove: (rowId: number) => void;
   onDirty: () => void;
   onPayChange: (rowId: number, value: string) => void;
@@ -380,12 +386,6 @@ const EntryRow = React.memo(function EntryRow({
 }) {
   const prefix = `g_${groupIndex}_row_${rowIndex}_`;
   const legLabel = `第 ${groupIndex + 1} 组第 ${rowIndex + 1} 程`;
-  // Controlled date: the wage rule is picked by the row's own date. No fixed
-  // default - new rows open empty; the previous leg's date stickily carries
-  // down while this row is untouched (one keystroke covers the whole sheet)
-  const [dateValue, setDateValue] = React.useState(defaults?.trip_date || "");
-  // Whether the current date came from carry-down, not the user's own edit
-  const dateInherited = React.useRef(false);
   // Dictionary order decides the opening choice (seeds: DEL first)
   const defaultOperation = operations[0]?.code ?? "DEL";
   const [operation, setOperation] = React.useState(defaults?.operation || defaultOperation);
@@ -405,11 +405,7 @@ const EntryRow = React.memo(function EntryRow({
   const [loadNoValue, setLoadNoValue] = React.useState(
     defaults?.operation && !operationRequiresLoad(defaults.operation) ? "" : defaults?.load_no || ""
   );
-  const [fromValue, setFromValue] = React.useState(defaults?.from || "");
   const [toValue, setToValue] = React.useState(defaults?.to || "");
-  // Whether the current from value came from carry-over, not the user's own
-  // pick (refill/photo defaults count as manual - carry never overwrites them)
-  const fromInherited = React.useRef(false);
   const [milesValue, setMilesValue] = React.useState(defaults?.miles || "0");
   // Fuel-up log (US gallons): optional ledger field, never priced - most legs
   // stay empty and submit as 0
@@ -423,54 +419,22 @@ const EntryRow = React.memo(function EntryRow({
   // error restore) basis changes never overwrite it - only "按规则重算" drops back
   const [manualPay, setManualPay] = React.useState<string | null>(defaults?.pay_amount || null);
 
-  // Carry-over start (sticky follow): the previous leg's endpoint fills this
-  // leg's start while it is empty or still carry-inherited - a hand-picked
-  // start sticks forever, an empty carry never clears what's already there
-  React.useEffect(() => {
-    if (!carryFrom) return;
-    if (fromInherited.current || fromValue === "") {
-      fromInherited.current = true;
-      setFromValue(carryFrom);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [carryFrom]);
-
-  // Keep the group's from map current (ROUND_TRIP circuits anchor on it);
-  // carry-over starts never pass through the picker's onValueChange, so the
-  // map must track the value itself, exactly like the date map below
-  React.useEffect(() => {
-    onFromChange(rowId, fromValue);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromValue]);
-
-  // Report the initial (refill/photo) endpoint once so the next leg can carry it
+  // Report the initial (refill/photo) endpoints/date once so the next leg can
+  // carry them; every later change reports directly from the pick handlers.
+  // Only the one-shot defaults count - the effective from/date may already be
+  // a carry on mount, and reporting that would pin it as this row's own
   React.useEffect(() => {
     if (toValue) onToChange(rowId, toValue);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Date carry-down (sticky follow): while this row's date is empty or still
-  // carry-inherited, the previous leg's date fills it - a hand edit sticks
   React.useEffect(() => {
-    if (!carryDate) return;
-    if (dateInherited.current || dateValue === "") {
-      dateInherited.current = true;
-      setDateValue(carryDate);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [carryDate]);
-
-  // Report the initial (refill/photo) date once so the next leg can carry it
-  React.useEffect(() => {
-    if (dateValue) onDateChange(rowId, dateValue);
+    if (defaults?.from) onFromChange(rowId, defaults.from);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Keep the group's date map current (carry source + wage-rule recompute)
   React.useEffect(() => {
-    onDateChange(rowId, dateValue);
+    if (defaults?.trip_date) onDateChange(rowId, defaults.trip_date);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateValue]);
+  }, []);
 
   // Filled = has a destination. A start alone can be the sticky carry-over
   // from the previous leg, which must not turn a reserve row "filled"
@@ -613,8 +577,7 @@ const EntryRow = React.memo(function EntryRow({
           name={`${prefix}trip_date`}
           value={dateValue}
           onValueChange={value => {
-            dateInherited.current = false;
-            setDateValue(value);
+            onDateChange(rowId, value);
             onDirty();
           }}
           aria-label={`${legLabel}日期`}
@@ -631,8 +594,6 @@ const EntryRow = React.memo(function EntryRow({
           aria-label={`${legLabel}起点`}
           triggerClassName="h-8 px-2"
           onValueChange={value => {
-            fromInherited.current = false;
-            setFromValue(value);
             onFromChange(rowId, value);
             onDirty();
           }}
@@ -904,13 +865,38 @@ const GroupSection = React.memo(function GroupSection({
     return map;
   }, [locations]);
 
-  // Planned packages follow the sheet live (endpoints/dates/rows/mode)
+  // Effective carry chain, derived top-down in ONE pass: a row without its own
+  // date follows the previous leg's, a row without its own start takes the
+  // previous leg's to. The maps hold only hand edits / refill defaults, so
+  // changing a leg's date or endpoint re-flows every untouched row below in
+  // this same render - no per-row accept-and-report effect round-trips
+  // cascading one full-sheet re-render per row down the chain.
+  const eff = React.useMemo(() => {
+    const dates: Record<number, string> = {};
+    const froms: Record<number, string> = {};
+    const dateList: string[] = [];
+    const fromList: string[] = [];
+    rows.forEach((slot, i) => {
+      const prevDate = i > 0 ? dateList[i - 1] : "";
+      const date = slot.id in dateByRow ? dateByRow[slot.id] : prevDate;
+      const from =
+        slot.id in fromByRow ? fromByRow[slot.id] : i > 0 ? (toByRow[rows[i - 1].id] ?? "") : "";
+      dates[slot.id] = date;
+      froms[slot.id] = from;
+      dateList[i] = date;
+      fromList[i] = from;
+    });
+    return { dates, froms, dateList, fromList };
+  }, [rows, dateByRow, fromByRow, toByRow]);
+
+  // Planned packages follow the sheet live (endpoints/dates/rows/mode) - fed
+  // the effective endpoints so carried starts anchor circuits like picks
   const plans = React.useMemo(
     () =>
       pkgUnit === "LEG"
         ? []
-        : planPackages(pkgUnit, rows, dateByRow, fromByRow, toByRow, codeByLocId),
-    [pkgUnit, rows, dateByRow, fromByRow, toByRow, codeByLocId]
+        : planPackages(pkgUnit, rows, eff.dates, eff.froms, toByRow, codeByLocId),
+    [pkgUnit, rows, eff, toByRow, codeByLocId]
   );
 
   // Rule suggestion per package: driver-scoped beats global (OWNER: owner
@@ -1024,6 +1010,12 @@ const GroupSection = React.memo(function GroupSection({
       });
       setRows(current => current.filter(r => r.id !== rowId));
       setToByRow(current => {
+        if (!(rowId in current)) return current;
+        const next = { ...current };
+        delete next[rowId];
+        return next;
+      });
+      setFromByRow(current => {
         if (!(rowId in current)) return current;
         const next = { ...current };
         delete next[rowId];
@@ -1211,7 +1203,7 @@ const GroupSection = React.memo(function GroupSection({
               onDirty();
             }}
             aria-label={`第 ${index + 1} 组计价方式`}
-            className="h-10 rounded-md border border-line bg-transparent px-2.5 text-[13px] focus-visible:ring-1"
+            className="h-10 rounded-md border border-transparent bg-muted px-2.5 text-[13px] focus-visible:border-route focus-visible:bg-card"
           >
             {PKG_UNIT_OPTIONS.map(option => (
               <option key={option.value} value={option.value}>
@@ -1304,8 +1296,8 @@ const GroupSection = React.memo(function GroupSection({
               // Day separator band: whenever this row's date differs from the
               // row above (a sheet's first dated row included), a full-width
               // band names the day so multi-day sheets read in blocks
-              const date = dateByRow[slot.id] ?? "";
-              const prevDate = i > 0 ? (dateByRow[rows[i - 1].id] ?? "") : "";
+              const date = eff.dateList[i];
+              const prevDate = i > 0 ? eff.dateList[i - 1] : "";
               const dayStart = date && date !== prevDate ? date : null;
               return (
                 <React.Fragment key={slot.id}>
@@ -1328,8 +1320,8 @@ const GroupSection = React.memo(function GroupSection({
                     wageRule={wageRule}
                     defaults={slot.defaults}
                     removable={rows.length > 1}
-                    carryFrom={i === 0 ? "" : (toByRow[rows[i - 1].id] ?? "")}
-                    carryDate={i === 0 ? "" : (dateByRow[rows[i - 1].id] ?? "")}
+                    dateValue={eff.dateList[i]}
+                    fromValue={eff.fromList[i]}
                     onRemove={removeRowById}
                     onDirty={onDirty}
                     onPayChange={handleRowPayChange}

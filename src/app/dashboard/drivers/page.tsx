@@ -8,7 +8,13 @@ import { FormGrid, TextField, DateField, TextareaField, CheckboxField, SelectFie
 import { FlashToast } from "@/components/flash-toast";
 import { requireUser } from "@/lib/auth";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
-import { PRICING_MODE_LABELS, type DriverType, type PricingMode } from "@/lib/labels";
+import {
+  DRIVER_TYPES,
+  PRICING_MODE_LABELS,
+  PRICING_MODES,
+  type DriverType,
+  type PricingMode
+} from "@/lib/labels";
 import { listDrivers, getDriverById, driverTypeCounts } from "@/lib/queries/drivers";
 import { saveDriver } from "./actions";
 import { DriversTable } from "./drivers-table";
@@ -56,14 +62,21 @@ export default async function DriversPage({
     editId ? getDriverById(editId) : Promise.resolve(null)
   ]);
 
+  // URL/form params are external input: whitelist before casting (a tampered
+  // ?f_driver_type would otherwise flow into the form as a bogus type)
+  const rawType = formField(sp, "driver_type", editing?.driver_type);
+  const rawPricingMode = formField(sp, "pricing_mode", editing?.pricing_mode);
+
   const values = {
     name: formField(sp, "full_name", editing?.full_name),
-    type: formField(sp, "driver_type", editing?.driver_type) as DriverType,
+    type: DRIVER_TYPES.includes(rawType as DriverType) ? (rawType as DriverType) : "DRIVER",
     priceAsDriver:
       firstValue(sp.price_as_driver) !== undefined
         ? firstValue(sp.price_as_driver) === "1"
         : (editing?.price_as_driver ?? false),
-    pricingMode: formField(sp, "pricing_mode", editing?.pricing_mode) as PricingMode,
+    pricingMode: PRICING_MODES.includes(rawPricingMode as PricingMode)
+      ? (rawPricingMode as PricingMode)
+      : "LEG",
     phone: formField(sp, "phone", editing?.phone),
     licenseNo: formField(sp, "license_no", editing?.license_no),
     licenseClass: formField(sp, "license_class", editing?.license_class),

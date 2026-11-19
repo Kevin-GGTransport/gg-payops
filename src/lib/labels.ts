@@ -10,6 +10,9 @@ export const DRIVER_TYPE_LABELS: Record<DriverType, string> = {
   OWNER: "车主"
 };
 
+/** Whitelist for validating URL/form values before casting to DriverType */
+export const DRIVER_TYPES = Object.keys(DRIVER_TYPE_LABELS) as DriverType[];
+
 /** Advisory pricing mode stored on ops.drivers.pricing_mode (entry-sheet default) */
 export type PricingMode = "LEG" | "DAY" | "ROUND_TRIP";
 
@@ -18,6 +21,9 @@ export const PRICING_MODE_LABELS: Record<PricingMode, string> = {
   DAY: "按天打包",
   ROUND_TRIP: "按往返打包"
 };
+
+/** Whitelist for validating URL/form values before casting to PricingMode */
+export const PRICING_MODES = Object.keys(PRICING_MODE_LABELS) as PricingMode[];
 
 export const LOCATION_TYPE_LABELS: Record<LocationType, string> = {
   BASE: "基地",

@@ -122,6 +122,15 @@ export function DateField({
     onValueChange?.(next);
   }
 
+  /** Typed path: commit upward but keep the raw text. Rewriting it mid-keystroke
+   *  (e.g. "11/1" -> "2026-11-01") moves the cursor to the end and garbles the
+   *  characters still coming, silently committing the wrong date - the box only
+   *  normalizes to ISO on blur, when nothing is being typed anymore. */
+  function commitTyped(parsed: string) {
+    if (!isControlled) setInternalIso(parsed);
+    onValueChange?.(parsed);
+  }
+
   return (
     <div className={cn(label && "grid gap-1.5 text-xs font-medium text-muted-foreground", className)}>
       {label && <span>{label}</span>}
@@ -137,15 +146,7 @@ export function DateField({
         <InputGroup
           data-empty={!iso}
           aria-label={rest["aria-label"] ?? (label ? `选择${label}` : undefined)}
-          className={cn(
-            size === "sm" && "h-8",
-            // Site focus color is route blue (Button/Input primitives); the
-            // official group focus is neutral ring - override with important
-            // so it reliably beats the primitive's own has-focus utilities
-            "has-[[data-slot=input-group-control]:focus-visible]:border-route! has-[[data-slot=input-group-control]:focus-visible]:ring-2! has-[[data-slot=input-group-control]:focus-visible]:ring-route/30!",
-            disabled && "opacity-50",
-            groupClassName
-          )}
+          className={cn(size === "sm" && "h-8", disabled && "opacity-50", groupClassName)}
         >
           <InputGroupInput
             value={focused ? text : iso || ""}
@@ -158,7 +159,7 @@ export function DateField({
             onChange={e => {
               setText(e.target.value);
               const parsed = parseDateText(e.target.value);
-              if (parsed !== null) commit(parsed);
+              if (parsed !== null) commitTyped(parsed);
             }}
             onFocus={() => {
               setText(iso);

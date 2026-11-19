@@ -70,6 +70,10 @@ export function collectDraftFromDOM(
   for (let g = 0; g < groupCount && g < MAX_GROUPS; g++) {
     const rowCount = Number.parseInt(field(form, `g_${g}_row_count`), 10) || 0;
     const rows: DraftRow[] = [];
+    // Effective date of the row above: dropped echoes keep following it, so
+    // comparisons run against this chain value, not the stored (maybe dropped)
+    // previous row value
+    let chainDate: string | undefined;
     for (let i = 0; i < rowCount && i < MAX_ROWS_PER_GROUP; i++) {
       const p = `g_${g}_row_${i}_`;
       const payInput = form.elements.namedItem(`${p}pay_amount`);
@@ -88,6 +92,18 @@ export function collectDraftFromDOM(
         pay_amount: isManual ? field(form, `${p}pay_amount`) : "",
         notes: field(form, `${p}notes`)
       };
+      // Carried values must not survive as one-shot defaults: a restored row
+      // treats a stored date/start as hand-set and stops following the leg
+      // above. A row whose only content is a date matching the effective date
+      // above (or a start matching the previous row's to) is a carry echo -
+      // drop it so the restore re-derives it from the chain
+      const prev = rows[rows.length - 1];
+      if (prev) {
+        const hasOwn = Boolean(row.to || row.load_no || row.notes || row.fuel_gallons);
+        if (!hasOwn && row.trip_date && row.trip_date === chainDate) row.trip_date = undefined;
+        if (!hasOwn && row.from && row.from === prev.to) row.from = "";
+      }
+      if (row.trip_date) chainDate = row.trip_date;
       if (rowHasContent(row)) anyContent = true;
       rows.push(row);
     }

@@ -75,6 +75,10 @@ export default async function PayrollPage({
 
   const statusFilter = view === "all" ? statusFromTab(firstValue(sp.status)) : "all";
   const counts = archive?.counts ?? { total: 0, draft: 0, verified: 0 };
+  // Each view always has its dataset by construction (period -> merged,
+  // archive -> archive); these locals keep the JSX free of non-null assertions
+  const mergedRows = merged ?? [];
+  const archiveRows = archive?.rows ?? [];
 
   const tabCount = (key: string) =>
     key === "all" ? counts.total : key === "DRAFT" ? counts.draft : counts.verified;
@@ -104,8 +108,8 @@ export default async function PayrollPage({
         }
         actions={
           <div className="flex items-center gap-2">
-            {view === "period" && (
-              <Link className="button button-dark" href={`/dashboard/payroll/export?period=${shownPeriod!.start}`}>
+            {view === "period" && shownPeriod && (
+              <Link className="button button-dark" href={`/dashboard/payroll/export?period=${shownPeriod.start}`}>
                 导出工资表
               </Link>
             )}
@@ -200,7 +204,7 @@ export default async function PayrollPage({
 
           <LedgerPanel label={<>汇总矩阵<b>{totals.drivers} 人出勤 · {idleDrivers} 人无行程</b></>}>
             <StatementsTable
-              statements={merged!}
+              statements={mergedRows}
               drivers={drivers}
               trucks={trucks}
               empty="本周期还没有司机有行程；先去录入行程。"
@@ -234,9 +238,9 @@ export default async function PayrollPage({
             </form>
           </div>
 
-          <LedgerPanel label={<>工资单档案<b>{archive!.rows.length} 张</b></>}>
+          <LedgerPanel label={<>工资单档案<b>{archiveRows.length} 张</b></>}>
             <StatementsTable
-              statements={archive!.rows}
+              statements={archiveRows}
               drivers={drivers}
               trucks={trucks}
               empty={

@@ -12,7 +12,9 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
+  /* 防疲劳：页面底用微暖纸灰（非 100% 纯白），长时间盯屏亮度降一档；
+     卡片保持纯白 --card，面板自然浮起、层次由底色承担 */
+  --background: oklch(0.98 0.003 75);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
@@ -28,6 +30,8 @@
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
+  /* 输入族已改「浅灰填充式」不再画边框（见 ui/input.tsx 等）；本 token 现在
+     只驱动小件描边（checkbox、日历单元格），恢复中性灰降噪 */
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
   --chart-1: oklch(0.785 0.115 274.713);
@@ -198,7 +202,7 @@
   @apply text-[13px] font-medium text-muted-foreground;
 }
 .field input {
-  @apply h-10 w-full rounded-md border border-input bg-card px-3 text-sm outline-none transition-colors focus-visible:border-route focus-visible:ring-2 focus-visible:ring-route/30;
+  @apply h-10 w-full rounded-md border border-transparent bg-muted px-3 text-sm outline-none transition-colors focus-visible:border-route focus-visible:bg-card;
 }
 .button {
   @apply inline-flex h-10 w-full cursor-pointer items-center justify-center rounded-md bg-navy font-semibold text-white transition-colors hover:bg-route focus-visible:ring-2 focus-visible:ring-route focus-visible:ring-offset-2 focus-visible:outline-none;
@@ -348,7 +352,7 @@
   @apply flex gap-1.5;
 }
 .search input {
-  @apply h-9.5 w-[clamp(220px,26vw,320px)] rounded-md border border-input bg-card px-2.5 text-sm outline-none focus-visible:border-route focus-visible:ring-2 focus-visible:ring-route/30;
+  @apply h-9.5 w-[clamp(220px,26vw,320px)] rounded-md border border-transparent bg-card px-2.5 text-sm outline-none focus-visible:border-route;
 }
 .search button {
   @apply h-9.5 cursor-pointer rounded-md border border-navy bg-navy px-3.5 font-semibold text-white transition-colors hover:bg-route;
@@ -371,7 +375,7 @@
   @apply underline;
 }
 .filter-select {
-  @apply h-9.5 cursor-pointer rounded-md border border-input bg-card px-2.5 text-sm outline-none focus-visible:border-route focus-visible:ring-2 focus-visible:ring-route/30;
+  @apply h-9.5 cursor-pointer rounded-md border border-transparent bg-card px-2.5 text-sm outline-none focus-visible:border-route;
 }
 
 /* 筛选下拉（FilterSelect）：触发按钮 + Popover 复选/单选列表面板 */
@@ -457,7 +461,14 @@ table {
 }
 th,
 td {
-  @apply border-b border-line px-3 py-2 text-left align-middle whitespace-nowrap;
+  @apply border-b border-line px-3 text-left align-middle whitespace-nowrap;
+}
+/* 防疲劳：数据行上下留白 +25%（全天录入/扫读的行距放松）；表头保持紧凑 */
+th {
+  @apply py-2;
+}
+td {
+  @apply py-2.5;
 }
 /* 表头回归 shadcn 标准：灰底、xs 常规字重、细线（与 TableHead 原语一致，
    raw <th> 也自动同款） */
@@ -487,17 +498,25 @@ td.ctr {
 .roster tbody tr {
   transition: background-color 120ms ease;
 }
-.roster tbody tr:hover {
+/* 防疲劳斑马纹：宽表扫行不串行。语义行（小计/合计/停用/标红/日期分隔带）
+   不染，保持自身信号；hover 与特殊行 hover 同落 td 级，层叠互不遮蔽 */
+.roster tbody tr:nth-child(even):not(.matrix-sub):not(.matrix-total):not(.row-off):not(.row-flagged):not(.day-sep) > td {
+  @apply bg-muted/35;
+}
+.roster tbody tr:hover:not(.row-off):not(.row-flagged) > td {
   @apply bg-muted/50;
+}
+.roster tbody tr.row-off:hover > td {
+  @apply bg-muted/30;
+}
+.roster tbody tr.row-flagged:hover > td {
+  @apply bg-red-100/70;
 }
 .roster .strong {
   @apply font-semibold text-foreground;
 }
 .roster .row-off td {
   @apply text-muted-foreground/70;
-}
-.roster .row-off:hover {
-  @apply bg-muted/30;
 }
 /* Verified statement whose trips changed afterwards: permanent red flag */
 .roster .row-flagged td {
@@ -506,9 +525,6 @@ td.ctr {
 .roster .row-flagged .num,
 .roster .row-flagged .mono {
   @apply text-red-700;
-}
-.roster .row-flagged:hover {
-  @apply bg-red-100/70;
 }
 /* The td itself must stay a table cell: display:flex on a td makes the
    browser wrap it in an anonymous cell that drops out of the row's
