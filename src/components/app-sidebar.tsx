@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  BarChart3,
   BookOpen,
   Calculator,
   ChevronRight,
@@ -58,7 +59,8 @@ const GROUPS: MenuGroup[] = [
     label: "工资结算",
     items: [
       { href: "/dashboard/payroll", label: "工资单", icon: Calculator },
-      { href: "/dashboard/trips", label: "行程管理", icon: ScrollText }
+      { href: "/dashboard/trips", label: "行程管理", icon: ScrollText },
+      { href: "/dashboard/stats", label: "数据统计", icon: BarChart3 }
     ]
   },
   {
