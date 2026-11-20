@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { type ColumnDef } from "@tanstack/react-table";
 
@@ -23,7 +24,10 @@ export function DriversTable({
   returnTo: string;
   empty: string;
 }) {
-  const columns: ColumnDef<DriverRow, unknown>[] = [
+  // Stable identity across client re-renders: a fresh array per render churns
+  // TanStack's sizing sync (the freeze family); rebuilt only when the return
+  // path changes
+  const columns = React.useMemo<ColumnDef<DriverRow, unknown>[]>(() => [
     {
       id: "name",
       header: "姓名",
@@ -132,7 +136,7 @@ export function DriversTable({
         );
       }
     }
-  ];
+  ], [returnTo]);
 
   const table = useRosterTable({
     data: drivers,

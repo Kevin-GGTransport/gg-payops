@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { type ColumnDef } from "@tanstack/react-table";
 
@@ -18,7 +19,9 @@ export function OperationsTable({
   operations: OperationTypeRow[];
   empty: string;
 }) {
-  const columns: ColumnDef<OperationTypeRow, unknown>[] = [
+  // Stable identity across client re-renders: a fresh array per render churns
+  // TanStack's sizing sync (the freeze family)
+  const columns = React.useMemo<ColumnDef<OperationTypeRow, unknown>[]>(() => [
     {
       id: "code",
       header: "代码",
@@ -108,7 +111,7 @@ export function OperationsTable({
         );
       }
     }
-  ];
+  ], []);
 
   const table = useRosterTable({
     data: operations,

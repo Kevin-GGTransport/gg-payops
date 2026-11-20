@@ -5,6 +5,7 @@ import { useFormStatus } from "react-dom";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { ComboboxField } from "@/components/combobox-field";
 import { cn } from "@/lib/utils";
 
 // Calendar-combo date picker (typed input + calendar popover), official
@@ -68,7 +69,9 @@ export function TextareaField({ label, name, placeholder, defaultValue, rows = 2
   );
 }
 
-/** Native select styled to match the other registry-card fields */
+/** Registry-card dropdown on the shadcn combo (Popover + Command), matching
+ *  the other fields' gray-fill look; the value submits via hidden input like
+ *  the old native select did */
 export function SelectField({
   label,
   name,
@@ -78,21 +81,18 @@ export function SelectField({
   className
 }: BaseField & { options: ReadonlyArray<{ value: string; label: string }>; hint?: string }) {
   return (
-    <label className={cn(fieldClass, className)}>
-      {label}
-      <select
+    <div className={cn(fieldClass, className)}>
+      <span>{label}</span>
+      <ComboboxField
         name={name}
         defaultValue={defaultValue}
-        className="h-9 w-full rounded-md border border-transparent bg-muted px-3 py-1 text-sm font-normal text-foreground outline-none focus-visible:border-route focus-visible:bg-card"
-      >
-        {options.map(option => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+        options={options}
+        searchable={false}
+        clearable={false}
+        aria-label={`选择${label}`}
+      />
       {hint && <span className="text-[11px] font-normal leading-tight text-muted-foreground/80">{hint}</span>}
-    </label>
+    </div>
   );
 }
 

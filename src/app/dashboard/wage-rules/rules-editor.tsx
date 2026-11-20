@@ -34,37 +34,44 @@ const PRICE_UNITS = [
 
 const cellInput =
   "h-8 border-0 bg-transparent px-2 shadow-none rounded-none text-[13px] focus-visible:ring-1";
-const cellSelect =
-  "h-8 border-0 bg-transparent px-1.5 shadow-none rounded-none text-[13px] focus-visible:ring-1 cursor-pointer";
+/** Cell-trigger look for the combo pickers: light like the typed cells,
+ *  one step of fill feedback on hover/open */
+const cellPickTrigger =
+  "h-8 border-0 bg-transparent px-1.5 text-[13px] shadow-none rounded-none hover:bg-muted/40 data-[state=open]:bg-muted/40";
 
-/** Compact styled native select: the per-row dropdowns stay light */
+/** Compact cell dropdown on the shadcn combo (Popover + Command) - the same
+ *  picker family as the 适用司机 column, cell-sized; value submits via the
+ *  hidden input like the old native select did */
 function CellSelect({
   name,
   value,
   onChange,
   options,
-  ariaLabel
+  ariaLabel,
+  clearable = false,
+  placeholder = "请选择"
 }: {
   name: string;
   value: string;
   onChange: (value: string) => void;
   options: ReadonlyArray<{ value: string; label: string }>;
   ariaLabel: string;
+  /** Empty value allowed (renders as the placeholder pick) */
+  clearable?: boolean;
+  placeholder?: string;
 }) {
   return (
-    <select
+    <ComboboxField
       name={name}
       value={value}
-      onChange={e => onChange(e.target.value)}
+      onValueChange={onChange}
+      options={options}
+      clearable={clearable}
+      searchable={false}
+      placeholder={placeholder}
       aria-label={ariaLabel}
-      className={cellSelect}
-    >
-      {options.map(option => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+      triggerClassName={cellPickTrigger}
+    />
   );
 }
 
@@ -116,7 +123,7 @@ export function RulesEditor({
   const [driverFilter, setDriverFilter] = React.useState("");
 
   const driverOptions = React.useMemo(
-    () => [{ value: "", label: "所有人" }, ...drivers.map(d => ({ value: d.id, label: d.full_name }))],
+    () => drivers.map(d => ({ value: d.id, label: d.full_name })),
     [drivers]
   );
   // Driver picker options: searchable, grouped 司机/车主, pricing identity hint
@@ -242,18 +249,16 @@ export function RulesEditor({
           </div>
           <div className="mb-1.5 flex items-center gap-2 text-xs text-muted-foreground">
             <span>按司机看价：</span>
-            <select
+            <ComboboxField
               value={driverFilter}
-              onChange={e => setDriverFilter(e.target.value)}
+              onValueChange={setDriverFilter}
+              options={driverOptions}
+              clearable
+              searchable
+              placeholder="所有人"
               aria-label="按司机筛选价格规则"
-              className={`${cellSelect} border border-line rounded px-2`}
-            >
-              {driverOptions.map(option => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+              triggerClassName="h-8 rounded border border-line bg-card px-2 text-[13px] w-44"
+            />
           </div>
           <table>
             <thead>
@@ -337,10 +342,9 @@ export function RulesEditor({
                       name={`price_${i}_operation`}
                       value={price.operation}
                       onChange={value => updatePrice(i, { operation: value })}
-                      options={[
-                        { value: "", label: "不限" },
-                        ...operations.map(op => ({ value: op.code, label: op.code }))
-                      ]}
+                      options={operations.map(op => ({ value: op.code, label: op.code }))}
+                      clearable
+                      placeholder="不限"
                       ariaLabel={`价格规则 ${i + 1} 操作限定`}
                     />
                   </td>

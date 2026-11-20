@@ -254,9 +254,12 @@ export type DriverPeriodTripRow = {
 function oneDayTrail(chainable: DriverPeriodTripRow[]): DriverPeriodTripRow[] | null {
   const outgoing = new Map<string, DriverPeriodTripRow[]>();
   for (const leg of chainable) {
-    const bucket = outgoing.get(leg.from_location_id!);
+    // Chaining keys by origin; a null-from leg can only ever start a trail,
+    // so it never needs an outgoing bucket
+    if (leg.from_location_id === null) continue;
+    const bucket = outgoing.get(leg.from_location_id);
     if (bucket) bucket.push(leg);
-    else outgoing.set(leg.from_location_id!, [leg]);
+    else outgoing.set(leg.from_location_id, [leg]);
   }
   const trail: DriverPeriodTripRow[] = [];
   const used = new Set<string>();

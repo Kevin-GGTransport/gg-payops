@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { type ColumnDef } from "@tanstack/react-table";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
@@ -18,7 +19,9 @@ export function WageRulesTable({
   /** Currently opened version: its row gets the route-blue pick line */
   selectedId?: string;
 }) {
-  const columns: ColumnDef<WageRuleVersionSummary, unknown>[] = [
+  // Stable identity across client re-renders: a fresh array per render churns
+  // TanStack's sizing sync (the freeze family)
+  const columns = React.useMemo<ColumnDef<WageRuleVersionSummary, unknown>[]>(() => [
     {
       id: "name",
       header: "版本",
@@ -82,7 +85,7 @@ export function WageRulesTable({
           </span>
         )
     }
-  ];
+  ], []);
 
   const table = useRosterTable({
     data: versions,

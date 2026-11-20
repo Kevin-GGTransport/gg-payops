@@ -112,8 +112,11 @@ export function MapPointPicker({
   /** Fired on search picks, map clicks and marker drags */
   onPick: (pick: MapPick) => void;
 }) {
-  const hasInitial =
-    typeof initialLat === "number" && typeof initialLng === "number";
+  // Narrowed once: both coordinates or neither (no per-use assertions)
+  const initial =
+    typeof initialLat === "number" && typeof initialLng === "number"
+      ? { lat: initialLat, lng: initialLng }
+      : null;
   const mapDivRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<google.maps.Map | null>(null);
   const geocoderRef = React.useRef<google.maps.Geocoder | null>(null);
@@ -121,9 +124,7 @@ export function MapPointPicker({
   // Missing key is render-time derived; only load failure needs state
   const [loadFailed, setLoadFailed] = React.useState(false);
   const unavailable = !API_KEY || loadFailed;
-  const [point, setPoint] = React.useState<MapPoint | null>(
-    hasInitial ? { lat: initialLat!, lng: initialLng! } : null
-  );
+  const [point, setPoint] = React.useState<MapPoint | null>(initial);
   const [picked, setPicked] = React.useState(false);
   const [resolving, setResolving] = React.useState(false);
   const [label, setLabel] = React.useState<string | undefined>(undefined);
@@ -188,8 +189,8 @@ export function MapPointPicker({
       .then(() => {
         if (cancelled || !mapDivRef.current) return;
         const map = new google.maps.Map(mapDivRef.current, {
-          center: hasInitial ? { lat: initialLat!, lng: initialLng! } : DEFAULT_CENTER,
-          zoom: hasInitial ? 14 : 10,
+          center: initial ?? DEFAULT_CENTER,
+          zoom: initial ? 14 : 10,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
@@ -201,10 +202,10 @@ export function MapPointPicker({
         map.addListener("click", (event: google.maps.MapMouseEvent) => {
           if (event.latLng) pickRef.current(event.latLng);
         });
-        if (hasInitial) {
+        if (initial) {
           markerRef.current = new google.maps.Marker({
             map,
-            position: { lat: initialLat!, lng: initialLng! },
+            position: initial,
             draggable: true
           });
           markerRef.current.addListener("dragend", () => {

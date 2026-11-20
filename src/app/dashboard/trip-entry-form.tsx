@@ -305,6 +305,7 @@ function planPackages(
     let seq = 0;
     const remaining = [...ids];
     while (remaining.length > 0) {
+      // Non-null by the while condition
       const head = remaining.shift()!;
       const origin = fromKey.get(head) ?? "";
       // No anchor to close on: this leg stays per-priced
@@ -1459,25 +1460,21 @@ const GroupSection = React.memo(function GroupSection({
           )}
         </div>
         <div className="flex items-center gap-2">
-          <label htmlFor={`${prefix}-pkg-unit`} className="text-xs font-medium text-muted-foreground">
-            计价
-          </label>
-          <select
-            id={`${prefix}-pkg-unit`}
+          <span className="text-xs font-medium text-muted-foreground">计价</span>
+          {/* Display-only picker: the unit rides the form via the group's
+              serialized pkg_state, not this control */}
+          <ComboboxField
             value={pkgUnit}
-            onChange={e => {
-              setPkgUnit(e.target.value as PkgUnit);
+            onValueChange={value => {
+              setPkgUnit(value as PkgUnit);
               onDirty();
             }}
+            options={PKG_UNIT_OPTIONS}
+            clearable={false}
+            searchable={false}
             aria-label={`第 ${index + 1} 组计价方式`}
-            className="h-10 rounded-md border border-transparent bg-muted px-2.5 text-[13px] focus-visible:border-route focus-visible:bg-card"
-          >
-            {PKG_UNIT_OPTIONS.map(option => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+            triggerClassName="h-10 px-2.5 text-[13px]"
+          />
         </div>
         <input type="hidden" name={`${prefix}_row_count`} value={rows.length} />
         <input type="hidden" name={`${prefix}_fuel_row_count`} value={fuelSlots.length} />

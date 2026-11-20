@@ -99,7 +99,8 @@ export default async function DriverPeriodPage({
   // Trip edits saved (inline batch or dialog) redirect back here
   const saved = firstValue(sp.saved) === "1";
   // Same landing default as the payroll list: the week that just closed
-  const period = dateParam(firstValue(sp.period)) ? periodOf(dateParam(firstValue(sp.period))!) : defaultPeriod();
+  const periodParam = dateParam(firstValue(sp.period));
+  const period = periodParam ? periodOf(periodParam) : defaultPeriod();
   const defaultWeek = defaultPeriod();
   const today = todayIso();
   const prev = shiftPeriod(period, -1);

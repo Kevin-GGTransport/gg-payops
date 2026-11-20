@@ -11,7 +11,7 @@ import {
   type StatementStatus
 } from "@/lib/labels";
 
-/* 钢印标签：方角、细描边、淡底 */
+/* Stamp-style label: square corners, thin outline, pale fill */
 const pillBase = "inline-flex items-center rounded-[3px] border px-1.5 py-px text-[11px] font-semibold leading-4";
 const tagBase = pillBase;
 
@@ -55,7 +55,8 @@ export function WageRuleStateBadge({ effective, label }: { effective: boolean; l
   );
 }
 
-/* 工资单状态：草稿=灰 · 核对=绿 · 司机确认=红；已改动红标只在详情页渲染 */
+/* Statement status: draft = gray, verified = green, driver-confirmed = red;
+ * the edited variant renders on detail sheets only */
 const STATEMENT_STYLES: Record<StatementStatus, string> = {
   DRAFT: "border-line bg-muted text-muted-foreground",
   VERIFIED: "border-audit/30 bg-audit/10 text-audit",

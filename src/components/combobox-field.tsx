@@ -28,9 +28,10 @@ export type ComboboxOption = {
 type ComboboxFieldProps = {
   /** Field label; omit for toolbar filters (use aria-label instead) */
   label?: string;
-  /** Form field name; the selected value submits via a hidden input */
-  name: string;
-  options: ComboboxOption[];
+  /** Form field name; the selected value submits via a hidden input. Omit
+   *  for display-only pickers that ride component state instead of a form */
+  name?: string;
+  options: ReadonlyArray<ComboboxOption>;
   defaultValue?: string;
   /** Controlled value; when provided the picker stops keeping its own state */
   value?: string;
@@ -65,7 +66,7 @@ type ComboboxFieldProps = {
 };
 
 /** Bucket options by group, preserving first-appearance order */
-function toGroups(options: ComboboxOption[]) {
+function toGroups(options: ReadonlyArray<ComboboxOption>) {
   const buckets = new Map<string, ComboboxOption[]>();
   for (const option of options) {
     const key = option.group ?? "";
@@ -137,7 +138,7 @@ export function ComboboxField({
   return (
     <div ref={rootRef} className={cn(label && "grid gap-1.5 text-xs font-medium text-muted-foreground", className)}>
       {label && <span>{label}</span>}
-      <input type="hidden" name={name} value={value} />
+      {name && <input type="hidden" name={name} value={value} />}
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button

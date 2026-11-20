@@ -247,6 +247,10 @@ const EditableLegRow = React.memo(function EditableLegRow({
     : packaged
       ? Number(payValue) || 0
       : Number(manualPay ?? autoPay.toFixed(2)) || 0;
+  // Known deviation from derive-don't-effect: rows own their live numbers
+  // behind a React.memo wall, so the parent's subtotals lift them through
+  // this effect (a render-phase call would loop). Deps are primitives, so
+  // each change still lands in one frame.
   React.useEffect(() => {
     onValues(leg.id, { miles: milesNum, fuel: fuelNum, pay: payNum, subsidy: subsidyValue });
     // eslint-disable-next-line react-hooks/exhaustive-deps
