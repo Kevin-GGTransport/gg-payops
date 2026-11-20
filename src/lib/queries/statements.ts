@@ -16,16 +16,16 @@ export type StatementRow = {
   period_start: string;
   period_end: string;
   status: StatementStatus | null;
-  /** Permanent flag: trips changed under a VERIFIED statement (red) */
+  /** Permanent flag: trips changed under a checked statement (detail red) */
   edited_after_verify: boolean;
   trip_days: number;
   leg_count: number;
   total_miles: string;
   total_fuel: string;
   total_pay: string;
-  /** Owner fuel subsidy of the period (live in DRAFT, frozen once verified) */
+  /** Owner fuel subsidy of the period (live in DRAFT, frozen once checked) */
   total_fuel_subsidy: string;
-  /** Leg counts per operation code (live in DRAFT, frozen once verified) */
+  /** Leg counts per operation code (live in DRAFT, frozen once checked) */
   op_counts: Record<string, number>;
   trucks: string;
   note: string | null;
@@ -74,8 +74,14 @@ export async function listStatements(filter: {
     filter.period ? Prisma.sql` AND s.period_start = ${filter.period}::date` : Prisma.sql``,
     filter.q ? Prisma.sql` AND d.full_name ILIKE ${`%${filter.q}%`}` : Prisma.sql``
   ];
+  // The 核对 tab covers both checked states (VERIFIED + DONE driver
+  // confirmed) so confirmed sheets never fall out of the tab
   const statusClause =
-    filter.status === "all" ? Prisma.sql`` : Prisma.sql` AND s.status = ${filter.status}::pay.statement_status`;
+    filter.status === "all"
+      ? Prisma.sql``
+      : filter.status === "VERIFIED"
+        ? Prisma.sql` AND s.status IN ('VERIFIED', 'DONE')`
+        : Prisma.sql` AND s.status = ${filter.status}::pay.statement_status`;
 
   const [rows, counts] = await Promise.all([
     prisma.$queryRaw<GeneratedStatementRow[]>`
@@ -86,7 +92,7 @@ export async function listStatements(filter: {
     prisma.$queryRaw<StatementStatusCounts[]>`
       SELECT count(*)::int AS total,
              count(*) FILTER (WHERE s.status = 'DRAFT')::int AS draft,
-             count(*) FILTER (WHERE s.status = 'VERIFIED')::int AS verified
+             count(*) FILTER (WHERE s.status IN ('VERIFIED', 'DONE'))::int AS verified
       FROM pay.payroll_statements s
       JOIN ops.drivers d ON d.id = s.driver_id
       WHERE 1 = 1 ${scope[0]} ${scope[1]}
@@ -130,7 +136,8 @@ export async function statementPeriodTotals() {
  * One period's full rollup: every stored statement, plus ACTIVE drivers
  * without one (no trips - dimmed zero rows for roster context). Drivers who
  * were deactivated after their statement was created still show their row
- * (the pay is owed). Statement numbers are live in DRAFT, frozen in VERIFIED.
+ * (the pay is owed). Statement numbers are live in DRAFT, frozen once checked
+ * (VERIFIED and DONE alike).
  */
 export async function mergedPeriodStatements(period: Period): Promise<StatementRow[]> {
   const [generated, actives] = await Promise.all([

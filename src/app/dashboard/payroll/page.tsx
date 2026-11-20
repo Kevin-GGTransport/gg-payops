@@ -85,7 +85,6 @@ export default async function PayrollPage({
 
   // Period-mode aggregates, straight off the merged rows (what you see is what exports)
   const idleDrivers = merged?.filter(r => r.status === null).length ?? 0;
-  const flagged = merged?.filter(r => r.edited_after_verify).length ?? 0;
   const totals = (merged ?? []).reduce(
     (acc, r) => ({
       drivers: acc.drivers + (r.leg_count > 0 ? 1 : 0),
@@ -103,7 +102,7 @@ export default async function PayrollPage({
         title="工资单"
         description={
           view === "period" && shownPeriod
-            ? `${periodLabel(shownPeriod)} 的汇总：录入行程自动生成草稿工资单，草稿数字实时跟随行程；点「核对」（列表或详情页）后金额冻结，再改行程只会标红。`
+            ? `${periodLabel(shownPeriod)} 的汇总：录入行程自动生成草稿工资单，草稿数字实时跟随行程；点「核对」（列表或详情页）后金额冻结，再「司机确认」；核对后的行程改动只在详情页标红。`
             : "所有周期的工资单档案；行程汇总在「按周期」页签。"
         }
         actions={
@@ -167,16 +166,10 @@ export default async function PayrollPage({
             </div>
           </div>
 
-          {flagged > 0 && (
-            <p className="mb-3 rounded-md border border-red-500/30 bg-red-50 px-3 py-2 text-[13px] text-red-700">
-              本周期有 {flagged} 张核对后的工资单被改过行程（红色行）：核对金额已冻结，改动不会计入，请人工复核。
-            </p>
-          )}
-
           <section className="gauge" aria-label="本周期读数">
             <header className="gauge-head">
               <span className="gauge-title">本周期读数</span>
-              <span className="gauge-range">{periodLabel(shownPeriod)} · 周六 ~ 周五 · 草稿实时 / 核对冻结</span>
+              <span className="gauge-range">{periodLabel(shownPeriod)} · 周六 ~ 周五 · 草稿实时 / 核对冻结 / 司机确认</span>
             </header>
             <div className="gauge-ticks" aria-hidden="true" />
             <div className="gauge-grid">

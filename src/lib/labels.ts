@@ -37,16 +37,18 @@ export const RECORD_STATUS_LABELS: Record<RecordStatus, string> = {
   ARCHIVED: "归档"
 };
 
-/** REVIEWED/DONE are legacy DB enum values kept in the type only - the app never uses them */
-export type StatementStatus = "DRAFT" | "VERIFIED";
+/** REVIEWED is a legacy DB enum value unused by the app; DONE = driver confirmed (reuse of the idle enum slot) */
+export type StatementStatus = "DRAFT" | "VERIFIED" | "DONE";
 
 export const STATEMENT_STATUS_LABELS: Record<StatementStatus, string> = {
   DRAFT: "草稿",
-  VERIFIED: "核对"
+  VERIFIED: "核对",
+  DONE: "司机确认"
 };
 
-/** DRAFT numbers track the live trips; VERIFIED freezes them (one-way) */
+/** DRAFT numbers track the live trips; VERIFIED freezes them (one-way), DONE marks the driver's sign-off */
 export const STATEMENT_STATUS_FLOW: readonly StatementStatus[] = [
   "DRAFT",
-  "VERIFIED"
+  "VERIFIED",
+  "DONE"
 ];

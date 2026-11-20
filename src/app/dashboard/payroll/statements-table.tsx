@@ -11,7 +11,7 @@ import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { fuel as fmtFuel, miles as fmtMiles, money } from "@/lib/format";
 import { isRedirectError } from "@/lib/action-result";
 import type { StatementRow } from "@/lib/queries/statements";
-import { verifyStatement } from "./actions";
+import { confirmDriverStatement, verifyStatement } from "./actions";
 import {
   CopyStatementButton,
   type CopyDriverOption,
@@ -60,6 +60,40 @@ function VerifyStatementButton({ statementId }: { statementId: string }) {
   );
 }
 
+/**
+ * VERIFIED -> driver-confirmed (DONE) straight from the ledger, mirroring the
+ * verify button: one click, a confirm dialog guards the misclick, and the
+ * numbers were already frozen at verification so nothing recomputes.
+ */
+function ConfirmDriverButton({ statementId }: { statementId: string }) {
+  return (
+    <ConfirmAction
+      title="标记司机确认？"
+      description="标记后该工资单视为司机已确认（金额不变，仍冻结）。"
+      confirmLabel="司机确认"
+      pendingLabel="确认中…"
+      trigger={props => (
+        <button {...props} className="linklike">
+          司机确认
+        </button>
+      )}
+      onConfirm={async () => {
+        const fd = new FormData();
+        fd.set("id", statementId);
+        fd.set("return_to", window.location.pathname + window.location.search);
+        try {
+          await confirmDriverStatement(fd);
+          toast.success("司机已确认");
+        } catch (error) {
+          // The action's redirect rejects with NEXT_REDIRECT on success
+          if (isRedirectError(error)) toast.success("司机已确认");
+          else toast.error("标记失败，请重试");
+        }
+      }}
+    />
+  );
+}
+
 /** Statement ledger on the shared TanStack + shadcn table shell */
 export function StatementsTable({
   statements,
@@ -73,7 +107,10 @@ export function StatementsTable({
   trucks: CopyTruckOption[];
   empty: string;
 }) {
-  const columns: ColumnDef<StatementRow, unknown>[] = [
+  // Stable identity across client re-renders (toasts, dialogs): a fresh array
+  // per render churns TanStack's sizing sync (same family as the entry-sheet
+  // freeze); rebuilt only when the server sends new copy-dialog pickers
+  const columns = React.useMemo<ColumnDef<StatementRow, unknown>[]>(() => [
     {
       id: "period",
       header: "周期",
@@ -88,12 +125,13 @@ export function StatementsTable({
       id: "driver",
       header: "司机 / 车主",
       size: 140,
-      // Same muted tones as the detail masthead: dark green = verified clean,
-      // dark red = edited after verification; drafts stay neutral
+      // Same muted tones as the detail masthead: dark green = verified, dark
+      // red = driver confirmed; drafts stay neutral. Edits after checking are
+      // a detail-sheet concern - the list never flags them
       cell: ({ row }) => (
         <span
           className={
-            row.original.edited_after_verify
+            row.original.status === "DONE"
               ? "text-red-800"
               : row.original.status === "VERIFIED"
                 ? "text-emerald-800"
@@ -168,10 +206,7 @@ export function StatementsTable({
       size: 96,
       cell: ({ row }) =>
         row.original.status ? (
-          <StatementStatusBadge
-            status={row.original.status}
-            edited={row.original.edited_after_verify}
-          />
+          <StatementStatusBadge status={row.original.status} />
         ) : (
           <span className="muted-inline">无行程</span>
         )
@@ -182,7 +217,8 @@ export function StatementsTable({
       size: 112,
       enableResizing: false,
       meta: { cellClass: "actions" },
-      // Legs editing lives on the detail sheet; verify is one click away here
+      // Legs editing lives on the detail sheet; verify and the driver
+      // confirmation are one click away here (each on its own status)
       cell: ({ row }) => {
         const s = row.original;
         return (
@@ -196,11 +232,12 @@ export function StatementsTable({
                 <VerifyStatementButton statementId={s.id} />
               </>
             )}
+            {s.id && s.status === "VERIFIED" && <ConfirmDriverButton statementId={s.id} />}
           </>
         );
       }
     }
-  ];
+  ], [drivers, trucks]);
 
   const table = useRosterTable({
     data: statements,
@@ -211,13 +248,7 @@ export function StatementsTable({
   return (
     <RosterTable
       table={table}
-      rowClassName={r =>
-        r.edited_after_verify
-          ? "row-flagged"
-          : r.status === null && r.leg_count === 0
-            ? "row-off"
-            : undefined
-      }
+      rowClassName={r => (r.status === null && r.leg_count === 0 ? "row-off" : undefined)}
       empty={empty}
     />
   );

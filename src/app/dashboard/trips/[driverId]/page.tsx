@@ -23,7 +23,7 @@ import { activeStateOptions, statementFuelDetail } from "@/lib/queries/fuel";
 import { FuelEditor, type FuelEditRow } from "./fuel-editor";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeTruckOptions } from "@/lib/queries/trucks";
-import { verifyStatement } from "../../payroll/actions";
+import { confirmDriverStatement, verifyStatement } from "../../payroll/actions";
 import { CopyStatementButton } from "../../payroll/copy-statement-dialog";
 import { ChangeTruckButton } from "../../payroll/change-truck-dialog";
 import { PayrollLegsTable } from "../payroll-legs-table";
@@ -184,13 +184,14 @@ export default async function DriverPeriodPage({
   const returnTo = `/dashboard/trips/${driver.id}?period=${period.start}`;
   const navHref = (p: { start: string }) => `/dashboard/trips/${driver.id}?period=${p.start}`;
 
-  // Draft numbers always equal the live ledger; VERIFIED freezes them. The
-  // permanent edited_after_verify flag (not a live comparison) drives the red
-  const statementFrozen = statement !== null && statement.status === "VERIFIED";
-  // Muted name tone for the whole page: dark green once verified clean, dark
-  // red once edited after verification - dim shades only, never bright
+  // Draft numbers always equal the live ledger; checked sheets (VERIFIED and
+  // DONE alike) freeze them. The permanent edited_after_verify flag (not a
+  // live comparison) drives the detail-only red
+  const statementFrozen = statement !== null && statement.status !== "DRAFT";
+  // Muted name tone for the whole page: dark green once verified, dark red
+  // once driver-confirmed or edited after checking - dim shades only
   const nameTone = statement
-    ? statement.edited_after_verify
+    ? statement.edited_after_verify || statement.status === "DONE"
       ? "text-red-800"
       : statementFrozen
         ? "text-emerald-800"
@@ -225,9 +226,11 @@ export default async function DriverPeriodPage({
             ) : (
               <>
                 工资单 <StatementStatusBadge status={statement.status} />
-                {statementFrozen
-                  ? " 已核对，金额冻结；再改行程只会标红。"
-                  : " 草稿中，数字实时跟随行程。"}
+                {statement.status === "DONE"
+                  ? " 司机已确认，金额冻结；再改行程只在详情页标红。"
+                  : statementFrozen
+                    ? " 已核对，金额冻结；可标记司机确认；再改行程只在详情页标红。"
+                    : " 草稿中，数字实时跟随行程。"}
               </>
             )
           ) : (
@@ -260,6 +263,15 @@ export default async function DriverPeriodPage({
                   </SubmitButton>
                 </form>
               </>
+            )}
+            {statement && statement.status === "VERIFIED" && legs.length > 0 && (
+              <form action={confirmDriverStatement}>
+                <input type="hidden" name="id" value={statement.id} />
+                <input type="hidden" name="return_to" value={returnTo} />
+                <SubmitButton className="button button-dark" pendingLabel="确认中…">
+                  司机确认
+                </SubmitButton>
+              </form>
             )}
             <Link className="button button-quiet" href={`/dashboard/payroll?period=${period.start}`}>
               返回工资单

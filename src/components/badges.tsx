@@ -55,10 +55,11 @@ export function WageRuleStateBadge({ effective, label }: { effective: boolean; l
   );
 }
 
-/* 工资单状态：草稿=灰 · 核对=藏青；核对后行程有改动 = 红色永久标记 */
+/* 工资单状态：草稿=灰 · 核对=绿 · 司机确认=红；已改动红标只在详情页渲染 */
 const STATEMENT_STYLES: Record<StatementStatus, string> = {
   DRAFT: "border-line bg-muted text-muted-foreground",
-  VERIFIED: "border-route/30 bg-route/10 text-route"
+  VERIFIED: "border-audit/30 bg-audit/10 text-audit",
+  DONE: "border-red-600/40 bg-red-50 text-red-700"
 };
 
 export function StatementStatusBadge({
@@ -66,7 +67,7 @@ export function StatementStatusBadge({
   edited = false
 }: {
   status: StatementStatus;
-  /** VERIFIED + trips changed afterwards: the badge turns red, permanently */
+  /** Checked sheet + trips changed afterwards: detail pages render the red variant */
   edited?: boolean;
 }) {
   const style = edited
@@ -74,7 +75,7 @@ export function StatementStatusBadge({
     : STATEMENT_STYLES[status];
   return (
     <span className={cn(pillBase, style)}>
-      {edited ? "核对 · 已改动" : STATEMENT_STATUS_LABELS[status]}
+      {edited ? `${STATEMENT_STATUS_LABELS[status]} · 已改动` : STATEMENT_STATUS_LABELS[status]}
     </span>
   );
 }

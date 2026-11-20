@@ -145,7 +145,7 @@ export async function saveStatementFuel(formData: FormData) {
     UPDATE pay.payroll_statements
     SET fuel_detail = ${payload}::jsonb, edited_after_verify = true, updated_at = now()
     WHERE driver_id = ${driverId}::bigint AND period_start = ${period.start}::date
-      AND status = 'VERIFIED'
+      AND status IN ('VERIFIED', 'DONE')
   `;
 
   revalidateStatementViews();
@@ -185,6 +185,29 @@ export async function verifyStatement(formData: FormData) {
       WHERE id = ${id}::bigint AND status = 'DRAFT'
     `;
   }
+
+  revalidateStatementViews();
+  redirect(returnTo || "/dashboard/payroll");
+}
+
+/**
+ * Mark one statement as driver-confirmed (the DONE enum slot): only a
+ * VERIFIED sheet can advance - verification stays the required first step -
+ * and the numbers are already frozen since then, so nothing is recomputed.
+ * One-way like verify: no un-confirm exists.
+ */
+export async function confirmDriverStatement(formData: FormData) {
+  await requireUser();
+
+  const id = str(formData, "id");
+  const returnTo = str(formData, "return_to");
+  if (!id) redirect("/dashboard/payroll");
+
+  await prisma.$executeRaw`
+    UPDATE pay.payroll_statements
+    SET status = 'DONE', updated_at = now()
+    WHERE id = ${id}::bigint AND status = 'VERIFIED'
+  `;
 
   revalidateStatementViews();
   redirect(returnTo || "/dashboard/payroll");
@@ -443,8 +466,9 @@ export async function changeStatementTruck(
 
   if ("code" in result) return { ok: false, code: result.code };
 
-  // Drafts recompute in place (trucks included); VERIFIED only gets the red
-  // flag - which is why its frozen trucks annotation needs the extra refresh
+  // Drafts recompute in place (trucks included); VERIFIED/DONE only get the
+  // red flag - which is why their frozen trucks annotation needs the extra
+  // refresh
   await syncStatements([{ driverId: result.driverId, periodStart: result.periodStart }]);
   await prisma.$executeRaw`
     UPDATE pay.payroll_statements s
@@ -458,7 +482,7 @@ export async function changeStatementTruck(
     ) agg
     WHERE s.driver_id = ${result.driverId}::bigint
       AND s.period_start = ${result.periodStart}::date
-      AND s.status = 'VERIFIED'
+      AND s.status IN ('VERIFIED', 'DONE')
   `;
 
   revalidateStatementViews();

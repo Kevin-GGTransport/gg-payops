@@ -467,9 +467,9 @@ export async function addTripsBatch(formData: FormData) {
       }))
     );
     // DRAFT arm creates the statement when missing (aggregates arrive from
-    // syncStatements right after, which never touches fuel_detail); VERIFIED
-    // keeps its frozen numbers and only takes the fuel plus the permanent
-    // edited flag - the same red as a trip edit
+    // syncStatements right after, which never touches fuel_detail);
+    // VERIFIED/DONE keep their frozen numbers and only take the fuel plus the
+    // permanent edited flag - the same red as a trip edit
     await prisma.$executeRaw`
       INSERT INTO pay.payroll_statements
         (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay, fuel_detail)
@@ -483,7 +483,7 @@ export async function addTripsBatch(formData: FormData) {
       UPDATE pay.payroll_statements
       SET fuel_detail = ${payload}::jsonb, edited_after_verify = true, updated_at = now()
       WHERE driver_id = ${driverId}::bigint AND period_start = ${sheetPeriodStart.start}::date
-        AND status = 'VERIFIED'
+        AND status IN ('VERIFIED', 'DONE')
     `;
   }
 

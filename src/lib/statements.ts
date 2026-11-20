@@ -10,8 +10,9 @@ export type StatementRef = { driverId: string; periodStart: string };
  * - missing statement is created as DRAFT with the live aggregates
  *   (entry = generation - no separate "generate" step exists)
  * - DRAFT numbers are recomputed in place (drafts always track the trips)
- * - VERIFIED numbers stay frozen; the mutation only sets edited_after_verify
- *   - a permanent audit flag that is never cleared anywhere
+ * - VERIFIED/DONE numbers stay frozen; the mutation only sets
+ *   edited_after_verify - a permanent audit flag that is never cleared
+ *   anywhere
  * - a DRAFT whose trips are all gone is dropped (no legs, no statement)
  */
 export async function syncStatements(refs: StatementRef[]) {
@@ -71,13 +72,14 @@ export async function syncStatements(refs: StatementRef[]) {
           updated_at = now()
         WHERE pay.payroll_statements.status = 'DRAFT'
       `,
-      // VERIFIED: numbers frozen forever; the change is only flagged (red)
+      // VERIFIED/DONE: numbers frozen forever; the change is only flagged
+      // (detail-sheet red - the list no longer surfaces this flag)
       prisma.$executeRaw`
         UPDATE pay.payroll_statements
         SET edited_after_verify = true, updated_at = now()
         WHERE driver_id = ${driverId}::bigint
           AND period_start = ${period.start}::date
-          AND status = 'VERIFIED'
+          AND status IN ('VERIFIED', 'DONE')
       `,
       // Draft with every leg deleted: remove the empty statement
       prisma.$executeRaw`
