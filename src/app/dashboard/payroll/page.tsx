@@ -17,6 +17,7 @@ import {
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeTruckOptions } from "@/lib/queries/trucks";
 import { StatementsTable } from "./statements-table";
+import { StatementCards } from "./statement-cards";
 
 export const metadata: Metadata = { title: "工资单 · G&G PayOps" };
 
@@ -27,7 +28,7 @@ const STATUS_TABS = [
 ] as const;
 
 const arrowClass =
-  "grid h-9.5 w-8 shrink-0 place-items-center rounded-md border border-line bg-card font-mono text-base text-route no-underline transition-colors hover:border-route hover:bg-muted/40";
+  "grid h-11 w-11 shrink-0 place-items-center rounded-md border border-line bg-card font-mono text-base text-route no-underline transition-colors hover:border-route hover:bg-muted/40 md:h-9.5 md:w-8";
 
 function statusFromTab(tab: string | undefined): StatementStatus | "all" {
   return STATUS_TABS.some(t => t.key === tab && t.key !== "all") ? (tab as StatementStatus) : "all";
@@ -70,7 +71,14 @@ export default async function PayrollPage({
 
   // Period mode: the period rollup (statements, DRAFT numbers live);
   // Archive mode: statements across all periods
-  const [merged, archive, pickerTotals, drivers, trucks] = await Promise.all([
+  // Driver-linked phones render the archive as period cards (StatementCards):
+  // fetched unfiltered for that one driver, on every scoped view since the
+  // phone UI has no tabs - the md+ rollup below stays as is
+  const cardArchive =
+    scopedDriverId && view !== "all"
+      ? listStatements({ period: null, status: "all", q: "", driverId: scopedDriverId })
+      : Promise.resolve(null);
+  const [merged, archive, pickerTotals, drivers, trucks, cards] = await Promise.all([
     shownPeriod ? mergedPeriodStatements(shownPeriod, scopedDriverId) : Promise.resolve(null),
     view === "all"
       ? listStatements({ period: null, status: statusFromTab(firstValue(sp.status)), q, driverId: scopedDriverId })
@@ -78,8 +86,13 @@ export default async function PayrollPage({
     statementPeriodTotals(scopedDriverId),
     // Copy-dialog pickers, shared by both table views
     activeDriverOptions(),
-    activeTruckOptions()
+    activeTruckOptions(),
+    cardArchive
   ]);
+  // view=all already holds the full archive; the cards reuse it
+  const cardRows = scoped
+    ? (view === "all" ? archive?.rows ?? [] : cards?.rows ?? [])
+    : null;
 
   const statusFilter = view === "all" ? statusFromTab(firstValue(sp.status)) : "all";
   const counts = archive?.counts ?? { total: 0, draft: 0, verified: 0 };
@@ -135,6 +148,17 @@ export default async function PayrollPage({
         }
       />
 
+      {/* Driver-linked phones: the archive as period cards (the component
+          self-hides on md+; everything below keeps serving desktop) */}
+      {scoped && cardRows && (
+        <StatementCards
+          statements={cardRows}
+          canConfirm={canConfirm}
+          empty="还没有工资单。录入行程后会自动生成草稿。"
+        />
+      )}
+
+      <div className={scoped ? "hidden md:block" : undefined}>
       {/* View tabs: the period rollup is the landing view (trips live there);
           the archive is the second tab */}
       <div className="mb-3">
@@ -269,6 +293,7 @@ export default async function PayrollPage({
           </LedgerPanel>
         </section>
       )}
+      </div>
     </>
   );
 }

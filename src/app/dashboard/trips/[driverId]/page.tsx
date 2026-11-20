@@ -46,7 +46,7 @@ const FEE_ERRORS: Record<string, string> = {
 };
 
 const arrowClass =
-  "grid h-9.5 w-8 shrink-0 place-items-center rounded-md border border-line bg-card font-mono text-base text-route no-underline transition-colors hover:border-route hover:bg-muted/40";
+  "grid h-11 w-11 shrink-0 place-items-center rounded-md border border-line bg-card font-mono text-base text-route no-underline transition-colors hover:border-route hover:bg-muted/40 md:h-9.5 md:w-8";
 
 function dateParam(value: string | undefined) {
   const v = (value ?? "").trim();

@@ -158,10 +158,10 @@
 }
 
 /* ==========================================================================
-   登录页 · 舱单封面
+   登录页 · 舱单封面（移动优先：全屏 navy + 底部白卡；md 起居中 440px 卡）
    ========================================================================== */
 .auth-page {
-  @apply relative grid min-h-screen place-items-center overflow-hidden bg-navy p-6;
+  @apply relative flex min-h-dvh flex-col overflow-hidden bg-navy px-5 py-8 md:grid md:min-h-screen md:place-items-center md:p-6;
 }
 /* 舱单格线纹理 */
 .auth-page::before {
@@ -174,11 +174,26 @@
   background-size: 44px 44px;
   pointer-events: none;
 }
+/* 移动品牌区：navy 画布上、表单卡之上（卡内的桌面头部 md 才显示） */
+.auth-brand {
+  @apply relative z-10 mb-6 flex items-center gap-3 md:hidden;
+}
+.auth-brand .auth-mark {
+  @apply size-11 text-sm;
+}
 .auth-manifest {
-  @apply relative w-full max-w-[440px] overflow-hidden rounded-lg bg-card shadow-2xl;
+  /* mt-auto：品牌置顶、表单卡沉到下半屏（单手拇指可达区） */
+  @apply relative z-10 mt-auto w-full max-w-none overflow-hidden rounded-lg bg-card shadow-2xl md:mt-0 md:max-w-[440px];
+}
+/* 移动足注：卡下方 navy 画布上的舱单尾注 */
+.auth-meta {
+  @apply relative z-10 mt-6 flex flex-col items-center gap-1 text-[11px] text-slate-400 md:hidden;
+}
+.auth-meta .mono {
+  @apply tracking-wider;
 }
 .auth-head {
-  @apply flex items-center gap-3 bg-navy px-5 py-4;
+  @apply hidden items-center gap-3 bg-navy px-5 py-4 md:flex;
 }
 .auth-mark {
   @apply grid size-10 shrink-0 place-items-center rounded-[3px] border border-amber/70 font-mono text-[13px] font-bold text-amber-200;
@@ -193,7 +208,7 @@
   @apply ml-auto shrink-0 self-start rounded-[2px] border border-white/25 px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-slate-400;
 }
 .auth-body {
-  @apply px-6 pb-5 pt-5;
+  @apply px-5 pb-6 pt-6 md:px-6 md:pb-5 md:pt-5;
 }
 .field {
   @apply mb-3.5 grid gap-1.5;
@@ -201,8 +216,13 @@
 .field > label {
   @apply text-[13px] font-medium text-muted-foreground;
 }
+/* 移动端 16px 输入（杜绝 iOS 聚焦自动放大）+ 48px 触控高；md 收回紧凑卡尺寸 */
 .field input {
-  @apply h-10 w-full rounded-md border border-transparent bg-muted px-3 text-sm outline-none transition-colors focus-visible:border-route focus-visible:bg-card;
+  @apply h-12 w-full rounded-md border border-transparent bg-muted px-3.5 text-base outline-none transition-colors focus-visible:border-route focus-visible:bg-card md:h-10 md:px-3 md:text-sm;
+}
+/* 登录主按钮：移动端同触控规范 */
+.auth-body .button {
+  @apply h-12 text-[15px] md:h-10 md:text-sm;
 }
 .button {
   @apply inline-flex h-10 w-full cursor-pointer items-center justify-center rounded-md bg-navy font-semibold text-white transition-colors hover:bg-route focus-visible:ring-2 focus-visible:ring-route focus-visible:ring-offset-2 focus-visible:outline-none;
@@ -214,7 +234,7 @@
   @apply mt-3.5 border-t border-dashed border-line pt-3 text-xs text-muted-foreground;
 }
 .auth-foot {
-  @apply flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line bg-muted/40 px-6 py-2.5 text-[11px] text-muted-foreground;
+  @apply hidden flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line bg-muted/40 px-6 py-2.5 text-[11px] text-muted-foreground md:flex;
 }
 .auth-foot .mono {
   @apply tracking-wider;
@@ -822,5 +842,25 @@ th.col-th {
   }
   .day-rail em {
     @apply ml-auto mt-0;
+  }
+  /* 触控规范：主按钮与筛选控件提到 44px；文本输入 16px 防 iOS 聚焦缩放 */
+  .button {
+    @apply h-11;
+  }
+  .filter-select {
+    @apply h-11;
+  }
+  input[type="text"],
+  input[type="search"],
+  input[type="password"],
+  input[type="email"],
+  input[type="number"],
+  select,
+  textarea {
+    font-size: 16px;
+  }
+  /* 页头操作按钮换行时占满所在行（native app 的按钮行观感） */
+  .page-head .button {
+    @apply min-w-0 flex-1 justify-center;
   }
 }

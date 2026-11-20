@@ -10,6 +10,16 @@ export default async function SignInPage({
 
   return (
     <main className="auth-page">
+      {/* Mobile brand on the navy canvas; the desktop card keeps its own
+          navy head strip (each breakpoint hides the other's copy) */}
+      <header className="auth-brand md:hidden">
+        <span className="auth-mark" aria-hidden="true">G&amp;G</span>
+        <div className="auth-title">
+          <h1>G&amp;G PayOps</h1>
+          <p>运输结算中心</p>
+        </div>
+      </header>
+
       <section className="auth-manifest" aria-label="值班登录">
         <header className="auth-head">
           <span className="auth-mark" aria-hidden="true">G&amp;G</span>
@@ -49,6 +59,12 @@ export default async function SignInPage({
           <span className="mono">DEL · LIVE · EMPTY · BOBTAIL</span>
         </footer>
       </section>
+
+      {/* Mobile manifest footer: under the card, on the navy canvas */}
+      <footer className="auth-meta md:hidden">
+        <span>核算周期 · 周六 ~ 周五</span>
+        <span className="mono">DEL · LIVE · EMPTY · BOBTAIL</span>
+      </footer>
     </main>
   );
 }
