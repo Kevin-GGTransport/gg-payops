@@ -30,6 +30,9 @@ const EMPTY_ROW: FuelEditRow = {
   truckCode: ""
 };
 
+/** Stable empty row set (module scope: a fresh [] per render churns TanStack) */
+const NO_ROWS: unknown[] = [];
+
 const INITIAL_ROWS = 2;
 
 /** Sheet-cell field style: h-8 sizing plus the ledger field look — black rule
@@ -85,7 +88,7 @@ export function FuelEditor({
     toSlots(rows, defaultTruckCode)
   );
   const fuelTable = useRosterTable({
-    data: [],
+    data: NO_ROWS,
     columns: FUEL_SHEET_COLUMNS,
     storageKey: "payops.detail.fuel.cols"
   });
