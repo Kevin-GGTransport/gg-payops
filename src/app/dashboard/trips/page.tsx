@@ -10,7 +10,7 @@ import { AutoSubmitDateField } from "@/components/auto-submit";
 import { FilterSelect } from "@/components/filter-select";
 import { BatchDeleteTrips } from "@/components/batch-delete";
 import { CleanForm } from "@/components/clean-form";
-import { requireUser } from "@/lib/auth";
+import { requirePermission, getLinkedDriverId, getUserPermissions } from "@/lib/permissions";
 import { allValues, firstValue, type SearchParams } from "@/lib/search-params";
 import { type OperationType } from "@/lib/labels";
 import { listOperationTypes, activeOperationOptions } from "@/lib/queries/operations";
@@ -51,7 +51,7 @@ export default async function TripsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireUser();
+  await requirePermission("trip.read");
   const sp = await searchParams;
   // The period rollup moved to the payroll page; old links keep working
   const view = firstValue(sp.view);
@@ -72,9 +72,16 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
   const page = intFromParam(firstValue(sp.page));
   const saved = firstValue(sp.saved) === "1";
 
+  // Driver-linked accounts are pinned to their own legs (URL params ignored);
+  // they also lack the entry powers, so edit/delete/batch stay hidden
+  const scopedDriverId = await getLinkedDriverId();
+  const canWrite = (await getUserPermissions()).has("trip.write");
+
   // Sanitize driver ids from the URL (bigint identities are digits only);
   // doing this locally lets all three queries start in parallel
-  const selectedIds = allValues(sp.driver).filter(id => /^\d+$/.test(id));
+  const selectedIds = scopedDriverId
+    ? [scopedDriverId]
+    : allValues(sp.driver).filter(id => /^\d+$/.test(id));
 
   // Dictionary-driven filter: any known code validates from the URL (a
   // deactivated one still filters history); the dropdown offers ACTIVE rows
@@ -135,7 +142,9 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
         actions={
           <div className="flex items-center gap-2">
             <Link className="button button-quiet" href="/dashboard/payroll">工资单</Link>
-            <Link className="button button-dark" href={entryHref}>录入行程</Link>
+            {canWrite && (
+              <Link className="button button-dark" href={entryHref}>录入行程</Link>
+            )}
           </div>
         }
       />
@@ -171,14 +180,20 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
                   .join(" · ")
               }))}
           />
-          <FilterSelect
-            name="driver"
-            multiple
-            options={drivers.map(d => ({ value: d.id, label: d.full_name }))}
-            selected={selectedIds}
-            placeholder="全部司机"
-            aria-label="按司机筛选"
-          />
+          {scopedDriverId ? (
+            <span className="inline-flex h-9.5 items-center rounded-md border border-line bg-muted/40 px-3 text-[13px] text-muted-foreground">
+              仅显示本人行程
+            </span>
+          ) : (
+            <FilterSelect
+              name="driver"
+              multiple
+              options={drivers.map(d => ({ value: d.id, label: d.full_name }))}
+              selected={selectedIds}
+              placeholder="全部司机"
+              aria-label="按司机筛选"
+            />
+          )}
           <AutoSubmitDateField
             name="from"
             defaultValue={dateFrom ?? ""}
@@ -204,7 +219,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
           <TripsTable
             trips={trips}
             returnTo={queryWith({ page }).toString()}
-            edit={{ locations, operations: operationOptions, wageRule }}
+            edit={canWrite ? { locations, operations: operationOptions, wageRule } : undefined}
             empty={
               hasFilter
                 ? "没有符合条件的行程。调整筛选条件，或点右上角「录入行程」前往首页录入。"
@@ -214,7 +229,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
         </LedgerPanel>
         <div className="table-foot">
           <div className="foot-left">
-            <BatchDeleteTrips returnTo={queryWith({ page }).toString()} />
+            {canWrite && <BatchDeleteTrips returnTo={queryWith({ page }).toString()} />}
             <span>
               共 {total} 条{totalPages > 1 ? ` · 第 ${page}/${totalPages} 页` : ""}
             </span>

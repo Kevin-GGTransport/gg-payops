@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/auth";
+import { requirePermission } from "@/lib/permissions";
 
 const TYPES = ["BASE", "AMAZON", "OTHER"] as const;
 
@@ -24,7 +24,7 @@ function backWithError(error: string, formData: FormData): never {
 }
 
 export async function saveLocation(formData: FormData) {
-  await requireUser();
+  await requirePermission("location.write");
 
   const id = str(formData, "id");
   const code = str(formData, "code").toUpperCase();
@@ -104,7 +104,7 @@ export async function saveLocation(formData: FormData) {
 }
 
 export async function setLocationStatus(formData: FormData) {
-  await requireUser();
+  await requirePermission("location.write");
   const id = str(formData, "id");
   const status = str(formData, "status");
   if (!id || !["ACTIVE", "INACTIVE"].includes(status)) redirect("/dashboard/locations");

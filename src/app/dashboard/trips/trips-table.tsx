@@ -136,40 +136,41 @@ export function TripsTable({
       size: 88,
       enableResizing: false,
       meta: { cellClass: "actions" },
-      cell: ({ row }) => (
-        <>
-          {edit && (
+      cell: ({ row }) =>
+        edit ? (
+          <>
             <button type="button" className="linklike" onClick={() => setEditing(row.original)}>
               编辑
             </button>
-          )}
-          <ConfirmAction
-            danger
-            title="删除这条行程？"
-            description="删除后该行程将从台账与工资单中移除，不可恢复。"
-            confirmLabel="删除"
-            pendingLabel="删除中…"
-            trigger={props => (
-              <button {...props} className="linklike danger">
-                删除
-              </button>
-            )}
-            onConfirm={async () => {
-              const fd = new FormData();
-              fd.set("id", row.original.id);
-              fd.set("return_to", returnTo);
-              try {
-                await deleteTrip(fd);
-                toast.success("行程已删除");
-              } catch (error) {
-                // The action's redirect rejects with NEXT_REDIRECT on success
-                if (isRedirectError(error)) toast.success("行程已删除");
-                else toast.error("删除失败，请重试");
-              }
-            }}
-          />
-        </>
-      )
+            <ConfirmAction
+              danger
+              title="删除这条行程？"
+              description="删除后该行程将从台账与工资单中移除，不可恢复。"
+              confirmLabel="删除"
+              pendingLabel="删除中…"
+              trigger={props => (
+                <button {...props} className="linklike danger">
+                  删除
+                </button>
+              )}
+              onConfirm={async () => {
+                const fd = new FormData();
+                fd.set("id", row.original.id);
+                fd.set("return_to", returnTo);
+                try {
+                  await deleteTrip(fd);
+                  toast.success("行程已删除");
+                } catch (error) {
+                  // The action's redirect rejects with NEXT_REDIRECT on success
+                  if (isRedirectError(error)) toast.success("行程已删除");
+                  else toast.error("删除失败，请重试");
+                }
+              }}
+            />
+          </>
+        ) : (
+          <span className="text-muted-foreground">只读</span>
+        )
     }
   ], [edit, returnTo, trips]); // identities stable across client re-renders (server payload)
 

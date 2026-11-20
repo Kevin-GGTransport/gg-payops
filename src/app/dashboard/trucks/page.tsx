@@ -15,7 +15,7 @@ import {
   SubmitButton,
   FormError
 } from "@/components/form-fields";
-import { requireUser } from "@/lib/auth";
+import { requirePermission, getUserPermissions } from "@/lib/permissions";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
 import { todayIso, odometerMi } from "@/lib/format";
 import {
@@ -45,7 +45,8 @@ export default async function TrucksPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireUser();
+  await requirePermission("truck.read");
+  const canWrite = (await getUserPermissions()).has("truck.write");
   const sp = await searchParams;
 
   const ownParam = firstValue(sp.own);
@@ -107,7 +108,7 @@ export default async function TrucksPage({
   const errorMessage = errorCode ? ERROR_MESSAGES[errorCode] ?? "保存出错，请检查后重试。" : undefined;
   // Odometer errors redirect back into the odometer modal; form errors open the truck form
   const odoOpen = Boolean(odoTruck);
-  const editOpen = !odoOpen && (isNew || Boolean(editing) || Boolean(errorCode));
+  const editOpen = canWrite && !odoOpen && (isNew || Boolean(editing) || Boolean(errorCode));
 
   return (
     <>
@@ -115,9 +116,11 @@ export default async function TrucksPage({
         title="车辆管理"
         description="登记车辆档案、归属与表显里程，作为车队基础数据。"
         actions={
-          <Link className="button button-quiet" href={`/dashboard/trucks?${modalParams.toString()}`}>
-            新增登记
-          </Link>
+          canWrite ? (
+            <Link className="button button-quiet" href={`/dashboard/trucks?${modalParams.toString()}`}>
+              新增登记
+            </Link>
+          ) : undefined
         }
       />
       {savedMessage && <FlashToast message={savedMessage} param="saved" />}
@@ -152,6 +155,7 @@ export default async function TrucksPage({
           <TrucksTable
             trucks={trucks}
             returnTo={returnTo}
+            canWrite={canWrite}
             empty={
               q || ownFilter !== "all"
                 ? "没有符合条件的记录。换个筛选条件，或直接新增一辆车。"

@@ -99,12 +99,19 @@ export function StatementsTable({
   statements,
   drivers,
   trucks,
+  canVerify,
+  canConfirm,
+  canCopy,
   empty
 }: {
   statements: StatementRow[];
   /** Copy-dialog pickers, pulled by the host page (same sources as entry) */
   drivers: CopyDriverOption[];
   trucks: CopyTruckOption[];
+  /** Convenience only - the actions re-check permissions server-side */
+  canVerify: boolean;
+  canConfirm: boolean;
+  canCopy: boolean;
   empty: string;
 }) {
   // Stable identity across client re-renders (toasts, dialogs): a fresh array
@@ -252,18 +259,22 @@ export function StatementsTable({
             <Link href={`/dashboard/trips/${s.driver_id}?period=${s.period_start}`}>
               详情
             </Link>
-            {s.id && s.status === "DRAFT" && s.leg_count > 0 && (
+            {canVerify && s.id && s.status === "DRAFT" && s.leg_count > 0 && (
               <>
-                <CopyStatementButton statement={{ ...s, id: s.id }} drivers={drivers} trucks={trucks} />
+                {canCopy && (
+                  <CopyStatementButton statement={{ ...s, id: s.id }} drivers={drivers} trucks={trucks} />
+                )}
                 <VerifyStatementButton statementId={s.id} />
               </>
             )}
-            {s.id && s.status === "VERIFIED" && <ConfirmDriverButton statementId={s.id} />}
+            {canConfirm && s.id && s.status === "VERIFIED" && (
+              <ConfirmDriverButton statementId={s.id} />
+            )}
           </>
         );
       }
     }
-  ], [drivers, trucks]);
+  ], [drivers, trucks, canVerify, canConfirm, canCopy]);
 
   const table = useRosterTable({
     data: statements,

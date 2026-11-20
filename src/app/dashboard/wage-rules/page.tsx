@@ -9,7 +9,7 @@ import { ConfirmButton } from "@/components/confirm-button";
 import { Button } from "@/components/ui/button";
 import { FormError, FormGrid, SubmitButton, TextField } from "@/components/form-fields";
 import { FlashToast } from "@/components/flash-toast";
-import { requireUser } from "@/lib/auth";
+import { requirePermission, getUserPermissions } from "@/lib/permissions";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeOperationOptions } from "@/lib/queries/operations";
@@ -45,8 +45,10 @@ export default async function WageRulesPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireUser();
+  await requirePermission("wage_rule.read");
   const sp = await searchParams;
+  // Read-only for accounts without wage_rule.write (actions re-check anyway)
+  const canWrite = (await getUserPermissions()).has("wage_rule.write");
   const viewId = (firstValue(sp.v) ?? "").trim();
   const errorCode = firstValue(sp.error);
   const isNew = firstValue(sp.new) === "1";
@@ -85,7 +87,7 @@ export default async function WageRulesPage({
         title="工资规则"
         description="定价就一张规则表：适用司机 × 起点 → 终点 × 操作 × 类型（按趟/按往返/按天）× 司机价 × 车主价。任一时刻只有一个版本生效，切换后新录入的行程即按新版本计价；无命中的行程按里程档兜底。"
         actions={
-          createSourceId ? (
+          canWrite && createSourceId ? (
             <Link
               className="button button-dark"
               href={`/dashboard/wage-rules?new=1&from=${createSourceId}`}
@@ -117,7 +119,7 @@ export default async function WageRulesPage({
                   />
                 </div>
                 <div className="flex shrink-0 items-center gap-2 tracking-normal">
-                  {canDelete && (
+                  {canWrite && canDelete && (
                     <form action={deleteVersion} className="contents">
                       <input type="hidden" name="id" value={detail.id} />
                       <ConfirmButton
@@ -130,31 +132,35 @@ export default async function WageRulesPage({
                       </ConfirmButton>
                     </form>
                   )}
-                  <Button type="submit" form="wage-rules-edit" className="h-7! px-3! text-xs">
-                    保存规则
-                  </Button>
+                  {canWrite && (
+                    <Button type="submit" form="wage-rules-edit" className="h-7! px-3! text-xs">
+                      保存规则
+                    </Button>
+                  )}
                 </div>
               </>
             }
           >
-            <RulesEditor
-              version={detail}
-              drivers={drivers}
-              operations={operations}
-              locations={locations}
-            />
+            <fieldset disabled={!canWrite} className="border-0 p-0">
+              <RulesEditor
+                version={detail}
+                drivers={drivers}
+                operations={operations}
+                locations={locations}
+              />
+            </fieldset>
           </LedgerPanel>
         </section>
       )}
 
       <section aria-label="版本列表">
         <LedgerPanel label={<b className="text-[15px] font-bold tracking-normal">版本列表（手动切换生效）</b>}>
-          <WageRulesTable versions={versions} selectedId={detail?.id} />
+          <WageRulesTable versions={versions} selectedId={detail?.id} canActivate={canWrite} />
         </LedgerPanel>
       </section>
 
       <ModalShell
-        open={isNew && Boolean(createSourceId)}
+        open={canWrite && isNew && Boolean(createSourceId)}
         closeHref="/dashboard/wage-rules"
         title="新建版本"
       >

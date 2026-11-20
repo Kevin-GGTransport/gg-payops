@@ -4,6 +4,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
+import {
+  hasPermission,
+  requirePermission,
+  getLinkedDriverId
+} from "@/lib/permissions";
 import { syncStatements } from "@/lib/statements";
 
 function str(formData: FormData, key: string) {
@@ -23,7 +28,7 @@ function revalidateStatementViews() {
  * One-way: there is no un-verify.
  */
 export async function verifyStatement(formData: FormData) {
-  await requireUser();
+  await requirePermission("payroll.write");
 
   const id = str(formData, "id");
   const returnTo = str(formData, "return_to");
@@ -62,11 +67,24 @@ export async function verifyStatement(formData: FormData) {
  * exists, and later changes only set the red edited_after_verify flag.
  */
 export async function confirmDriverStatement(formData: FormData) {
-  await requireUser();
+  await requirePermission("payroll.confirm");
 
   const id = str(formData, "id");
   const returnTo = str(formData, "return_to");
   if (!id) redirect("/dashboard/payroll");
+
+  // Driver-scoped accounts may only confirm their own sheet (scope applies
+  // whenever the account is linked to a driver profile, whatever its roles)
+  const linked = await getLinkedDriverId();
+  if (linked !== null) {
+    const owners = await prisma.$queryRaw<Array<{ driver_id: string }>>`
+      SELECT driver_id::text FROM pay.payroll_statements
+      WHERE id = ${id}::bigint LIMIT 1
+    `;
+    if (owners[0] && owners[0].driver_id !== linked) {
+      redirect("/dashboard/forbidden");
+    }
+  }
 
   await prisma.$executeRaw`
     UPDATE pay.payroll_statements s
@@ -106,6 +124,7 @@ export async function confirmDriverStatement(formData: FormData) {
 /** Why a copy was refused; the dialog maps these to Chinese messages */
 export type CopyErrorCode =
   | "bad_request"
+  | "forbidden"
   | "no_trips"
   | "source_not_draft"
   | "target_same"
@@ -137,6 +156,10 @@ export async function copyStatement(
   formData: FormData
 ): Promise<{ ok: false; code: CopyErrorCode } | undefined> {
   await requireUser();
+  // Return-value action: no redirect, the dialog maps the code to Chinese
+  if (!(await hasPermission("payroll.write"))) {
+    return { ok: false, code: "forbidden" };
+  }
 
   const id = str(formData, "id");
   const targetDriverId = str(formData, "target_driver_id");
@@ -272,6 +295,7 @@ export async function copyStatement(
 /** Why a truck change was refused; the dialog maps these to Chinese messages */
 export type ChangeTruckErrorCode =
   | "bad_request"
+  | "forbidden"
   | "statement_missing"
   | "truck_missing"
   | "no_trips";
@@ -294,6 +318,10 @@ export async function changeStatementTruck(
   formData: FormData
 ): Promise<{ ok: false; code: ChangeTruckErrorCode } | undefined> {
   await requireUser();
+  // Return-value action: no redirect, the dialog maps the code to Chinese
+  if (!(await hasPermission("payroll.write"))) {
+    return { ok: false, code: "forbidden" };
+  }
 
   const id = str(formData, "id");
   const targetTruckId = str(formData, "target_truck_id");

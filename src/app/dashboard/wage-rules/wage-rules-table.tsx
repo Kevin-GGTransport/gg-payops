@@ -13,11 +13,14 @@ import type { WageRuleVersionSummary } from "@/lib/queries/wage-rules";
 /** Version list on the shared TanStack + shadcn table shell */
 export function WageRulesTable({
   versions,
-  selectedId
+  selectedId,
+  canActivate
 }: {
   versions: WageRuleVersionSummary[];
   /** Currently opened version: its row gets the route-blue pick line */
   selectedId?: string;
+  /** Convenience only - the action re-checks permissions server-side */
+  canActivate: boolean;
 }) {
   // Stable identity across client re-renders: a fresh array per render churns
   // TanStack's sizing sync (the freeze family)
@@ -72,20 +75,22 @@ export function WageRulesTable({
         ) : (
           <span className="inline-flex items-center gap-3">
             <Link href={`/dashboard/wage-rules?v=${row.original.id}`}>详情</Link>
-            <form action={activateVersion} className="contents">
-              <input type="hidden" name="id" value={row.original.id} />
-              <ConfirmButton
-                className="button button-quiet h-7! px-2! text-xs"
-                title="将该版本设为生效？"
-                message="当前生效版本会立即停用，新录入的行程按新版本计价。"
-              >
-                设为生效
-              </ConfirmButton>
-            </form>
+            {canActivate && (
+              <form action={activateVersion} className="contents">
+                <input type="hidden" name="id" value={row.original.id} />
+                <ConfirmButton
+                  className="button button-quiet h-7! px-2! text-xs"
+                  title="将该版本设为生效？"
+                  message="当前生效版本会立即停用，新录入的行程按新版本计价。"
+                >
+                  设为生效
+                </ConfirmButton>
+              </form>
+            )}
           </span>
         )
     }
-  ], []);
+  ], [canActivate]);
 
   const table = useRosterTable({
     data: versions,

@@ -15,10 +15,13 @@ import { setTruckStatus } from "./actions";
 export function TrucksTable({
   trucks,
   returnTo,
+  canWrite,
   empty
 }: {
   trucks: TruckRow[];
   returnTo: string;
+  /** Convenience only - the actions re-check permissions server-side */
+  canWrite: boolean;
   empty: string;
 }) {
   // Stable identity across client re-renders: a fresh array per render churns
@@ -88,7 +91,7 @@ export function TrucksTable({
       meta: { cellClass: "actions" },
       cell: ({ row }) => {
         const truck = row.original;
-        return (
+        return canWrite ? (
           <>
             <Link href={`/dashboard/trucks?edit=${truck.id}${returnTo ? `&${returnTo}` : ""}`}>
               编辑
@@ -109,10 +112,12 @@ export function TrucksTable({
               </SubmitButton>
             </form>
           </>
+        ) : (
+          <span className="text-muted-foreground">只读</span>
         );
       }
     }
-  ], [returnTo]);
+  ], [returnTo, canWrite]);
 
   const table = useRosterTable({
     data: trucks,

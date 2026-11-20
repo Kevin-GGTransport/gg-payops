@@ -23,6 +23,7 @@ export type ChangeTruckStatement = {
 
 const CHANGE_TRUCK_ERROR_MESSAGES: Record<ChangeTruckErrorCode, string> = {
   bad_request: "参数缺失，请刷新页面后重试。",
+  forbidden: "你的账号没有更换车辆的权限。",
   statement_missing: "工资单不存在或已被删除。",
   truck_missing: "所选车辆不存在或已停用。",
   no_trips: "本周期没有行程可改。"

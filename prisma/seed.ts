@@ -7,12 +7,50 @@ if (!process.env.DATABASE_URL) {
 
 const prisma = new PrismaClient();
 
-const permissionCodes = [
-  "driver.read", "driver.write",
-  "location.read", "location.write",
-  "payroll.read", "payroll.write",
-  "report.read"
-] as const;
+/** [code, Chinese name] - must stay in lockstep with migration 0033 */
+const permissionCodes: Array<[string, string]> = [
+  ["trip.read", "行程查看"],
+  ["trip.write", "行程录入与编辑"],
+  ["payroll.read", "工资单查看"],
+  ["payroll.write", "工资单编辑"],
+  ["payroll.confirm", "工资单司机确认"],
+  ["driver.read", "司机档案查看"],
+  ["driver.write", "司机档案编辑"],
+  ["truck.read", "车辆查看"],
+  ["truck.write", "车辆编辑"],
+  ["location.read", "位置查看"],
+  ["location.write", "位置编辑"],
+  ["operation.read", "操作类型查看"],
+  ["operation.write", "操作类型编辑"],
+  ["wage_rule.read", "工资规则查看"],
+  ["wage_rule.write", "工资规则编辑"],
+  ["report.read", "数据统计查看"],
+  ["account.read", "账号管理查看"],
+  ["account.write", "账号管理编辑"],
+  ["role.read", "角色权限查看"],
+  ["role.write", "角色权限编辑"]
+];
+
+/**
+ * Explicit preset-role grant matrix (the old RegExp scheme over-granted:
+ * finance got master-data writes it never uses). Keep aligned with 0033.
+ */
+const roleGrants: Record<string, string[]> = {
+  SUPER_ADMIN: permissionCodes.map(([code]) => code),
+  FINANCE_CLERK: [
+    "trip.read", "trip.write", "payroll.read", "payroll.write",
+    "driver.read", "truck.read", "location.read", "operation.read",
+    "wage_rule.read", "report.read"
+  ],
+  PAYROLL_REVIEWER: [
+    "trip.read", "payroll.read", "payroll.write", "payroll.confirm", "report.read"
+  ],
+  DRIVER: ["trip.read", "payroll.read", "payroll.confirm"],
+  VIEWER: [
+    "trip.read", "payroll.read", "driver.read", "truck.read",
+    "location.read", "operation.read", "wage_rule.read", "report.read"
+  ]
+};
 
 async function main() {
   const [adminHash, financeHash, reviewerHash] = await Promise.all([
@@ -49,6 +87,7 @@ async function main() {
     ["SUPER_ADMIN", "超级管理员"],
     ["FINANCE_CLERK", "财务录入员"],
     ["PAYROLL_REVIEWER", "工资审核人"],
+    ["DRIVER", "司机"],
     ["VIEWER", "查看者"]
   ];
   for (const [code, name] of roles) {
@@ -59,27 +98,21 @@ async function main() {
     `;
   }
 
-  for (const code of permissionCodes) {
+  for (const [code, name] of permissionCodes) {
     await prisma.$executeRaw`
       INSERT INTO common.permissions(code, name, module, resource, action)
       VALUES (
-        ${code}, ${code},
+        ${code}, ${name},
         split_part(${code}, '.', 1),
         split_part(${code}, '.', 2),
         split_part(${code}, '.', 3)
       )
-      ON CONFLICT (code) DO NOTHING
+      ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
     `;
   }
 
-  const rolePermissions: Array<[string, RegExp]> = [
-    ["SUPER_ADMIN", /.*/],
-    ["FINANCE_CLERK", /^(driver|location|payroll|report)\./],
-    ["PAYROLL_REVIEWER", /^(driver|location|payroll|report)\./],
-    ["VIEWER", /\.(read)$/]
-  ];
-  for (const [roleCode, pattern] of rolePermissions) {
-    for (const code of permissionCodes.filter(code => pattern.test(code))) {
+  for (const [roleCode, codes] of Object.entries(roleGrants)) {
+    for (const code of codes) {
       await prisma.$executeRaw`
         INSERT INTO common.role_permissions(role_id, permission_id)
         SELECT r.id, p.id FROM common.roles r, common.permissions p

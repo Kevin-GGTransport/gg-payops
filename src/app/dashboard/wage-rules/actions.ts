@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/auth";
+import { requirePermission } from "@/lib/permissions";
 
 function str(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
@@ -170,7 +170,7 @@ async function writeVersionChildren(
  * versions are freely editable presets that only take effect once activated.
  */
 export async function saveVersion(formData: FormData) {
-  await requireUser();
+  await requirePermission("wage_rule.write");
 
   const id = str(formData, "id");
   const back = (error: string) => `/dashboard/wage-rules?v=${id}&error=${error}`;
@@ -205,7 +205,7 @@ export async function saveVersion(formData: FormData) {
 
 /** Copy an existing version (params + children) as an INACTIVE preset */
 export async function createVersion(formData: FormData) {
-  await requireUser();
+  await requirePermission("wage_rule.write");
 
   const sourceId = str(formData, "source_id");
   const name = str(formData, "name");
@@ -251,7 +251,7 @@ export async function createVersion(formData: FormData) {
  * (exactly one ACTIVE version at any time). New trips price by it instantly.
  */
 export async function activateVersion(formData: FormData) {
-  await requireUser();
+  await requirePermission("wage_rule.write");
 
   const id = str(formData, "id");
   const existing = await prisma.$queryRaw<Array<{ one: number }>>`
@@ -272,7 +272,7 @@ export async function activateVersion(formData: FormData) {
 
 /** INACTIVE versions only; the ACTIVE version cannot be deleted */
 export async function deleteVersion(formData: FormData) {
-  await requireUser();
+  await requirePermission("wage_rule.write");
 
   const id = str(formData, "id");
   const existing = await prisma.$queryRaw<Array<{ status: string }>>`

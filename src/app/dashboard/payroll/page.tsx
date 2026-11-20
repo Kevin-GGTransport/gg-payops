@@ -3,7 +3,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel } from "@/components/ledger";
 import { PeriodPicker } from "@/components/period-picker";
-import { requireUser } from "@/lib/auth";
+import { requirePermission, getLinkedDriverId, getUserPermissions } from "@/lib/permissions";
 import { todayIso } from "@/lib/format";
 import { miles as fmtMiles, money } from "@/lib/format";
 import { firstValue, type SearchParams } from "@/lib/search-params";
@@ -38,8 +38,16 @@ export default async function PayrollPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireUser();
+  await requirePermission("payroll.read");
   const sp = await searchParams;
+
+  // Driver-linked accounts see only their own sheets; write powers come from
+  // live permissions (button hiding is convenience, actions re-check)
+  const scopedDriverId = await getLinkedDriverId();
+  const scoped = scopedDriverId !== null;
+  const permissions = await getUserPermissions();
+  const canVerify = permissions.has("payroll.write");
+  const canConfirm = permissions.has("payroll.confirm");
 
   // Two tabs: the period rollup is the default landing view; the archive
   // (statements across all periods) is the second tab
@@ -63,11 +71,11 @@ export default async function PayrollPage({
   // Period mode: the period rollup (statements, DRAFT numbers live);
   // Archive mode: statements across all periods
   const [merged, archive, pickerTotals, drivers, trucks] = await Promise.all([
-    shownPeriod ? mergedPeriodStatements(shownPeriod) : Promise.resolve(null),
+    shownPeriod ? mergedPeriodStatements(shownPeriod, scopedDriverId) : Promise.resolve(null),
     view === "all"
-      ? listStatements({ period: null, status: statusFromTab(firstValue(sp.status)), q })
+      ? listStatements({ period: null, status: statusFromTab(firstValue(sp.status)), q, driverId: scopedDriverId })
       : Promise.resolve(null),
-    statementPeriodTotals(),
+    statementPeriodTotals(scopedDriverId),
     // Copy-dialog pickers, shared by both table views
     activeDriverOptions(),
     activeTruckOptions()
@@ -113,9 +121,11 @@ export default async function PayrollPage({
                 <Link className="button button-dark" href={`/dashboard/payroll/export?period=${shownPeriod.start}`}>
                   导出工资表
                 </Link>
-                <Link className="button button-quiet" href={`/dashboard/fuel-export?period=${shownPeriod.start}`}>
-                  导出加油
-                </Link>
+                {!scoped && (
+                  <Link className="button button-quiet" href={`/dashboard/fuel-export?period=${shownPeriod.start}`}>
+                    导出加油
+                  </Link>
+                )}
               </>
             )}
             <Link className="button button-quiet" href="/dashboard/trips">
@@ -208,6 +218,9 @@ export default async function PayrollPage({
               statements={mergedRows}
               drivers={drivers}
               trucks={trucks}
+              canVerify={canVerify}
+              canConfirm={canConfirm}
+              canCopy={canVerify && !scoped}
               empty="本周期还没有司机有行程；先去录入行程。"
             />
           </LedgerPanel>
@@ -244,6 +257,9 @@ export default async function PayrollPage({
               statements={archiveRows}
               drivers={drivers}
               trucks={trucks}
+              canVerify={canVerify}
+              canConfirm={canConfirm}
+              canCopy={canVerify && !scoped}
               empty={
                 q || statusFilter !== "all"
                   ? "没有符合条件的工资单。换个筛选条件看看。"

@@ -14,9 +14,12 @@ import { setLocationStatus } from "./actions";
 /** Location roster on the shared TanStack + shadcn table shell */
 export function LocationsTable({
   locations,
+  canWrite,
   empty
 }: {
   locations: LocationRow[];
+  /** Convenience only - the actions re-check permissions server-side */
+  canWrite: boolean;
   empty: string;
 }) {
   // Stable identity across client re-renders: a fresh array per render churns
@@ -73,7 +76,7 @@ export function LocationsTable({
       meta: { cellClass: "actions" },
       cell: ({ row }) => {
         const location = row.original;
-        return (
+        return canWrite ? (
           <>
             <Link href={`/dashboard/locations?edit=${location.id}`}>编辑</Link>
             <form action={setLocationStatus}>
@@ -88,10 +91,12 @@ export function LocationsTable({
               </SubmitButton>
             </form>
           </>
+        ) : (
+          <span className="text-muted-foreground">只读</span>
         );
       }
     }
-  ], []);
+  ], [canWrite]);
 
   const table = useRosterTable({
     data: locations,

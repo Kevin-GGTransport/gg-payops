@@ -18,10 +18,13 @@ const lgHidden = "hidden lg:table-cell";
 export function DriversTable({
   drivers,
   returnTo,
+  canWrite,
   empty
 }: {
   drivers: DriverRow[];
   returnTo: string;
+  /** Convenience only - the actions re-check permissions server-side */
+  canWrite: boolean;
   empty: string;
 }) {
   // Stable identity across client re-renders: a fresh array per render churns
@@ -117,7 +120,7 @@ export function DriversTable({
       meta: { cellClass: "actions" },
       cell: ({ row }) => {
         const driver = row.original;
-        return (
+        return canWrite ? (
           <>
             <Link href={`/dashboard/drivers?edit=${driver.id}`}>编辑</Link>
             <form action={setDriverStatus}>
@@ -133,10 +136,12 @@ export function DriversTable({
               </SubmitButton>
             </form>
           </>
+        ) : (
+          <span className="text-muted-foreground">只读</span>
         );
       }
     }
-  ], [returnTo]);
+  ], [returnTo, canWrite]);
 
   const table = useRosterTable({
     data: drivers,

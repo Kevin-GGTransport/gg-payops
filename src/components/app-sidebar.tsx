@@ -12,10 +12,14 @@ import {
   MapPin,
   ScrollText,
   Shapes,
+  ShieldCheck,
   Truck,
-  UserRound
+  UserRound,
+  Users
 } from "lucide-react";
 import { signOutAction } from "@/app/actions";
+import { ChangePasswordButton } from "@/components/change-password-dialog";
+import type { PermissionCode } from "@/lib/permission-catalog";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -40,6 +44,8 @@ type MenuLeaf = {
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
+  /** Required permission (enforced server-side; hidden here as convenience) */
+  permission?: PermissionCode;
 };
 
 type MenuGroup = {
@@ -51,26 +57,34 @@ type MenuGroup = {
 const WORKBENCH: MenuLeaf = {
   href: "/dashboard",
   label: "工作台",
-  icon: LayoutDashboard
+  icon: LayoutDashboard,
+  permission: "trip.write"
 };
 
 const GROUPS: MenuGroup[] = [
   {
     label: "工资结算",
     items: [
-      { href: "/dashboard/payroll", label: "工资单", icon: Calculator },
-      { href: "/dashboard/trips", label: "行程管理", icon: ScrollText },
-      { href: "/dashboard/stats", label: "数据统计", icon: BarChart3 }
+      { href: "/dashboard/payroll", label: "工资单", icon: Calculator, permission: "payroll.read" },
+      { href: "/dashboard/trips", label: "行程管理", icon: ScrollText, permission: "trip.read" },
+      { href: "/dashboard/stats", label: "数据统计", icon: BarChart3, permission: "report.read" }
     ]
   },
   {
     label: "基础数据",
     items: [
-      { href: "/dashboard/wage-rules", label: "工资规则", icon: BookOpen },
-      { href: "/dashboard/drivers", label: "司机管理", icon: UserRound },
-      { href: "/dashboard/trucks", label: "车辆管理", icon: Truck },
-      { href: "/dashboard/locations", label: "位置管理", icon: MapPin },
-      { href: "/dashboard/operations", label: "操作类型", icon: Shapes }
+      { href: "/dashboard/wage-rules", label: "工资规则", icon: BookOpen, permission: "wage_rule.read" },
+      { href: "/dashboard/drivers", label: "司机管理", icon: UserRound, permission: "driver.read" },
+      { href: "/dashboard/trucks", label: "车辆管理", icon: Truck, permission: "truck.read" },
+      { href: "/dashboard/locations", label: "位置管理", icon: MapPin, permission: "location.read" },
+      { href: "/dashboard/operations", label: "操作类型", icon: Shapes, permission: "operation.read" }
+    ]
+  },
+  {
+    label: "系统",
+    items: [
+      { href: "/dashboard/accounts", label: "账号管理", icon: Users, permission: "account.read" },
+      { href: "/dashboard/roles", label: "角色权限", icon: ShieldCheck, permission: "role.read" }
     ]
   }
 ];
@@ -84,12 +98,23 @@ function useIsActive() {
 
 export function AppSidebar({
   displayName,
-  roles
+  roleNames = [],
+  permissions = []
 }: {
   displayName: string;
-  roles: string[];
+  /** Live role names from the DB (the JWT snapshot went stale on role edits) */
+  roleNames?: string[];
+  /** Live permission codes; nav items outside this set stay hidden */
+  permissions?: string[];
 }) {
   const isActive = useIsActive();
+  const allowed = (item: MenuLeaf) =>
+    !item.permission || permissions.includes(item.permission);
+  const showWorkbench = allowed(WORKBENCH);
+  const groups = GROUPS.map(group => ({
+    ...group,
+    items: group.items.filter(allowed)
+  })).filter(group => group.items.length > 0);
 
   return (
     <Sidebar collapsible="icon">
@@ -116,26 +141,28 @@ export function AppSidebar({
         </div>
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={isActive(WORKBENCH.href)}
-                  tooltip="工作台"
-                  className="text-[15px] font-semibold"
-                >
-                  <Link href={WORKBENCH.href}>
-                    <WORKBENCH.icon />
-                    <span>{WORKBENCH.label}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        {GROUPS.map(group => {
+        {showWorkbench ? (
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={isActive(WORKBENCH.href)}
+                    tooltip="工作台"
+                    className="text-[15px] font-semibold"
+                  >
+                    <Link href={WORKBENCH.href}>
+                      <WORKBENCH.icon />
+                      <span>{WORKBENCH.label}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : null}
+        {groups.map(group => {
           return (
             <Collapsible
               key={group.label}
@@ -187,9 +214,10 @@ export function AppSidebar({
               {displayName}
             </p>
             <p className="m-0 mt-0.5 text-[11px] text-slate-400">
-              {roles.join(" / ") || "未分配角色"}
+              {roleNames.join(" / ") || "未分配角色"}
             </p>
           </div>
+          <ChangePasswordButton />
           <form action={signOutAction} className="mt-2.5">
             <Button
               variant="ghost"

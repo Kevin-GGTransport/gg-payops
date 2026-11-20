@@ -38,6 +38,7 @@ export type CopySourceStatement = {
 
 const COPY_ERROR_MESSAGES: Record<CopyErrorCode, string> = {
   bad_request: "参数缺失，请刷新页面后重试。",
+  forbidden: "你的账号没有复制工资单的权限。",
   no_trips: "源工资单本周期没有行程可复制。",
   source_not_draft: "源工资单已核对或不存在，只有草稿可以复制。",
   target_same: "不能复制给同一个人。",

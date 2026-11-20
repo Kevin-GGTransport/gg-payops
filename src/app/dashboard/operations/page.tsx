@@ -12,7 +12,7 @@ import {
   TextField
 } from "@/components/form-fields";
 import { FlashToast } from "@/components/flash-toast";
-import { requireUser } from "@/lib/auth";
+import { requirePermission, getUserPermissions } from "@/lib/permissions";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
 import { getOperationTypeById, listOperationTypes } from "@/lib/queries/operations";
 import { saveOperation } from "./actions";
@@ -36,7 +36,8 @@ export default async function OperationsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireUser();
+  await requirePermission("operation.read");
+  const canWrite = (await getUserPermissions()).has("operation.write");
   const sp = await searchParams;
 
   const editId = (firstValue(sp.edit) ?? "").trim();
@@ -69,7 +70,7 @@ export default async function OperationsPage({
       <PageHeader
         title="操作类型"
         description="行程操作的可管理字典：录入下拉、行程筛选与徽章都读这里；带柜操作可勾选必填 Load#。"
-        actions={<Link className="button button-quiet" href="/dashboard/operations?new=1">新增操作</Link>}
+        actions={canWrite ? <Link className="button button-quiet" href="/dashboard/operations?new=1">新增操作</Link> : undefined}
       />
       {savedMessage && <FlashToast message={savedMessage} param="saved" />}
 
@@ -77,13 +78,14 @@ export default async function OperationsPage({
         <LedgerPanel>
           <OperationsTable
             operations={operations}
+            canWrite={canWrite}
             empty="还没有操作类型，点右上角新增。"
           />
         </LedgerPanel>
       </section>
 
       <ModalShell
-        open={isNew || Boolean(editing) || Boolean(errorCode)}
+        open={canWrite && (isNew || Boolean(editing) || Boolean(errorCode))}
         closeHref="/dashboard/operations"
         title={editing ? `编辑 ${editing.code}` : "新增操作类型"}
       >

@@ -14,9 +14,12 @@ import { deleteOperation, setOperationStatus } from "./actions";
 /** Operation dictionary roster on the shared TanStack + shadcn table shell */
 export function OperationsTable({
   operations,
+  canWrite,
   empty
 }: {
   operations: OperationTypeRow[];
+  /** Convenience only - the actions re-check permissions server-side */
+  canWrite: boolean;
   empty: string;
 }) {
   // Stable identity across client re-renders: a fresh array per render churns
@@ -76,6 +79,13 @@ export function OperationsTable({
       meta: { cellClass: "actions" },
       cell: ({ row }) => {
         const op = row.original;
+        if (!canWrite) {
+          return op.is_system ? (
+            <span className="text-muted-foreground">系统内置</span>
+          ) : (
+            <span className="text-muted-foreground">只读</span>
+          );
+        }
         return (
           <>
             <Link href={`/dashboard/operations?edit=${op.id}`}>编辑</Link>
@@ -111,7 +121,7 @@ export function OperationsTable({
         );
       }
     }
-  ], []);
+  ], [canWrite]);
 
   const table = useRosterTable({
     data: operations,

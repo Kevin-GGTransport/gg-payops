@@ -124,3 +124,12 @@ export function PackageBadge({ note }: { note: string | null }) {
     </span>
   );
 }
+
+/** Role stamp: neutral ticket style (system presets and custom roles alike) */
+export function RoleBadge({ name }: { name: string }) {
+  return (
+    <span className={cn(pillBase, "border-line bg-muted/60 text-foreground")}>
+      {name}
+    </span>
+  );
+}

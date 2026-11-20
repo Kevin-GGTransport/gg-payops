@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
+import { forbidApi } from "@/lib/permissions";
 import { recognizeTripPhoto, type OcrSheet } from "@/lib/vision-ocr";
 import { prisma } from "@/lib/prisma";
 
@@ -21,8 +21,9 @@ function friendlyError(error: string): string {
  * photos in parallel. Photos are used in-memory only, never stored.
  */
 export async function POST(request: NextRequest) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // Entry-time photo import: only accounts that may enter trips
+  const denied = await forbidApi("trip.write");
+  if (denied) return denied;
 
   const form = await request.formData().catch(() => null);
   const files = form?.getAll("files").filter((v): v is File => v instanceof File) ?? [];

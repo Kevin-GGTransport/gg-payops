@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/auth";
+import { requirePermission } from "@/lib/permissions";
 import { calcFuelSubsidy } from "@/lib/wage";
 import type { DriverType } from "@/lib/labels";
 import { resolveEndpointId } from "@/lib/locations";
@@ -218,7 +218,7 @@ function mergeFuelRows(target: ParsedFuelRow[], incoming: ParsedFuelRow[]) {
  * and an empty batch.
  */
 export async function addTripsBatch(formData: FormData) {
-  await requireUser();
+  await requirePermission("trip.write");
 
   const groupCount = clampCount(str(formData, "group_count"), MAX_GROUPS);
   if (groupCount === 0) backWithError("no_rows", formData, []);

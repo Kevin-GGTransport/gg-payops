@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { FlashToast } from "@/components/flash-toast";
 import { FormError } from "@/components/form-fields";
 import { requireUser } from "@/lib/auth";
+import { firstPermittedHref, getUserPermissions } from "@/lib/permissions";
 import { defaultPeriod, periodOf } from "@/lib/period";
 import { firstValue, type SearchParams } from "@/lib/search-params";
 import { activeDriverOptions } from "@/lib/queries/drivers";
@@ -37,6 +39,12 @@ export default async function EntryPage({
   searchParams: Promise<SearchParams>;
 }) {
   await requireUser();
+  // Entry is a trip.write page: accounts without it (a driver, say) land on
+  // their first permitted module instead of staring at a 403
+  const permissions = await getUserPermissions();
+  if (!permissions.has("trip.write")) {
+    redirect(firstPermittedHref(permissions));
+  }
   const sp = await searchParams;
 
   const errorCode = firstValue(sp.error);

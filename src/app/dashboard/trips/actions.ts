@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/auth";
+import { requirePermission, assertDriverScope, getLinkedDriverId } from "@/lib/permissions";
 import { calcFuelSubsidy } from "@/lib/wage";
 import { resolveEndpointId } from "@/lib/locations";
 import { syncStatements, type StatementRef } from "@/lib/statements";
@@ -127,13 +127,14 @@ async function applyTripUpdate(
  * lenient field semantics.
  */
 export async function updateTrip(formData: FormData) {
-  await requireUser();
+  await requirePermission("trip.write");
   const id = str(formData, "id");
   const backTo = backPath(str(formData, "return_to"));
   if (!id) redirect(backTo);
 
   const current = await getTripById(id);
   if (!current) redirect(backTo);
+  await assertDriverScope(current.driver_id);
 
   const { validOperations, fuelSubsidyRate } = await pricingContext();
   const refs = await applyTripUpdate(id, current, formData, "", validOperations, fuelSubsidyRate);
@@ -160,11 +161,12 @@ export async function updateTrip(formData: FormData) {
  * edited flag - their numbers stay frozen.
  */
 export async function saveStatementSheet(formData: FormData) {
-  await requireUser();
+  await requirePermission("trip.write");
   const backTo = backPath(str(formData, "return_to"));
   const driverId = str(formData, "driver_id");
   const periodRaw = str(formData, "period");
   if (!/^\d+$/.test(driverId) || !isIsoDate(periodRaw)) redirect("/dashboard/payroll");
+  await assertDriverScope(driverId);
   const period = periodOf(periodRaw);
 
   // ---- Legs: only the dirty ids are written; appended rows INSERT
@@ -442,7 +444,7 @@ export async function saveStatementSheet(formData: FormData) {
 }
 
 export async function deleteTrip(formData: FormData) {
-  await requireUser();
+  await requirePermission("trip.write");
   const id = str(formData, "id");
   const backTo = backPath(str(formData, "return_to"));
   if (!id) redirect(backTo);
@@ -450,6 +452,7 @@ export async function deleteTrip(formData: FormData) {
   // Driver + period are needed to sync the statement after the row is gone
   const current = await getTripById(id);
   if (!current) redirect(backTo);
+  await assertDriverScope(current.driver_id);
 
   await prisma.$executeRaw`DELETE FROM pay.trips WHERE id = ${id}::bigint`;
 
@@ -464,7 +467,7 @@ export async function deleteTrip(formData: FormData) {
 }
 
 export async function deleteTripsBatch(formData: FormData) {
-  await requireUser();
+  await requirePermission("trip.write");
   const ids = formData.getAll("selected").map(String).filter(Boolean);
   const returnTo = str(formData, "return_to");
   const backTo = `/dashboard/trips${returnTo ? `?${returnTo}` : ""}`;
@@ -476,6 +479,11 @@ export async function deleteTripsBatch(formData: FormData) {
     FROM pay.trips
     WHERE id IN (${Prisma.join(ids.map(id => Prisma.sql`${id}::bigint`))})
   `;
+  // Driver-linked accounts may only batch-delete their own legs
+  const linked = await getLinkedDriverId();
+  if (linked !== null && doomed.some(r => r.driver_id !== linked)) {
+    redirect("/dashboard/forbidden");
+  }
 
   await prisma.$executeRaw`DELETE FROM pay.trips WHERE id IN (${Prisma.join(ids.map(id => Prisma.sql`${id}::bigint`))})`;
 

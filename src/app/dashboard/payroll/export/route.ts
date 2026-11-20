@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 
-import { requireUser } from "@/lib/auth";
+import { requirePermission, getLinkedDriverId } from "@/lib/permissions";
 import { DRIVER_TYPE_LABELS } from "@/lib/labels";
 import { defaultPeriod, periodLabel, periodOf, type Period } from "@/lib/period";
 import { listOperationTypes } from "@/lib/queries/operations";
@@ -184,14 +184,16 @@ function addDriverSheet(
  * attended driver with every leg, day subtotals and week totals.
  */
 export async function GET(request: Request) {
-  await requireUser();
+  await requirePermission("payroll.read");
   const url = new URL(request.url);
   const param = url.searchParams.get("period");
   const period: Period =
     param && /^\d{4}-\d{2}-\d{2}$/.test(param) ? periodOf(param) : defaultPeriod();
 
+  // Driver-scoped accounts export only their own sheet, never the fleet's
+  const scopedDriverId = await getLinkedDriverId();
   const [rows, operations] = await Promise.all([
-    mergedPeriodStatements(period),
+    mergedPeriodStatements(period, scopedDriverId),
     listOperationTypes()
   ]);
 

@@ -162,16 +162,19 @@ const STATEMENT_SELECT = Prisma.sql`
 /**
  * Statement list: every period by default, one period when `period` is set.
  * Status tabs and the name search share the period/q scoping so the counts
- * always match what the tabs will show.
+ * always match what the tabs will show. `driverId` scopes to one driver
+ * (driver-linked accounts only ever see their own sheets).
  */
 export async function listStatements(filter: {
   period: string | null;
   status: StatementStatus | "all";
   q: string;
+  driverId?: string | null;
 }) {
   const scope = [
     filter.period ? Prisma.sql` AND s.period_start = ${filter.period}::date` : Prisma.sql``,
-    filter.q ? Prisma.sql` AND d.full_name ILIKE ${`%${filter.q}%`}` : Prisma.sql``
+    filter.q ? Prisma.sql` AND d.full_name ILIKE ${`%${filter.q}%`}` : Prisma.sql``,
+    filter.driverId ? Prisma.sql` AND s.driver_id = ${filter.driverId}::bigint` : Prisma.sql``
   ];
   // The 核对 tab covers both checked states (VERIFIED + DONE driver
   // confirmed) so confirmed sheets never fall out of the tab
@@ -185,7 +188,7 @@ export async function listStatements(filter: {
   const [rows, counts] = await Promise.all([
     prisma.$queryRaw<GeneratedStatementRow[]>`
       ${STATEMENT_SELECT}
-      WHERE 1 = 1 ${scope[0]} ${scope[1]} ${statusClause}
+      WHERE 1 = 1 ${scope[0]} ${scope[1]} ${scope[2]} ${statusClause}
       ORDER BY s.period_start DESC, d.full_name
     `,
     prisma.$queryRaw<StatementStatusCounts[]>`
@@ -194,7 +197,7 @@ export async function listStatements(filter: {
              count(*) FILTER (WHERE s.status IN ('VERIFIED', 'DONE'))::int AS verified
       FROM pay.payroll_statements s
       JOIN ops.drivers d ON d.id = s.driver_id
-      WHERE 1 = 1 ${scope[0]} ${scope[1]}
+      WHERE 1 = 1 ${scope[0]} ${scope[1]} ${scope[2]}
     `
   ]);
   return { rows, counts: counts[0] ?? { total: 0, draft: 0, verified: 0 } };
@@ -218,12 +221,16 @@ export async function getStatementByDriverPeriod(driverId: string, periodStart: 
 }
 
 /** Per-period statement totals, feeding the period picker's wage column */
-export async function statementPeriodTotals() {
+export async function statementPeriodTotals(driverId?: string | null) {
+  const scope = driverId
+    ? Prisma.sql`WHERE driver_id = ${driverId}::bigint`
+    : Prisma.sql``;
   const rows = await prisma.$queryRaw<{ start: string; legs: number; pay: string }[]>`
     SELECT to_char(period_start, 'YYYY-MM-DD') AS start,
            sum(leg_count)::int AS legs,
            sum(total_pay + total_custom_fees)::text AS pay
     FROM pay.payroll_statements
+    ${scope}
     GROUP BY period_start
   `;
   return Object.fromEntries(
@@ -236,18 +243,30 @@ export async function statementPeriodTotals() {
  * without one (no trips - dimmed zero rows for roster context). Drivers who
  * were deactivated after their statement was created still show their row
  * (the pay is owed). Statement numbers are live in DRAFT, frozen once checked
- * (VERIFIED and DONE alike).
+ * (VERIFIED and DONE alike). `driverId` scopes the whole rollup to one driver
+ * (the driver-linked account view: no roster context, no other sheets).
  */
-export async function mergedPeriodStatements(period: Period): Promise<StatementRow[]> {
+export async function mergedPeriodStatements(
+  period: Period,
+  driverId?: string | null
+): Promise<StatementRow[]> {
   const [generated, actives] = await Promise.all([
-    listStatements({ period: period.start, status: "all", q: "" }),
-    prisma.$queryRaw<
-      Array<{ driver_id: string; full_name: string; driver_type: DriverType }>
-    >`
-      SELECT id::text AS driver_id, full_name, driver_type::text AS driver_type
-      FROM ops.drivers
-      WHERE status = 'ACTIVE'
-    `
+    listStatements({ period: period.start, status: "all", q: "", driverId }),
+    driverId
+      ? prisma.$queryRaw<
+          Array<{ driver_id: string; full_name: string; driver_type: DriverType }>
+        >`
+          SELECT id::text AS driver_id, full_name, driver_type::text AS driver_type
+          FROM ops.drivers
+          WHERE status = 'ACTIVE' AND id = ${driverId}::bigint
+        `
+      : prisma.$queryRaw<
+          Array<{ driver_id: string; full_name: string; driver_type: DriverType }>
+        >`
+          SELECT id::text AS driver_id, full_name, driver_type::text AS driver_type
+          FROM ops.drivers
+          WHERE status = 'ACTIVE'
+        `
   ]);
   const byDriver = new Map(generated.rows.map(s => [s.driver_id, s]));
 

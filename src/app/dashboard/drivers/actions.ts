@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/auth";
+import { requirePermission } from "@/lib/permissions";
 import { withFlash } from "@/lib/search-params";
 
 const FIELDS = [
@@ -39,7 +39,7 @@ function backWithError(error: string, formData: FormData): never {
 }
 
 export async function saveDriver(formData: FormData) {
-  await requireUser();
+  await requirePermission("driver.write");
 
   const id = str(formData, "id");
   const fullName = str(formData, "full_name");
@@ -95,7 +95,7 @@ export async function saveDriver(formData: FormData) {
 }
 
 export async function setDriverStatus(formData: FormData) {
-  await requireUser();
+  await requirePermission("driver.write");
 
   const id = str(formData, "id");
   const status = str(formData, "status");

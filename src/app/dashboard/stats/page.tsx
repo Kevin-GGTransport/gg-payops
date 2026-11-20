@@ -4,7 +4,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel } from "@/components/ledger";
 import { PeriodPicker } from "@/components/period-picker";
-import { requireUser } from "@/lib/auth";
+import { requirePermission } from "@/lib/permissions";
 import { miles as fmtMiles, money, todayIso } from "@/lib/format";
 import { firstValue, type SearchParams } from "@/lib/search-params";
 import { defaultPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
@@ -33,7 +33,7 @@ export default async function StatsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireUser();
+  await requirePermission("report.read");
   const sp = await searchParams;
 
   const periodParam = (firstValue(sp.period) ?? "").trim();

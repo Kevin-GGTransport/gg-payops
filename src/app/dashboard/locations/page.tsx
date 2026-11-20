@@ -7,7 +7,7 @@ import { FormGrid, TextField, SubmitButton, FormError } from "@/components/form-
 import { FlashToast } from "@/components/flash-toast";
 import { ComboboxField } from "@/components/combobox-field";
 import { MapPicker } from "@/components/map-picker";
-import { requireUser } from "@/lib/auth";
+import { requirePermission, getUserPermissions } from "@/lib/permissions";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
 import { LOCATION_TYPE_LABELS, type LocationType } from "@/lib/labels";
 import { listLocations, getLocationById, locationTagSuggestions, locationTypeCounts } from "@/lib/queries/locations";
@@ -32,7 +32,8 @@ export default async function LocationsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireUser();
+  await requirePermission("location.read");
+  const canWrite = (await getUserPermissions()).has("location.write");
   const sp = await searchParams;
 
   const typeParam = firstValue(sp.type);
@@ -80,7 +81,7 @@ export default async function LocationsPage({
       <PageHeader
         title="位置管理"
         description="行程起终点与基准金额的基础数据，按类型区分基地、亚马逊仓、其他。"
-        actions={<Link className="button button-quiet" href="/dashboard/locations?new=1">新增位置</Link>}
+        actions={canWrite ? <Link className="button button-quiet" href="/dashboard/locations?new=1">新增位置</Link> : undefined}
       />
       {savedMessage && <FlashToast message={savedMessage} param="saved" />}
 
@@ -113,13 +114,14 @@ export default async function LocationsPage({
         <LedgerPanel>
           <LocationsTable
             locations={locations}
+            canWrite={canWrite}
             empty="没有符合条件的位置。换筛选条件，或点右上角新增。"
           />
         </LedgerPanel>
       </section>
 
       <ModalShell
-        open={isNew || Boolean(editing) || Boolean(errorCode)}
+        open={canWrite && (isNew || Boolean(editing) || Boolean(errorCode))}
         closeHref="/dashboard/locations"
         title={editing ? `编辑 ${editing.code}` : "新增位置"}
       >

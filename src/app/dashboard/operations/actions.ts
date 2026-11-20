@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/auth";
+import { requirePermission } from "@/lib/permissions";
 import { getOperationTypeById } from "@/lib/queries/operations";
 
 function str(formData: FormData, key: string) {
@@ -29,7 +29,7 @@ function revalidateDictionary() {
 }
 
 export async function saveOperation(formData: FormData) {
-  await requireUser();
+  await requirePermission("operation.write");
 
   const id = str(formData, "id");
   const existing = id ? await getOperationTypeById(id) : null;
@@ -83,7 +83,7 @@ export async function saveOperation(formData: FormData) {
 }
 
 export async function setOperationStatus(formData: FormData) {
-  await requireUser();
+  await requirePermission("operation.write");
   const id = str(formData, "id");
   const status = str(formData, "status");
   if (!id || !["ACTIVE", "INACTIVE"].includes(status)) redirect("/dashboard/operations");
@@ -106,7 +106,7 @@ export async function setOperationStatus(formData: FormData) {
 }
 
 export async function deleteOperation(formData: FormData) {
-  await requireUser();
+  await requirePermission("operation.write");
   const id = str(formData, "id");
   if (!id) redirect("/dashboard/operations");
 

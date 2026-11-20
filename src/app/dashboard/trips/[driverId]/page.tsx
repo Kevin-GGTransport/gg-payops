@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
 import { FlashToast } from "@/components/flash-toast";
@@ -9,7 +9,7 @@ import { LedgerPanel } from "@/components/ledger";
 import { SubmitButton } from "@/components/submit-button";
 import { DriverTypeBadge, StatementStatusBadge } from "@/components/badges";
 import { PeriodPicker } from "@/components/period-picker";
-import { requireUser } from "@/lib/auth";
+import { requirePermission, getLinkedDriverId, getUserPermissions } from "@/lib/permissions";
 import { firstValue, type SearchParams } from "@/lib/search-params";
 import { fuel as fmtFuel, miles as fmtMiles, money, todayIso } from "@/lib/format";
 import { defaultPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
@@ -30,6 +30,7 @@ import { confirmDriverStatement, verifyStatement } from "../../payroll/actions";
 import { CopyStatementButton } from "../../payroll/copy-statement-dialog";
 import { ChangeTruckButton } from "../../payroll/change-truck-dialog";
 import { PayrollLegsTable } from "../payroll-legs-table";
+import { ReadOnlyStatement } from "./read-only-statement";
 
 export const metadata: Metadata = { title: "周期工资单 · G&G PayOps" };
 
@@ -96,12 +97,24 @@ export default async function DriverPeriodPage({
   params: Promise<{ driverId: string }>;
   searchParams: Promise<SearchParams>;
 }) {
-  await requireUser();
+  await requirePermission("trip.read");
   const { driverId } = await params;
   if (!/^\d+$/.test(driverId)) notFound();
 
   const driver = await getDriverById(driverId);
   if (!driver) notFound();
+
+  // Driver-linked accounts bounce off other drivers' sheets (gently, back to
+  // their own payroll list); they read a static sheet and may only confirm
+  const scopedDriverId = await getLinkedDriverId();
+  if (scopedDriverId !== null && scopedDriverId !== driverId) {
+    redirect("/dashboard/payroll");
+  }
+  const permissions = await getUserPermissions();
+  const canWrite = permissions.has("trip.write");
+  const canVerify = permissions.has("payroll.write");
+  const canConfirm = permissions.has("payroll.confirm");
+  const readOnly = !canWrite || scopedDriverId !== null;
 
   const sp = await searchParams;
   // Trip edits saved (inline batch or dialog) redirect back here
@@ -350,7 +363,7 @@ export default async function DriverPeriodPage({
             <Link className="button button-quiet" href={`/dashboard/payroll?period=${period.start}`}>
               返回工资单
             </Link>
-            {statement && legs.length > 0 && (
+            {canVerify && !readOnly && statement && legs.length > 0 && (
               <ChangeTruckButton
                 statement={statement}
                 trucks={truckOptions}
@@ -358,7 +371,7 @@ export default async function DriverPeriodPage({
                 triggerClassName="button button-quiet"
               />
             )}
-            {statement && statement.status === "DRAFT" && legs.length > 0 && (
+            {canVerify && !readOnly && statement && statement.status === "DRAFT" && legs.length > 0 && (
               <CopyStatementButton
                 statement={statement}
                 drivers={driverOptions}
@@ -366,13 +379,15 @@ export default async function DriverPeriodPage({
                 triggerClassName="button button-quiet"
               />
             )}
-            <Link className="button button-quiet" href={`/dashboard/fuel-export?period=${period.start}`}>
-              导出加油
-            </Link>
+            {!readOnly && (
+              <Link className="button button-quiet" href={`/dashboard/fuel-export?period=${period.start}`}>
+                导出加油
+              </Link>
+            )}
             <Link className="button button-quiet" href={`/dashboard/payroll/export?period=${period.start}`}>
               导出工资表
             </Link>
-            {statement && statement.status === "DRAFT" && legs.length > 0 && (
+            {canVerify && statement && statement.status === "DRAFT" && legs.length > 0 && (
               <form action={verifyStatement}>
                 <input type="hidden" name="id" value={statement.id} />
                 <input type="hidden" name="return_to" value={returnTo} />
@@ -381,7 +396,7 @@ export default async function DriverPeriodPage({
                 </SubmitButton>
               </form>
             )}
-            {statement && statement.status === "VERIFIED" && legs.length > 0 && (
+            {canConfirm && statement && statement.status === "VERIFIED" && legs.length > 0 && (
               <form action={confirmDriverStatement}>
                 <input type="hidden" name="id" value={statement.id} />
                 <input type="hidden" name="return_to" value={returnTo} />
@@ -458,87 +473,98 @@ export default async function DriverPeriodPage({
         </div>
       </section>
 
-      {/* One form wraps the three editable sections: legs, fuel, fees share a
-          single save (the save bar derives its hint off what each section
-          reports through the sheet context) */}
-      <StatementSheetForm
-        driverId={driver.id}
-        periodStart={period.start}
-        returnTo={returnTo}
-        frozen={archived}
-        states={stateOptions}
-      >
-        <section aria-label="按日明细" className="mt-4">
-          <LedgerPanel
-            label={
-              <>
-                按日明细
-                <b>
-                  {days.length} 天 · {legs.length} 段 · {fmtMiles(totals.miles)} mi · {money(totals.pay)}
-                  {totals.subsidy > 0 && ` · 补助 ${money(totals.subsidy)}`}
-                </b>
-              </>
-            }
-          >
-            <PayrollLegsTable
-              days={days}
-              returnTo={returnTo}
-              edit={{ locations, operations: operationOptions, wageRule }}
-              newLegCtx={{
-                driverId: driver.id,
-                driverType: driver.driver_type,
-                priceAsDriver: driver.price_as_driver,
-                // Fresh rows open on today when it falls inside the viewed
-                // period, else the period's Saturday
-                defaultDate:
-                  today >= period.start && today <= period.end ? today : period.start
-              }}
-              storageKey="payops.payroll.detail.cols"
-              changes={snapshot ? { changedFieldsByLeg, addedLegIds } : undefined}
-            />
-            {legs.length === 0 && (
-              <p className="notice mt-3">
-                本周期没有行程。可<Link className="linklike" href={`/dashboard?driver=${driver.id}&period=${period.start}`}>前往录入</Link>，或点下方「添加行程」直接补录。
-              </p>
-            )}
-          </LedgerPanel>
-        </section>
+      {readOnly ? (
+        /* Driver-linked / write-less accounts: static sheet, confirm stays in
+           the header - no editors, no save bar, nothing to corrupt */
+        <ReadOnlyStatement
+          days={days}
+          fuelDetail={fuelDetail}
+          feeDetail={feeDetail}
+          feeTotal={feeTotal}
+        />
+      ) : (
+        /* One form wraps the three editable sections: legs, fuel, fees share a
+           single save (the save bar derives its hint off what each section
+           reports through the sheet context) */
+        <StatementSheetForm
+          driverId={driver.id}
+          periodStart={period.start}
+          returnTo={returnTo}
+          frozen={archived}
+          states={stateOptions}
+        >
+          <section aria-label="按日明细" className="mt-4">
+            <LedgerPanel
+              label={
+                <>
+                  按日明细
+                  <b>
+                    {days.length} 天 · {legs.length} 段 · {fmtMiles(totals.miles)} mi · {money(totals.pay)}
+                    {totals.subsidy > 0 && ` · 补助 ${money(totals.subsidy)}`}
+                  </b>
+                </>
+              }
+            >
+              <PayrollLegsTable
+                days={days}
+                returnTo={returnTo}
+                edit={{ locations, operations: operationOptions, wageRule }}
+                newLegCtx={{
+                  driverId: driver.id,
+                  driverType: driver.driver_type,
+                  priceAsDriver: driver.price_as_driver,
+                  // Fresh rows open on today when it falls inside the viewed
+                  // period, else the period's Saturday
+                  defaultDate:
+                    today >= period.start && today <= period.end ? today : period.start
+                }}
+                storageKey="payops.payroll.detail.cols"
+                changes={snapshot ? { changedFieldsByLeg, addedLegIds } : undefined}
+              />
+              {legs.length === 0 && (
+                <p className="notice mt-3">
+                  本周期没有行程。可<Link className="linklike" href={`/dashboard?driver=${driver.id}&period=${period.start}`}>前往录入</Link>，或点下方「添加行程」直接补录。
+                </p>
+              )}
+            </LedgerPanel>
+          </section>
 
-        <section aria-label="加油按州汇总" className="mt-4">
-          <LedgerPanel
-            label={
-              <>
-                加油 · 按州
-                <b>{fuelDetail.length > 0 ? `${fuelDetail.length} 州 · ${fmtFuel(fuelRollup.gallons)} gal` : "未录入"}</b>
-              </>
-            }
-          >
-            <FuelEditor
-              states={stateOptions}
-              rows={fuelEditRows}
-              defaultTruckCode={fuelDefaultTruck}
-              markings={snapshot ? { changed: changedFuelStates, added: addedFuelStates } : undefined}
-            />
-          </LedgerPanel>
-        </section>
+          <section aria-label="加油按州汇总" className="mt-4">
+            <LedgerPanel
+              label={
+                <>
+                  加油 · 按州
+                  <b>{fuelDetail.length > 0 ? `${fuelDetail.length} 州 · ${fmtFuel(fuelRollup.gallons)} gal` : "未录入"}</b>
+                </>
+              }
+            >
+              <FuelEditor
+                states={stateOptions}
+                rows={fuelEditRows}
+                defaultTruckCode={fuelDefaultTruck}
+                markings={snapshot ? { changed: changedFuelStates, added: addedFuelStates } : undefined}
+              />
+            </LedgerPanel>
+          </section>
 
-        <section aria-label="自定义费用" className="mt-4">
-          <LedgerPanel
-            label={
-              <>
-                自定义费用
-                <b>
-                  {feeDetail.length > 0
-                    ? `${feeDetail.length} 笔 · ${money(feeTotal)}`
-                    : "未录入"}
-                </b>
-              </>
-            }
-          >
-            <FeeEditor rows={feeEditRows} />
-          </LedgerPanel>
-        </section>
-      </StatementSheetForm>
+          <section aria-label="自定义费用" className="mt-4">
+            <LedgerPanel
+              label={
+                <>
+                  自定义费用
+                  <b>
+                    {feeDetail.length > 0
+                      ? `${feeDetail.length} 笔 · ${money(feeTotal)}`
+                      : "未录入"}
+                  </b>
+                </>
+              }
+            >
+              <FeeEditor rows={feeEditRows} />
+            </LedgerPanel>
+          </section>
+        </StatementSheetForm>
+      )}
     </>
   );
 }

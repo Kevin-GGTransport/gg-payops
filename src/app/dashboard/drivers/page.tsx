@@ -6,7 +6,7 @@ import { LedgerPanel } from "@/components/ledger";
 import { DriverTypeCards } from "@/components/choice-cards";
 import { FormGrid, TextField, DateField, TextareaField, CheckboxField, SelectField, SubmitButton, FormError } from "@/components/form-fields";
 import { FlashToast } from "@/components/flash-toast";
-import { requireUser } from "@/lib/auth";
+import { requirePermission, getUserPermissions } from "@/lib/permissions";
 import { firstValue, formField, type SearchParams } from "@/lib/search-params";
 import {
   DRIVER_TYPES,
@@ -31,7 +31,8 @@ export default async function DriversPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireUser();
+  await requirePermission("driver.read");
+  const canWrite = (await getUserPermissions()).has("driver.write");
   const sp = await searchParams;
 
   const typeParam = firstValue(sp.type);
@@ -97,9 +98,11 @@ export default async function DriversPage({
         title="司机管理"
         description="登记司机与车主档案，作为行程录入和计薪的基础数据。"
         actions={
-          <Link className="button button-quiet" href={`/dashboard/drivers?${modalParams.toString()}`}>
-            新增登记
-          </Link>
+          canWrite ? (
+            <Link className="button button-quiet" href={`/dashboard/drivers?${modalParams.toString()}`}>
+              新增登记
+            </Link>
+          ) : undefined
         }
       />
       {savedMessage && <FlashToast message={savedMessage} param="saved" />}
@@ -134,6 +137,7 @@ export default async function DriversPage({
           <DriversTable
             drivers={drivers}
             returnTo={returnTo}
+            canWrite={canWrite}
             empty={
               q || typeFilter !== "all"
                 ? "没有符合条件的记录。换个筛选条件，或直接新增一位司机 / 车主。"
@@ -144,7 +148,7 @@ export default async function DriversPage({
       </section>
 
       <ModalShell
-        open={isNew || Boolean(editing) || Boolean(errorCode)}
+        open={canWrite && (isNew || Boolean(editing) || Boolean(errorCode))}
         closeHref={closeHref}
         title={editing ? `编辑 ${editing.full_name}` : "登记司机 / 车主"}
       >

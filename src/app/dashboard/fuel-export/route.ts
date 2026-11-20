@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 
-import { requireUser } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { requirePermission, getLinkedDriverId } from "@/lib/permissions";
 import { defaultPeriod, periodLabel, periodOf } from "@/lib/period";
 import { listFuelByPeriod } from "@/lib/queries/fuel";
 
@@ -29,7 +30,9 @@ function gridify(row: ExcelJS.Row, bold = false) {
  * the payroll export's styling so the two downloads read as one family.
  */
 export async function GET(request: Request) {
-  await requireUser();
+  await requirePermission("payroll.read");
+  // Fuel-by-state is fleet-wide truck data - driver-scoped accounts get no cut
+  if ((await getLinkedDriverId()) !== null) redirect("/dashboard/forbidden");
   const url = new URL(request.url);
   const param = url.searchParams.get("period");
   const period =

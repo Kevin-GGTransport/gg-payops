@@ -23,11 +23,11 @@ type BaseField = {
 
 const fieldClass = "grid gap-1.5 text-xs font-medium text-muted-foreground";
 
-export function TextField({ label, name, required, placeholder, defaultValue, maxLength, className }: BaseField & { maxLength?: number }) {
+export function TextField({ label, name, required, placeholder, defaultValue, maxLength, className, type = "text" }: BaseField & { maxLength?: number; type?: "text" | "password" }) {
   return (
     <label className={cn(fieldClass, className)}>
       {label}
-      <Input name={name} required={required} placeholder={placeholder} defaultValue={defaultValue} maxLength={maxLength} />
+      <Input type={type} name={name} required={required} placeholder={placeholder} defaultValue={defaultValue} maxLength={maxLength} />
     </label>
   );
 }

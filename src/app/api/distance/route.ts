@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
+import { forbidApi } from "@/lib/permissions";
 import { fullAddress } from "@/lib/format";
 import { drivingMiles } from "@/lib/google-maps";
 import { getLocationById } from "@/lib/queries/locations";
@@ -27,8 +27,9 @@ async function resolveEndpoint(value: string): Promise<string> {
 }
 
 export async function GET(request: NextRequest) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // Entry-time helper: only accounts that may enter trips
+  const denied = await forbidApi("trip.write");
+  if (denied) return denied;
 
   const fromParam = request.nextUrl.searchParams.get("from")?.trim() ?? "";
   const toParam = request.nextUrl.searchParams.get("to")?.trim() ?? "";

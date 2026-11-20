@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/auth";
+import { requirePermission } from "@/lib/permissions";
 import { withFlash } from "@/lib/search-params";
 import { todayIso, isoPlusDays } from "@/lib/format";
 
@@ -73,7 +73,7 @@ async function applyOwnership(truckId: string, ownerDriverId: string | null) {
 }
 
 export async function saveTruck(formData: FormData) {
-  await requireUser();
+  await requirePermission("truck.write");
 
   const id = str(formData, "id");
   const code = str(formData, "truck_code").toUpperCase();
@@ -152,7 +152,7 @@ export async function saveTruck(formData: FormData) {
 }
 
 export async function setTruckStatus(formData: FormData) {
-  await requireUser();
+  await requirePermission("truck.write");
 
   const id = str(formData, "id");
   const status = str(formData, "status");
@@ -174,7 +174,7 @@ export async function setTruckStatus(formData: FormData) {
 }
 
 export async function addOdometerReading(formData: FormData) {
-  await requireUser();
+  await requirePermission("truck.write");
 
   const truckId = str(formData, "truck_id");
   const readingDate = str(formData, "reading_date");
@@ -200,7 +200,7 @@ export async function addOdometerReading(formData: FormData) {
 }
 
 export async function deleteOdometerReading(formData: FormData) {
-  await requireUser();
+  await requirePermission("truck.write");
 
   const id = str(formData, "id");
   const truckId = str(formData, "truck_id");
