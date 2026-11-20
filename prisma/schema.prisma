@@ -99,6 +99,10 @@ model PayrollStatement {
   /// stateCode, gallons, miles, amount, note}]; frozen at verify like the
   /// other numbers (raw-SQL access only)
   fuelDetail   Json            @default("[]") @map("fuel_detail")
+  /// Frozen at verification: the period's whole editable leg set + the then
+  /// fuel_detail, for cell-level post-verify diffing on the detail sheet;
+  /// NULL on rows verified before this column existed (raw-SQL access only)
+  verifySnapshot Json?          @map("verify_snapshot")
   generatedAt  DateTime        @default(now()) @map("generated_at") @db.Timestamptz(6)
   updatedAt    DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 

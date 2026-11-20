@@ -51,6 +51,14 @@ const cellPick = "border-foreground bg-route/10 hover:bg-route/20 data-[state=op
 /** DateField group variant of the typed-cell look */
 const cellDate =
   "border-foreground bg-card has-[[data-slot=input-group-control]:focus-visible]:border-foreground";
+/** Red variants mark cells changed after verification (plain class swaps -
+ *  NOT appended - so the border color never depends on CSS order) */
+const cellInputRed =
+  "h-8 px-2 border-red-600 bg-card text-[13px] text-red-700 focus-visible:border-red-600";
+const cellPickRed =
+  "border-red-600 bg-red-50/60 hover:bg-red-50 data-[state=open]:bg-red-50";
+const cellDateRed =
+  "border-red-600 bg-card has-[[data-slot=input-group-control]:focus-visible]:border-red-600";
 const cellHint = "block text-[10px] leading-tight font-normal text-muted-foreground";
 
 /** Stable column set (module scope: a fresh array per render churns TanStack's sizing sync) */
@@ -115,6 +123,8 @@ const EditableLegRow = React.memo(function EditableLegRow({
   returnTo,
   paySpan,
   payFolded,
+  changedFields,
+  added,
   onDirty,
   onValues
 }: {
@@ -128,11 +138,19 @@ const EditableLegRow = React.memo(function EditableLegRow({
   paySpan?: PaySpan;
   /** Member inside a merged run: renders no pay cell at all */
   payFolded?: boolean;
+  /** Field keys that differ from the verification snapshot (red marks) */
+  changedFields?: string[];
+  /** Leg created after verification (whole-row tint + tag) */
+  added?: boolean;
   onDirty: (id: string) => void;
   onValues: (id: string, values: LegValues) => void;
 }) {
   const prefix = `leg_${leg.id}_`;
   const legLabel = `${leg.trip_date} 的第 ${leg.load_no || "—"} 程`;
+  // Snapshot-diff marks: red class swaps per field (see cellInputRed note)
+  const changed = new Set(changedFields ?? []);
+  const redIf = (field: string, red: string, plain: string) =>
+    changed.has(field) ? red : plain;
 
   // Stored endpoint -> picker value: the loc: pick when the row is in the
   // dictionary, else txt:<code>, else empty
@@ -267,7 +285,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           : "";
 
   return (
-    <tr>
+    <tr className={added ? "bg-red-50/40" : undefined}>
       <td className="px-1.5">
         <DateField
           name={`${prefix}trip_date`}
@@ -278,8 +296,9 @@ const EditableLegRow = React.memo(function EditableLegRow({
           }}
           aria-label={`${legLabel}日期`}
           size="sm"
-          groupClassName={cellDate}
+          groupClassName={redIf("trip_date", cellDateRed, cellDate)}
         />
+        {added && <span className={`${cellHint} text-red-700`}>核对后新增</span>}
       </td>
       <td className="px-1.5">
         <LocationPicker
@@ -289,7 +308,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           value={fromValue}
           placeholder="起点"
           aria-label={`${legLabel}起点`}
-          triggerClassName={`h-8 px-2 ${cellPick}`}
+          triggerClassName={`h-8 px-2 ${redIf("from", cellPickRed, cellPick)}`}
           onValueChange={value => {
             setFromValue(value);
             onDirty(leg.id);
@@ -304,7 +323,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           value={toValue}
           placeholder="终点"
           aria-label={`${legLabel}终点`}
-          triggerClassName={`h-8 px-2 ${cellPick}`}
+          triggerClassName={`h-8 px-2 ${redIf("to", cellPickRed, cellPick)}`}
           onValueChange={value => {
             setToValue(value);
             onDirty(leg.id);
@@ -318,7 +337,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           clearable={false}
           searchable={false}
           aria-label={`${legLabel}操作`}
-          triggerClassName={`h-8 px-2 ${cellPick}`}
+          triggerClassName={`h-8 px-2 ${redIf("operation", cellPickRed, cellPick)}`}
           onValueChange={value => {
             setOperation(value);
             if (!operationRequiresLoad(value)) setLoadNoValue("");
@@ -340,7 +359,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           maxLength={64}
           placeholder={operationRequiresLoad(operation) ? "如 LD101" : "该操作免填"}
           aria-label={`${legLabel}Load#`}
-          className={`${cellInput} font-mono font-semibold`}
+          className={`${redIf("load_no", cellInputRed, cellInput)} font-mono font-semibold`}
         />
       </td>
       <td className="px-1.5">
@@ -356,7 +375,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
             onDirty(leg.id);
           }}
           aria-label={`${legLabel}里程`}
-          className={`${cellInput} font-mono`}
+          className={`${redIf("miles", cellInputRed, cellInput)} font-mono`}
         />
         {milesHint && (
           <span className={`${cellHint} ${phase === "failed" ? "text-destructive" : ""}`}>
@@ -377,7 +396,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           }}
           placeholder="—"
           aria-label={`${legLabel}加油量`}
-          className={`${cellInput} font-mono`}
+          className={`${redIf("fuel_gallons", cellInputRed, cellInput)} font-mono`}
         />
       </td>
       <td className="px-1.5 font-mono text-[13px]">
@@ -400,7 +419,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
                 onDirty(leg.id);
               }}
               aria-label={`${legLabel}工资`}
-              className={`${cellInput} font-mono`}
+              className={`${redIf("pay_amount", cellInputRed, cellInput)} font-mono`}
             />
             <span className={cellHint}>
               {leg.package_note} · 整包金额{paySpan && paySpan.span > 1 ? `（${paySpan.span} 程）` : ""}
@@ -413,7 +432,11 @@ const EditableLegRow = React.memo(function EditableLegRow({
         ) : packaged ? (
           <>
             <input type="hidden" name={`${prefix}pay_amount`} value={payValue} />
-            <span className="block px-2 font-mono text-[13px] tabular-nums">
+            <span
+              className={`block px-2 font-mono text-[13px] tabular-nums ${
+                changed.has("pay_amount") ? "text-red-700" : ""
+              }`}
+            >
               {money(payValue)}
             </span>
             <span className={cellHint}>
@@ -433,7 +456,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
                 onDirty(leg.id);
               }}
               aria-label={`${legLabel}工资`}
-              className={`${cellInput} font-mono`}
+              className={`${redIf("pay_amount", cellInputRed, cellInput)} font-mono`}
             />
             {manualPay !== null && (
               <span className={cellHint}>
@@ -460,7 +483,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
           defaultValue={leg.notes ?? ""}
           placeholder="选填"
           aria-label={`${legLabel}备注`}
-          className={cellInput}
+          className={redIf("notes", cellInputRed, cellInput)}
           onChange={() => onDirty(leg.id)}
         />
       </td>
@@ -517,7 +540,10 @@ export function PayrollLegsTable({
   /** True when the statement is VERIFIED: saves won't move the frozen
    *  numbers, they only mark the sheet red - say so up front */
   frozen = false,
-  storageKey = "payops.payroll.legs.cols"
+  storageKey = "payops.payroll.legs.cols",
+  /** Verification-snapshot diff: field keys per changed leg + post-verify
+   *  additions (undefined on legacy statements without a snapshot) */
+  changes
 }: {
   days: DayGroup[];
   /** Where the batch save redirects back to (full path with ?period=) */
@@ -525,6 +551,7 @@ export function PayrollLegsTable({
   edit: TripEditDictionaries;
   frozen?: boolean;
   storageKey?: string;
+  changes?: { changedFieldsByLeg: Record<string, string[]>; addedLegIds: string[] };
 }) {
   // Live per-leg numbers (initial = stored), recomputed subtotals read these
   const [live, setLive] = React.useState<Record<string, LegValues>>(() =>
@@ -547,6 +574,11 @@ export function PayrollLegsTable({
   // Package pay cells merge across each carrier's contiguous run (stable
   // across renders: EditableLegRow is memo'd on these props)
   const { spans, folded } = React.useMemo(() => planPaySpans(days), [days]);
+  // Post-verify additions as a lookup (diff data arrives from the server)
+  const addedLegIds = React.useMemo(
+    () => new Set(changes?.addedLegIds ?? []),
+    [changes]
+  );
 
   const onDirty = React.useCallback((id: string) => {
     setDirty(prev => (prev.has(id) ? prev : new Set(prev).add(id)));
@@ -612,6 +644,8 @@ export function PayrollLegsTable({
                 returnTo={returnTo}
                 paySpan={spans.get(leg.id)}
                 payFolded={folded.has(leg.id)}
+                changedFields={changes?.changedFieldsByLeg[leg.id]}
+                added={addedLegIds.has(leg.id)}
                 onDirty={onDirty}
                 onValues={onValues}
               />

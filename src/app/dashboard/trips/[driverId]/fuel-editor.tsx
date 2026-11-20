@@ -72,7 +72,8 @@ export function FuelEditor({
   states,
   rows,
   defaultTruckCode,
-  frozen
+  frozen,
+  markings
 }: {
   driverId: string;
   periodStart: string;
@@ -83,6 +84,8 @@ export function FuelEditor({
   defaultTruckCode: string;
   /** VERIFIED statement: edits land with the permanent red flag */
   frozen: boolean;
+  /** Verification-snapshot diff: state codes changed / added after verify */
+  markings?: { changed: string[]; added: string[] };
 }) {
   const [slots, setSlots] = React.useState<FuelSlot[]>(() =>
     toSlots(rows, defaultTruckCode)
@@ -110,7 +113,10 @@ export function FuelEditor({
     setSlots(current => [...current, { id, value: { ...EMPTY_ROW, truckCode: defaultTruckCode } }]);
   }
 
-  // Dup hints and totals derive off the slots in this render (single frame)
+  // Dup hints and totals derive off the slots in this render (single frame);
+  // post-verify change marks come in as plain lookups (render-derived)
+  const changedStates = new Set(markings?.changed ?? []);
+  const addedStates = new Set(markings?.added ?? []);
   const content = slots.filter(s => Boolean(
     s.value.state || s.value.gallons || s.value.miles || s.value.amount || s.value.note
   ));
@@ -144,10 +150,20 @@ export function FuelEditor({
           {slots.map((slot, i) => {
             const dup = dupOf.get(slot.id);
             const label = `加油第 ${i + 1} 行`;
+            const rowAdded = addedStates.has(slot.value.state);
+            const rowChanged = changedStates.has(slot.value.state);
             return (
-              <tr key={slot.id}>
+              <tr
+                key={slot.id}
+                className={rowAdded || rowChanged ? "bg-red-50/40" : undefined}
+              >
                 <td className="ctr px-1.5 font-mono text-[12px] tabular-nums text-foreground">
                   {i + 1}
+                  {(rowAdded || rowChanged) && (
+                    <span className="block text-[9px] leading-tight text-red-700">
+                      {rowAdded ? "核对后新增" : "核对后已改"}
+                    </span>
+                  )}
                 </td>
                 <td className="px-1.5">
                   <input type="hidden" name={`f_fuel_row_${i}_truck_code`} value={slot.value.truckCode} />

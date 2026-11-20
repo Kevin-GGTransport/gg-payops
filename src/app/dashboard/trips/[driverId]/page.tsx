@@ -18,7 +18,7 @@ import { activeOperationOptions } from "@/lib/queries/operations";
 import { activeLocationOptions } from "@/lib/queries/locations";
 import { currentWageRule } from "@/lib/queries/wage-rules";
 import { driverPeriodTrips, periodPayTotals, type DriverPeriodTripRow } from "@/lib/queries/trips";
-import { getStatementByDriverPeriod } from "@/lib/queries/statements";
+import { getStatementByDriverPeriod, parseVerifySnapshot } from "@/lib/queries/statements";
 import { activeStateOptions, statementFuelDetail } from "@/lib/queries/fuel";
 import { FuelEditor, type FuelEditRow } from "./fuel-editor";
 import { activeDriverOptions } from "@/lib/queries/drivers";
@@ -189,6 +189,73 @@ export default async function DriverPeriodPage({
   // DONE alike) freeze them. The permanent edited_after_verify flag (not a
   // live comparison) drives the detail-only red
   const statementFrozen = statement !== null && statement.status !== "DRAFT";
+
+  // Post-verify change localization: diff the live legs against the frozen
+  // snapshot so the sheet can mark exactly WHICH cells moved. Legacy rows
+  // (null snapshot, verified before 0031) keep the statement-level red only.
+  const numEq = (a: string | null, b: string | null) => Number(a ?? 0) === Number(b ?? 0);
+  const textEq = (a: string | null, b: string | null) => (a ?? "") === (b ?? "");
+  const snapshot = statementFrozen ? parseVerifySnapshot(statement.verify_snapshot) : null;
+  const changedFieldsByLeg: Record<string, string[]> = {};
+  const addedLegIds: string[] = [];
+  const changedFuelStates: string[] = [];
+  const addedFuelStates: string[] = [];
+  let deletedLegs = 0;
+  let deletedFuelStates = 0;
+  if (snapshot) {
+    const snapById = new Map(snapshot.legs.map(l => [l.id, l]));
+    for (const leg of legs) {
+      const snap = snapById.get(leg.id);
+      if (!snap) {
+        addedLegIds.push(leg.id);
+        continue;
+      }
+      snapById.delete(leg.id);
+      const fields: string[] = [];
+      if (snap.trip_date !== leg.trip_date) fields.push("trip_date");
+      if (!textEq(snap.operation, leg.operation)) fields.push("operation");
+      if (!textEq(snap.load_no, leg.load_no)) fields.push("load_no");
+      if (!textEq(snap.from_code, leg.from_code)) fields.push("from");
+      if (!textEq(snap.to_code, leg.to_code)) fields.push("to");
+      if (!numEq(snap.miles, leg.miles)) fields.push("miles");
+      if (!numEq(snap.fuel_gallons, leg.fuel_gallons)) fields.push("fuel_gallons");
+      if (!numEq(snap.pay_amount, leg.pay_amount)) fields.push("pay_amount");
+      if (!textEq(snap.notes, leg.notes)) fields.push("notes");
+      if (fields.length > 0) changedFieldsByLeg[leg.id] = fields;
+    }
+    deletedLegs = snapById.size;
+    const snapFuel = new Map(snapshot.fuel.map(r => [r.stateCode, r]));
+    for (const row of fuelDetail) {
+      const snap = snapFuel.get(row.stateCode);
+      if (!snap) {
+        addedFuelStates.push(row.stateCode);
+        continue;
+      }
+      snapFuel.delete(row.stateCode);
+      if (
+        snap.gallons !== row.gallons ||
+        snap.miles !== row.miles ||
+        snap.amount !== row.amount
+      ) {
+        changedFuelStates.push(row.stateCode);
+      }
+    }
+    deletedFuelStates = snapFuel.size;
+  }
+  const changedLegCount = Object.keys(changedFieldsByLeg).length;
+  // Banner summary off the localized diff (legacy rows keep the plain text)
+  const fuelTouched =
+    changedFuelStates.length + addedFuelStates.length + deletedFuelStates;
+  const changeSummary = snapshot
+    ? [
+        changedLegCount > 0 ? `${changedLegCount} 段有改动` : null,
+        addedLegIds.length > 0 ? `${addedLegIds.length} 段新增` : null,
+        deletedLegs > 0 ? `${deletedLegs} 段已删除` : null,
+        fuelTouched > 0 ? "加油有改动" : null
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
   // Muted name tone for the whole page: dark green once verified, dark red
   // once driver-confirmed or edited after checking - dim shades only
   const nameTone = statement
@@ -221,7 +288,7 @@ export default async function DriverPeriodPage({
               <>
                 <StatementStatusBadge status={statement.status} edited />
                 <span className="text-red-700">
-                  {" "}核对后行程有改动：核对金额 {money(statement.total_pay)} 已冻结（改动不自动计入），红色标记不消除，请人工复核。
+                  {" "}核对后行程有改动{changeSummary && `（${changeSummary}）`}：核对金额 {money(statement.total_pay)} 已冻结（改动不自动计入）{snapshot ? "，改动处已标红" : ""}，请人工复核。
                 </span>
               </>
             ) : (
@@ -367,6 +434,7 @@ export default async function DriverPeriodPage({
             edit={{ locations, operations: operationOptions, wageRule }}
             frozen={statementFrozen}
             storageKey="payops.payroll.detail.cols"
+            changes={snapshot ? { changedFieldsByLeg, addedLegIds } : undefined}
           />
           {legs.length === 0 && (
             <p className="notice mt-3">
@@ -392,6 +460,7 @@ export default async function DriverPeriodPage({
             rows={fuelEditRows}
             defaultTruckCode={fuelDefaultTruck}
             frozen={statementFrozen}
+            markings={snapshot ? { changed: changedFuelStates, added: addedFuelStates } : undefined}
           />
         </LedgerPanel>
       </section>

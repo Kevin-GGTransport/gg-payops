@@ -198,7 +198,23 @@ export function StatementsTable({
       header: "本周期工资",
       size: 116,
       meta: { cellClass: "mono num strong", headerClass: "num" },
-      cell: ({ row }) => money(row.original.total_pay)
+      // Frozen sheets whose live sum drifted (post-verify edits) show the
+      // live number as a red sub-line, so the freeze reads intentional
+      cell: ({ row }) => {
+        const s = row.original;
+        const drifted =
+          s.status !== null && s.status !== "DRAFT" && Number(s.live_pay) !== Number(s.total_pay);
+        return drifted ? (
+          <>
+            <span>{money(s.total_pay)}</span>
+            <span className="block text-[11px] leading-tight font-normal text-red-600">
+              实时 {money(s.live_pay)}
+            </span>
+          </>
+        ) : (
+          money(s.total_pay)
+        );
+      }
     },
     {
       id: "status",

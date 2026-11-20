@@ -31,6 +31,10 @@ export type StatementRow = {
   note: string | null;
   /** Gallons summed off fuel_detail (the by-state rollup, not total_fuel) */
   fuel_gal: string;
+  /** Live trip sum for the period (the list's "differs from frozen" hint) */
+  live_pay: string;
+  /** Verification-time snapshot (jsonb as stored; null before 0031 / drafts) */
+  verify_snapshot: unknown;
 };
 
 /** A stored statement: id/status always present (merged rows may lack them) */
@@ -38,6 +42,90 @@ export type GeneratedStatementRow = Omit<StatementRow, "id" | "status"> & {
   id: string;
   status: StatementStatus;
 };
+
+/** One leg's editable fields as frozen at verification (raw strings off jsonb) */
+export type SnapshotLeg = {
+  id: string;
+  trip_date: string;
+  operation: string;
+  load_no: string | null;
+  from_code: string | null;
+  to_code: string | null;
+  miles: string;
+  fuel_gallons: string;
+  pay_amount: string;
+  notes: string | null;
+};
+
+/** One fuel-by-state row as frozen at verification */
+export type SnapshotFuelRow = {
+  stateCode: string;
+  gallons: number;
+  miles: number;
+  amount: number;
+};
+
+/** The whole verification-time snapshot stored on the statement row */
+export type VerifySnapshot = {
+  legs: SnapshotLeg[];
+  fuel: SnapshotFuelRow[];
+};
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+
+/**
+ * Narrow the jsonb payload into a VerifySnapshot. jsonb is trusted-by-us
+ * storage but still external input to the type system: anything malformed
+ * (legacy shapes, truncation, manual edits) falls back to null, which the
+ * detail sheet renders as the statement-level red only.
+ */
+export function parseVerifySnapshot(value: unknown): VerifySnapshot | null {
+  if (!isRecord(value)) return null;
+  const legs = value.legs;
+  const fuel = value.fuel;
+  if (!Array.isArray(legs) || !Array.isArray(fuel)) return null;
+  const parsedLegs: SnapshotLeg[] = [];
+  for (const leg of legs) {
+    if (!isRecord(leg)) return null;
+    const id = str(leg.id);
+    const date = str(leg.trip_date);
+    const operation = str(leg.operation);
+    if (id === null || date === null || operation === null) return null;
+    parsedLegs.push({
+      id,
+      trip_date: date,
+      operation,
+      load_no: str(leg.load_no),
+      from_code: str(leg.from_code),
+      to_code: str(leg.to_code),
+      miles: str(leg.miles) ?? "0",
+      fuel_gallons: str(leg.fuel_gallons) ?? "0",
+      pay_amount: str(leg.pay_amount) ?? "0",
+      notes: str(leg.notes)
+    });
+  }
+  const parsedFuel: SnapshotFuelRow[] = [];
+  for (const row of fuel) {
+    if (!isRecord(row)) return null;
+    const stateCode = str(row.stateCode);
+    const gallons = row.gallons;
+    const miles = row.miles;
+    const amount = row.amount;
+    if (
+      stateCode === null ||
+      typeof gallons !== "number" ||
+      typeof miles !== "number" ||
+      typeof amount !== "number"
+    ) {
+      return null;
+    }
+    parsedFuel.push({ stateCode, gallons, miles, amount });
+  }
+  return { legs: parsedLegs, fuel: parsedFuel };
+}
 
 export type StatementStatusCounts = {
   total: number;
@@ -55,7 +143,13 @@ const STATEMENT_SELECT = Prisma.sql`
          s.total_pay::text AS total_pay, s.total_fuel_subsidy::text AS total_fuel_subsidy,
          s.op_counts, s.trucks, s.note,
          (SELECT COALESCE(sum((e->>'gallons')::numeric), 0)
-          FROM jsonb_array_elements(s.fuel_detail) e)::text AS fuel_gal
+          FROM jsonb_array_elements(s.fuel_detail) e)::text AS fuel_gal,
+         (SELECT COALESCE(sum(t.pay_amount), 0)
+          FROM pay.trips t
+          WHERE t.driver_id = s.driver_id
+            AND t.trip_date >= s.period_start
+            AND t.trip_date <= s.period_end)::text AS live_pay,
+         s.verify_snapshot
   FROM pay.payroll_statements s
   JOIN ops.drivers d ON d.id = s.driver_id
 `;
@@ -173,7 +267,9 @@ export async function mergedPeriodStatements(period: Period): Promise<StatementR
       op_counts: {},
       trucks: "",
       note: null,
-      fuel_gal: "0"
+      fuel_gal: "0",
+      live_pay: "0",
+      verify_snapshot: null
     });
   }
   rows.sort((a, b) => a.full_name.localeCompare(b.full_name, "zh-Hans-CN"));

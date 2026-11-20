@@ -179,10 +179,39 @@ export async function verifyStatement(formData: FormData) {
     await syncStatements([
       { driverId: target.driver_id, periodStart: target.period_start }
     ]);
+    // The flip and the snapshot land atomically: the same UPDATE freezes the
+    // numbers AND captures the period's whole editable leg set plus the then
+    // fuel_detail, so the detail sheet can later diff cell-by-cell. Endpoint
+    // codes join the location dictionary the same way the sheet's query does.
     await prisma.$executeRaw`
-      UPDATE pay.payroll_statements
-      SET status = 'VERIFIED', edited_after_verify = false, updated_at = now()
-      WHERE id = ${id}::bigint AND status = 'DRAFT'
+      UPDATE pay.payroll_statements s
+      SET status = 'VERIFIED', edited_after_verify = false, updated_at = now(),
+          verify_snapshot = (
+            SELECT jsonb_build_object(
+              'legs', COALESCE((
+                SELECT jsonb_agg(jsonb_build_object(
+                  'id', t.id::text,
+                  'trip_date', to_char(t.trip_date, 'YYYY-MM-DD'),
+                  'operation', t.operation,
+                  'load_no', t.load_no,
+                  'from_code', f.code,
+                  'to_code', o.code,
+                  'miles', to_char(t.miles, 'FM999999990.00'),
+                  'fuel_gallons', to_char(t.fuel_gallons, 'FM999999990.000'),
+                  'pay_amount', to_char(t.pay_amount, 'FM999999990.00'),
+                  'notes', t.notes
+                ) ORDER BY t.id)
+                FROM pay.trips t
+                LEFT JOIN ops.locations f ON f.id = t.from_location_id
+                LEFT JOIN ops.locations o ON o.id = t.to_location_id
+                WHERE t.driver_id = s.driver_id
+                  AND t.trip_date >= s.period_start
+                  AND t.trip_date <= s.period_end
+              ), '[]'::jsonb),
+              'fuel', s.fuel_detail
+            )
+          )
+      WHERE s.id = ${id}::bigint AND s.status = 'DRAFT'
     `;
   }
 
