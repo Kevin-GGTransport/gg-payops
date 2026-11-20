@@ -25,6 +25,10 @@ export type StatementRow = {
   total_pay: string;
   /** Owner fuel subsidy of the period (live in DRAFT, frozen once checked) */
   total_fuel_subsidy: string;
+  /** Signed net of custom fees (ADD minus SUB); stays editable after verify */
+  total_custom_fees: string;
+  /** Custom fee rows as stored (jsonb array; parse via parseCustomFees) */
+  custom_fees: unknown;
   /** Leg counts per operation code (live in DRAFT, frozen once checked) */
   op_counts: Record<string, number>;
   trucks: string;
@@ -141,6 +145,7 @@ const STATEMENT_SELECT = Prisma.sql`
          s.trip_days, s.leg_count,
          s.total_miles::text AS total_miles, s.total_fuel::text AS total_fuel,
          s.total_pay::text AS total_pay, s.total_fuel_subsidy::text AS total_fuel_subsidy,
+         s.total_custom_fees::text AS total_custom_fees, s.custom_fees,
          s.op_counts, s.trucks, s.note,
          (SELECT COALESCE(sum((e->>'gallons')::numeric), 0)
           FROM jsonb_array_elements(s.fuel_detail) e)::text AS fuel_gal,
@@ -217,7 +222,7 @@ export async function statementPeriodTotals() {
   const rows = await prisma.$queryRaw<{ start: string; legs: number; pay: string }[]>`
     SELECT to_char(period_start, 'YYYY-MM-DD') AS start,
            sum(leg_count)::int AS legs,
-           sum(total_pay)::text AS pay
+           sum(total_pay + total_custom_fees)::text AS pay
     FROM pay.payroll_statements
     GROUP BY period_start
   `;
@@ -264,6 +269,8 @@ export async function mergedPeriodStatements(period: Period): Promise<StatementR
       total_fuel: "0",
       total_pay: "0",
       total_fuel_subsidy: "0",
+      total_custom_fees: "0",
+      custom_fees: null,
       op_counts: {},
       trucks: "",
       note: null,

@@ -5,6 +5,7 @@ import { DRIVER_TYPE_LABELS } from "@/lib/labels";
 import { defaultPeriod, periodLabel, periodOf, type Period } from "@/lib/period";
 import { listOperationTypes } from "@/lib/queries/operations";
 import { mergedPeriodStatements } from "@/lib/queries/statements";
+import { statementCustomFees, type FeeDetailRow } from "@/lib/queries/fees";
 import { driverPeriodTrips } from "@/lib/queries/trips";
 
 const FMT_MONEY = '"$"#,##0.00';
@@ -79,15 +80,16 @@ function gridify(row: ExcelJS.Row, bold = false) {
 /**
  * Build one driver's detail sheet in the reference workbook's shape: a single
  * banner row (name + period + truck annotation), a flat bordered grid of legs
- * (date printed once per day), then the fuel-subsidy line and the Total row -
- * the subsidy lands in the Driver column so the column sum equals total
- * payable.
+ * (date printed once per day), then the fuel-subsidy line, the custom-fee
+ * lines and the Total row - both settlement lines land in the Driver column
+ * so the column sum equals total payable.
  */
 function addDriverSheet(
   workbook: ExcelJS.Workbook,
   name: string,
   driver: Awaited<ReturnType<typeof mergedPeriodStatements>>[number],
   legs: Awaited<ReturnType<typeof driverPeriodTrips>>,
+  fees: FeeDetailRow[],
   period: Period,
   opLabels: Map<string, string>
 ) {
@@ -155,9 +157,23 @@ function addDriverSheet(
     gridify(fuel, true);
   }
 
+  // Custom-fee settlement lines: amount (ADDS to the payout) in the Driver
+  // column, label + miles + note under Nature so the money stays explained
+  // on the printed sheet
+  let feeSum = 0;
+  for (const fee of fees) {
+    feeSum += fee.amount;
+    const feeRow = sheet.addRow([
+      "", "",
+      `费用 · ${fee.label}${fee.miles > 0 ? ` · ${fee.miles} mi` : ""}${fee.note ? ` · ${fee.note}` : ""}`,
+      "", "", "", null, Number(fee.amount.toFixed(2))
+    ]);
+    gridify(feeRow, true);
+  }
+
   const total = sheet.addRow([
     "Total", "", "", "", "", "",
-    totalMiles, Number((totalPay + subsidy).toFixed(2))
+    totalMiles, Number((totalPay + subsidy + feeSum).toFixed(2))
   ]);
   gridify(total, true);
 }
@@ -196,14 +212,15 @@ export async function GET(request: Request) {
   const headerCells = [
     "车号", "姓名", "类型", "出勤天数",
     ...opCodes,
-    "总段数", "总里程(mi)", "加油(gal)", "燃油补助($)", "本期工资($)"
+    "总段数", "总里程(mi)", "加油(gal)", "燃油补助($)", "费用($)", "本期工资($)"
   ];
   summary.columns = [
     { width: 18 }, { width: 12 }, { width: 8 }, { width: 10 },
     ...opCodes.map(() => ({ width: 8 })),
     { width: 9 }, { width: 12, style: { numFmt: FMT_MI } },
     { width: 10, style: { numFmt: FMT_ONE } },
-    { width: 12, style: { numFmt: FMT_MONEY } }, { width: 13, style: { numFmt: FMT_MONEY } }
+    { width: 12, style: { numFmt: FMT_MONEY } },
+    { width: 11, style: { numFmt: FMT_MONEY } }, { width: 13, style: { numFmt: FMT_MONEY } }
   ];
   const title = summary.addRow([`核算周期 ${periodLabel(period)}（${period.start} ~ ${period.end}）`]);
   title.font = { bold: true, size: 12 };
@@ -220,7 +237,8 @@ export async function GET(request: Request) {
       r.trucks, r.full_name, DRIVER_TYPE_LABELS[r.driver_type], r.trip_days,
       ...opCodes.map(code => r.op_counts[code] ?? 0),
       r.leg_count, Math.round(Number(r.total_miles)), fuelGal(r),
-      Number(r.total_fuel_subsidy), Number(r.total_pay)
+      Number(r.total_fuel_subsidy), Number(r.total_custom_fees),
+      Number(r.total_pay) + Number(r.total_custom_fees)
     ]);
   }
   const attended = rows.filter(r => r.leg_count > 0).length;
@@ -231,17 +249,21 @@ export async function GET(request: Request) {
     ...opCodes.map(code => sum(r => r.op_counts[code] ?? 0)),
     sum(r => r.leg_count),
     sum(r => Math.round(Number(r.total_miles))), sum(fuelGal),
-    sum(r => Number(r.total_fuel_subsidy)), sum(r => Number(r.total_pay))
+    sum(r => Number(r.total_fuel_subsidy)), sum(r => Number(r.total_custom_fees)),
+    sum(r => Number(r.total_pay) + Number(r.total_custom_fees))
   ]);
   totals.font = { bold: true };
 
   /* ---------- One detail sheet per attended driver ---------- */
   const opLabels = new Map(operations.map(o => [o.code, o.label]));
   const drivers = rows.filter(r => r.leg_count > 0 || r.id !== null);
-  const legLists = await Promise.all(drivers.map(d => driverPeriodTrips(period, d.driver_id)));
+  const [legLists, feeLists] = await Promise.all([
+    Promise.all(drivers.map(d => driverPeriodTrips(period, d.driver_id))),
+    Promise.all(drivers.map(d => statementCustomFees(d.driver_id, period.start)))
+  ]);
   const used = new Set<string>(["汇总"]);
   drivers.forEach((d, i) =>
-    addDriverSheet(workbook, sheetName(d.full_name, used), d, legLists[i], period, opLabels)
+    addDriverSheet(workbook, sheetName(d.full_name, used), d, legLists[i], feeLists[i], period, opLabels)
   );
 
   const buffer = await workbook.xlsx.writeBuffer();

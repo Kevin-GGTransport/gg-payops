@@ -99,6 +99,12 @@ model PayrollStatement {
   /// stateCode, gallons, miles, amount, note}]; frozen at verify like the
   /// other numbers (raw-SQL access only)
   fuelDetail   Json            @default("[]") @map("fuel_detail")
+  /// User-defined payout additions: [{label, miles, amount, note?}] (miles
+  /// informational); post-verify edits only set edited_after_verify
+  /// (raw-SQL access only)
+  customFees      Json           @default("[]") @map("custom_fees")
+  /// Sum of customFees amounts (all fees add to the payout)
+  totalCustomFees Decimal        @default(0) @map("total_custom_fees") @db.Decimal(12, 2)
   /// Frozen at verification: the period's whole editable leg set + the then
   /// fuel_detail, for cell-level post-verify diffing on the detail sheet;
   /// NULL on rows verified before this column existed (raw-SQL access only)

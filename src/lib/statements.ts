@@ -81,13 +81,17 @@ export async function syncStatements(refs: StatementRef[]) {
           AND period_start = ${period.start}::date
           AND status IN ('VERIFIED', 'DONE')
       `,
-      // Draft with every leg deleted: remove the empty statement
+      // Draft with every leg deleted: remove the empty statement. Custom fees
+      // are deliberately entered money (a fees-only draft can exist), so a
+      // statement carrying them survives; fuel_detail is intentionally NOT
+      // part of this guard (scoped decision kept from the fuel feature)
       prisma.$executeRaw`
         DELETE FROM pay.payroll_statements
         WHERE driver_id = ${driverId}::bigint
           AND period_start = ${period.start}::date
           AND status = 'DRAFT'
           AND leg_count = 0
+          AND custom_fees = '[]'::jsonb
       `
     ]);
   }

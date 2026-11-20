@@ -91,9 +91,10 @@ export default async function PayrollPage({
       legs: acc.legs + r.leg_count,
       miles: acc.miles + Number(r.total_miles),
       pay: acc.pay + Number(r.total_pay),
-      subsidy: acc.subsidy + Number(r.total_fuel_subsidy)
+      subsidy: acc.subsidy + Number(r.total_fuel_subsidy),
+      fees: acc.fees + Number(r.total_custom_fees)
     }),
-    { drivers: 0, legs: 0, miles: 0, pay: 0, subsidy: 0 }
+    { drivers: 0, legs: 0, miles: 0, pay: 0, subsidy: 0, fees: 0 }
   );
 
   return (
@@ -190,10 +191,12 @@ export default async function PayrollPage({
               </div>
               <div className="gauge-cell gauge-hot">
                 <span className="gauge-label">本期应付</span>
-                <strong className="gauge-value">{money((totals.pay + totals.subsidy).toString())}</strong>
+                <strong className="gauge-value">{money((totals.pay + totals.subsidy + totals.fees).toString())}</strong>
                 <span className="gauge-sub">
-                  {totals.subsidy > 0
-                    ? `工资 ${money(totals.pay.toString())} + 燃油补助 ${money(totals.subsidy.toString())}`
+                  {totals.subsidy > 0 || totals.fees > 0
+                    ? `工资 ${money(totals.pay.toString())}${totals.subsidy > 0 ? ` + 补助 ${money(totals.subsidy.toString())}` : ""}${
+                        totals.fees > 0 ? ` + 费用 ${money(totals.fees.toString())}` : ""
+                      }`
                     : "与导出一致"}
                 </span>
               </div>

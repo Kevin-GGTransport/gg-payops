@@ -15,6 +15,7 @@ const DRAFT_KEY = "payops.entry.draft.v1";
 const MAX_GROUPS = 20;
 const MAX_ROWS_PER_GROUP = 50;
 const MAX_FUEL_ROWS_PER_GROUP = 50;
+const MAX_FEE_ROWS_PER_GROUP = 20;
 
 export type DraftRow = {
   trip_date?: string;
@@ -37,6 +38,14 @@ export type DraftFuelRow = {
   note: string;
 };
 
+/** One custom-fee row of a group's fee section (amount ADDS to the payout) */
+export type DraftFeeRow = {
+  label: string;
+  amount: string;
+  miles: string;
+  note: string;
+};
+
 export type DraftGroup = {
   driverId: string;
   truckId: string;
@@ -45,6 +54,8 @@ export type DraftGroup = {
   pkg?: string;
   /** Fuel-section rows with any content (pure data - no carry semantics) */
   fuelRows: DraftFuelRow[];
+  /** Fee-section rows with any content; absent on pre-fee drafts = empty */
+  feeRows?: DraftFeeRow[];
 };
 
 export type EntryDraft = {
@@ -145,8 +156,26 @@ export function collectDraftFromDOM(
       }
     }
     if (fuelRows.length > 0) anyContent = true;
+    // Fee-section rows: same plain-named-inputs contract (kind rides the
+    // picker's hidden input); untouched reserve rows drop out
+    const feeRowCount =
+      Number.parseInt(field(form, `g_${g}_fee_row_count`), 10) || 0;
+    const feeRows: DraftFeeRow[] = [];
+    for (let i = 0; i < feeRowCount && i < MAX_FEE_ROWS_PER_GROUP; i++) {
+      const p = `g_${g}_fee_row_${i}_`;
+      const feeRow: DraftFeeRow = {
+        label: field(form, `${p}label`),
+        amount: field(form, `${p}amount`),
+        miles: field(form, `${p}miles`),
+        note: field(form, `${p}note`)
+      };
+      if (feeRow.label || feeRow.amount || feeRow.miles || feeRow.note) {
+        feeRows.push(feeRow);
+      }
+    }
+    if (feeRows.length > 0) anyContent = true;
     const pkg = field(form, `g_${g}_pkg_state`);
-    groups.push({ driverId, truckId, rows, pkg: pkg || undefined, fuelRows });
+    groups.push({ driverId, truckId, rows, pkg: pkg || undefined, fuelRows, feeRows });
   }
 
   if (!anyContent) return null;
@@ -210,12 +239,25 @@ export function readEntryDraft(): EntryDraft | null {
           note: str(f.note)
         };
       });
+      // Pre-fee drafts carry no feeRows key; restore keeps them empty (the
+      // section falls back to the driver's saved set, same as fuel)
+      const rawFees = Array.isArray(g.feeRows) ? g.feeRows : [];
+      const feeRows = rawFees.slice(0, MAX_FEE_ROWS_PER_GROUP).map(rawFeeRow => {
+        const f = (rawFeeRow ?? {}) as Record<string, unknown>;
+        return {
+          label: str(f.label),
+          amount: str(f.amount),
+          miles: str(f.miles),
+          note: str(f.note)
+        };
+      });
       return {
         driverId: str(g.driverId),
         truckId: str(g.truckId),
         rows,
         pkg: str(g.pkg) || undefined,
-        fuelRows
+        fuelRows,
+        feeRows
       };
     });
 

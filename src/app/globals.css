@@ -287,7 +287,7 @@
    按钮变体（页面辅助类，底层 shadcn Button 亦可直用）
    ========================================================================== */
 .button-quiet {
-  @apply w-auto border-line bg-card text-foreground hover:border-route hover:text-route hover:bg-card;
+  @apply w-auto px-4 border-line bg-card text-foreground hover:border-route hover:text-route hover:bg-card;
 }
 .button-dark {
   @apply w-auto px-4;

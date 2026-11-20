@@ -74,6 +74,15 @@ export type FuelRowDefault = {
   note: string;
 };
 
+/** One fee-section row's initial values (saved week, draft or failed-submit
+ *  refill); miles is informational only - it never prices anything */
+export type FeeRowDefault = {
+  label: string;
+  amount: string;
+  miles: string;
+  note: string;
+};
+
 /** One row's initial values (photo import or failed-submit refill) */
 export type RefillRow = {
   trip_date?: string;
@@ -95,6 +104,8 @@ export type RefillGroup = {
   pkgState?: string;
   /** Fuel-section rows from the failed-submit refill */
   fuelRows?: FuelRowDefault[];
+  /** Fee-section rows from the failed-submit refill */
+  feeRows?: FeeRowDefault[];
 };
 
 type TripEntryFormProps = {
@@ -110,6 +121,8 @@ type TripEntryFormProps = {
   /** The cover period's saved fuel rows per driver, prefilling the fuel
    *  sections when a week is reopened (edit-a-week = return to its period) */
   fuelByDriver?: Record<string, FuelRowDefault[]>;
+  /** The cover period's saved custom-fee rows per driver (same week prefill) */
+  feesByDriver?: Record<string, FeeRowDefault[]>;
   defaultDriverId?: string;
   /** Present when redirected back after a validation error */
   refillGroups?: RefillGroup[];
@@ -181,6 +194,18 @@ export const FUEL_SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
   { id: "seq", header: "#", size: 44, enableResizing: false, meta: { headerClass: "ctr" } },
   { id: "state", header: "州", size: 132, minSize: 100 },
   { id: "gallons", header: "加仑 (gal)", size: 104, minSize: 84 },
+  { id: "miles", header: "里程 (mi)", size: 104, minSize: 84 },
+  { id: "amount", header: "金额 ($)", size: 104, minSize: 84 },
+  { id: "note", header: "备注", size: 200, minSize: 120 },
+  { id: "delete", header: "操作", size: 56, enableResizing: false, meta: { headerClass: "px-1.5" } }
+];
+
+/** Column layout of the per-group custom-fees section (module scope for the
+ *  same stability reason as FUEL_SHEET_COLUMNS; the detail-page fee editor
+ *  imports this so both surfaces share one shape) */
+export const FEE_SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
+  { id: "seq", header: "#", size: 44, enableResizing: false, meta: { headerClass: "ctr" } },
+  { id: "label", header: "费用名称", size: 180, minSize: 120 },
   { id: "miles", header: "里程 (mi)", size: 104, minSize: 84 },
   { id: "amount", header: "金额 ($)", size: 104, minSize: 84 },
   { id: "note", header: "备注", size: 200, minSize: 120 },
@@ -906,8 +931,99 @@ const FuelRow = React.memo(function FuelRow({
   );
 });
 
+/**
+ * One custom-fee row of the group's fee section: free-text label plus an
+ * informational miles column and the amount ADDED to the payout. Values are
+ * group-held like the fuel rows; field names are positional the same way.
+ */
+const FeeRow = React.memo(function FeeRow({
+  rowId,
+  groupIndex,
+  rowIndex,
+  value,
+  removable,
+  onRemove,
+  onChange
+}: {
+  rowId: number;
+  groupIndex: number;
+  rowIndex: number;
+  value: FeeRowDefault;
+  removable: boolean;
+  onRemove: (rowId: number) => void;
+  onChange: (rowId: number, patch: Partial<FeeRowDefault>) => void;
+}) {
+  const prefix = `g_${groupIndex}_fee_row_${rowIndex}_`;
+  const label = `第 ${groupIndex + 1} 组费用第 ${rowIndex + 1} 行`;
+  return (
+    <tr>
+      <td className="ctr px-1.5 font-mono text-[12px] tabular-nums text-foreground">
+        {rowIndex + 1}
+      </td>
+      <td className="px-1.5">
+        <Input
+          name={`${prefix}label`}
+          value={value.label}
+          maxLength={60}
+          placeholder="如 过路费 / 补贴"
+          aria-label={`${label}名称`}
+          className={cellInput}
+          onChange={e => onChange(rowId, { label: e.target.value })}
+        />
+      </td>
+      <td className="px-1.5">
+        <Input
+          type="number"
+          name={`${prefix}miles`}
+          min={0}
+          step={0.1}
+          value={value.miles}
+          onChange={e => onChange(rowId, { miles: e.target.value })}
+          placeholder="—"
+          aria-label={`${label}里程`}
+          className={`${cellInput} font-mono`}
+        />
+      </td>
+      <td className="px-1.5">
+        <Input
+          type="number"
+          name={`${prefix}amount`}
+          min={0}
+          step={0.01}
+          value={value.amount}
+          onChange={e => onChange(rowId, { amount: e.target.value })}
+          placeholder="—"
+          aria-label={`${label}金额`}
+          className={`${cellInput} font-mono`}
+        />
+      </td>
+      <td className="px-1.5">
+        <Input
+          name={`${prefix}note`}
+          value={value.note}
+          maxLength={200}
+          placeholder="选填"
+          aria-label={`${label}备注`}
+          className={cellInput}
+          onChange={e => onChange(rowId, { note: e.target.value })}
+        />
+      </td>
+      <td className="actions px-1.5">
+        {removable && (
+          <button type="button" className="linklike danger" onClick={() => onRemove(rowId)}>
+            删除
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+});
+
 /** A fuel-section slot: stable id plus its current values (group-held state) */
 type FuelSlot = { id: number; value: FuelRowDefault };
+
+/** A fee-section slot: stable id plus its current values (group-held state) */
+type FeeSlot = { id: number; value: FeeRowDefault };
 
 /** A group slot: stable id + one-shot initial driver/truck/rows */
 type GroupSlot = {
@@ -920,6 +1036,9 @@ type GroupSlot = {
   /** Fuel-section initial rows (saved week, draft or failed-submit refill);
    *  absent = seed empty rows (or the saved set once a driver is picked) */
   fuelDefaults?: FuelRowDefault[];
+  /** Fee-section initial rows (saved week, draft or failed-submit refill);
+   *  absent = seed one blank row (or the saved set once a driver is picked) */
+  feeDefaults?: FeeRowDefault[];
 };
 
 /** Seed the fuel slots from defaults, or open with blank reserve rows */
@@ -939,6 +1058,31 @@ function toFuelSlots(defaults: FuelRowDefault[] | undefined): FuelSlot[] {
 function fuelSlotHasContent(slot: FuelSlot) {
   const v = slot.value;
   return Boolean(v.state || v.gallons || v.miles || v.amount || v.note);
+}
+
+/** Blank fee rows a fresh section opens with (fees are far sparser than fuel) */
+const FEE_INITIAL_ROWS = 1;
+
+/** Seed the fee slots from defaults, or open with one blank row */
+function toFeeSlots(defaults: FeeRowDefault[] | undefined): FeeSlot[] {
+  const source = defaults && defaults.length > 0 ? defaults : [];
+  const rows = source.map((value, i) => ({
+    id: i + 1,
+    value: { label: value.label, amount: value.amount, miles: value.miles, note: value.note }
+  }));
+  if (rows.length === 0) {
+    return Array.from({ length: FEE_INITIAL_ROWS }, (_, i) => ({
+      id: i + 1,
+      value: { label: "", amount: "", miles: "", note: "" }
+    }));
+  }
+  return rows;
+}
+
+/** Rows that carry anything a submission would keep */
+function feeSlotHasContent(slot: FeeSlot) {
+  const v = slot.value;
+  return Boolean(v.label || v.amount || v.miles || v.note);
 }
 
 /**
@@ -962,6 +1106,7 @@ const GroupSection = React.memo(function GroupSection({
   wageRule,
   states,
   fuelByDriver,
+  feesByDriver,
   sheetTable,
   removable,
   onRemove,
@@ -989,6 +1134,8 @@ const GroupSection = React.memo(function GroupSection({
   states: StateOption[];
   /** Cover-period saved fuel rows per driver (week prefill on driver pick) */
   fuelByDriver?: Record<string, FuelRowDefault[]>;
+  /** Cover-period saved custom-fee rows per driver (same week prefill) */
+  feesByDriver?: Record<string, FeeRowDefault[]>;
   /** Shared columns-only TanStack instance (thead + colgroup for this sheet) */
   sheetTable: TanstackTable<unknown>;
   removable: boolean;
@@ -1054,6 +1201,16 @@ const GroupSection = React.memo(function GroupSection({
     data: NO_ROWS,
     columns: FUEL_SHEET_COLUMNS,
     storageKey: "payops.entry.fuel.cols"
+  });
+  // Fee section: same one-shot-defaults contract as the fuel section above
+  const [feeSlots, setFeeSlots] = React.useState<FeeSlot[]>(() =>
+    toFeeSlots(group.feeDefaults ?? (group.driverId ? feesByDriver?.[group.driverId] : undefined))
+  );
+  const [feeOpen, setFeeOpen] = React.useState(false);
+  const feeTable = useRosterTable({
+    data: NO_ROWS,
+    columns: FEE_SHEET_COLUMNS,
+    storageKey: "payops.entry.fees.cols"
   });
   const dragActive = dragging?.groupId === group.id;
   const driverRecord = drivers.find(d => d.id === driverId);
@@ -1315,6 +1472,30 @@ const GroupSection = React.memo(function GroupSection({
     ]);
   }
 
+  /** Patch one fee row's values (group-held, same contract as the fuel rows) */
+  const handleFeeChange = React.useCallback((rowId: number, patch: Partial<FeeRowDefault>) => {
+    setFeeSlots(current =>
+      current.map(slot => (slot.id === rowId ? { ...slot, value: { ...slot.value, ...patch } } : slot))
+    );
+  }, []);
+
+  const removeFeeRow = React.useCallback(
+    (rowId: number) => {
+      onDirty();
+      setFeeSlots(current => current.filter(slot => slot.id !== rowId));
+    },
+    [onDirty]
+  );
+
+  function addFeeRow() {
+    onDirty();
+    const id = feeSlots.reduce((max, slot) => Math.max(max, slot.id), 0) + 1;
+    setFeeSlots(current => [
+      ...current,
+      { id, value: { label: "", amount: "", miles: "", note: "" } }
+    ]);
+  }
+
   // Fuel dup hints and totals derive straight off the slots in this render -
   // one frame, no report-back round-trips. Content rows only.
   const fuelContent = fuelSlots.filter(fuelSlotHasContent);
@@ -1341,6 +1522,16 @@ const GroupSection = React.memo(function GroupSection({
         { gallons: 0, miles: 0, amount: 0 }
       ),
     [fuelContent]
+  );
+
+  // Fee totals derive off the slots in this render too - content rows only
+  const feeContent = feeSlots.filter(feeSlotHasContent);
+  const feeTotals = feeContent.reduce(
+    (acc, slot) => ({
+      miles: acc.miles + (Number(slot.value.miles) || 0),
+      amount: acc.amount + (Number(slot.value.amount) || 0)
+    }),
+    { miles: 0, amount: 0 }
   );
 
   const armDrag = React.useCallback((rowId: number, armed: boolean) => {
@@ -1414,6 +1605,8 @@ const GroupSection = React.memo(function GroupSection({
             // week's truth before it is submitted
             const loadedFuel = toFuelSlots(fuelByDriver?.[value]);
             setFuelSlots(loadedFuel);
+            // Fees follow the same contract (their saved rows for this week)
+            setFeeSlots(toFeeSlots(feesByDriver?.[value]));
             onDirty();
           }}
           options={drivers.map(d => ({
@@ -1478,6 +1671,7 @@ const GroupSection = React.memo(function GroupSection({
         </div>
         <input type="hidden" name={`${prefix}_row_count`} value={rows.length} />
         <input type="hidden" name={`${prefix}_fuel_row_count`} value={fuelSlots.length} />
+        <input type="hidden" name={`${prefix}_fee_row_count`} value={feeSlots.length} />
         {/* Pricing state rides the form so the draft collector and the
             failed-submit refill both round-trip it across remounts */}
         <input
@@ -1721,6 +1915,74 @@ const GroupSection = React.memo(function GroupSection({
           </div>
         </CollapsibleContent>
       </Collapsible>
+
+      {/* Custom fees of this group's week: one collapsible section per driver
+          group, submitted with the trips onto the statement's custom_fees
+          (signed adjustments: 加项 raises the payout, 减项 deducts). Collapsed
+          by default - a typical week carries a handful of rows at most. */}
+      <Collapsible
+        open={feeOpen}
+        onOpenChange={setFeeOpen}
+        className="mt-3 border-t border-line"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex items-center gap-1.5 text-[13px] font-medium text-foreground"
+              aria-label={`展开第 ${index + 1} 组自定义费用`}
+            >
+              <ChevronDownIcon
+                className={`size-3.5 text-muted-foreground transition-transform ${feeOpen ? "" : "-rotate-90"}`}
+              />
+              自定义费用
+              {feeContent.length > 0 && (
+                <span className="rounded-full bg-route/15 px-1.5 font-mono text-[10px] leading-4 tabular-nums text-route">
+                  {feeContent.length}
+                </span>
+              )}
+            </button>
+          </CollapsibleTrigger>
+          {feeContent.length > 0 && (
+            <span className="flex items-center gap-3 font-mono text-[12px] text-muted-foreground">
+              <span>
+                {feeTotals.miles.toLocaleString("en-US", { maximumFractionDigits: 1 })} mi
+              </span>
+              <span>
+                ${feeTotals.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </span>
+          )}
+        </div>
+        {/* forceMount for the same reason as the fuel section: the named fee
+            inputs always ride the form submit and the draft collector */}
+        <CollapsibleContent forceMount className={feeOpen ? "" : "hidden"}>
+          <div className="pb-1">
+            <RosterTable table={feeTable}>
+              <tbody className="tb-group">
+                {feeSlots.map((slot, i) => (
+                  <FeeRow
+                    key={slot.id}
+                    rowId={slot.id}
+                    groupIndex={index}
+                    rowIndex={i}
+                    value={slot.value}
+                    removable={feeSlots.length > 1}
+                    onRemove={removeFeeRow}
+                    onChange={handleFeeChange}
+                  />
+                ))}
+              </tbody>
+            </RosterTable>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <button type="button" className="linklike" onClick={addFeeRow}>
+                <PlusIcon className="mr-1 inline size-3.5" />
+                添加费用
+              </button>
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   );
 });
@@ -1740,6 +2002,7 @@ export function TripEntryForm({
   wageRule,
   states,
   fuelByDriver,
+  feesByDriver,
   defaultDriverId = "",
   refillGroups,
   initialActiveIndex,
@@ -1767,7 +2030,9 @@ export function TripEntryForm({
         rows: g.rows.map((row, j) => ({ id: j + 1, defaults: row })),
         pkg: parsePkgState(g.pkgState ?? ""),
         fuelDefaults:
-          g.fuelRows && g.fuelRows.length > 0 ? g.fuelRows.map(row => ({ ...row })) : undefined
+          g.fuelRows && g.fuelRows.length > 0 ? g.fuelRows.map(row => ({ ...row })) : undefined,
+        feeDefaults:
+          g.feeRows && g.feeRows.length > 0 ? g.feeRows.map(row => ({ ...row })) : undefined
       }))
     : [
         {
@@ -1935,6 +2200,12 @@ export function TripEntryForm({
           ? g.fuelRows.map(row => ({ ...row }))
           : fuelByDriver?.[g.driverId]
             ? fuelByDriver[g.driverId].map(row => ({ ...row }))
+            : undefined,
+      feeDefaults:
+        g.feeRows && g.feeRows.length > 0
+          ? g.feeRows.map(row => ({ ...row }))
+          : feesByDriver?.[g.driverId]
+            ? feesByDriver[g.driverId].map(row => ({ ...row }))
             : undefined
     }));
     setGroups(restored);
@@ -2229,6 +2500,7 @@ export function TripEntryForm({
                   wageRule={wageRule}
                   states={states}
                   fuelByDriver={fuelByDriver}
+                  feesByDriver={feesByDriver}
                   sheetTable={sheetTable}
                   removable={groups.length > 1}
                   onRemove={removeGroup}

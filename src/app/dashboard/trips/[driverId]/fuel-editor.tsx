@@ -4,10 +4,9 @@ import * as React from "react";
 import { PlusIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ComboboxField } from "@/components/combobox-field";
-import { SubmitButton } from "@/components/submit-button";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { FUEL_SHEET_COLUMNS, type StateOption } from "../../trip-entry-form";
-import { saveStatementFuel } from "@/app/dashboard/payroll/actions";
+import { useSheetReport } from "./statement-sheet";
 
 /** One editor row's values (truckCode rides along as a hidden snapshot) */
 export type FuelEditRow = {
@@ -67,23 +66,16 @@ function toSlots(rows: FuelEditRow[] | undefined, defaultTruckCode: string): Fue
  * clearing it, with the same lifecycle rules as the entry sheet.
  */
 export function FuelEditor({
-  driverId,
-  periodStart,
   states,
   rows,
   defaultTruckCode,
-  frozen,
   markings
 }: {
-  driverId: string;
-  periodStart: string;
   states: StateOption[];
   /** Stored fuel rows (or URL refill after a failed save) */
   rows: FuelEditRow[];
   /** Truck snapshot for new rows (the statement's own truck annotation) */
   defaultTruckCode: string;
-  /** VERIFIED statement: edits land with the permanent red flag */
-  frozen: boolean;
   /** Verification-snapshot diff: state codes changed / added after verify */
   markings?: { changed: string[]; added: string[] };
 }) {
@@ -96,19 +88,25 @@ export function FuelEditor({
     storageKey: "payops.detail.fuel.cols"
   });
 
+  // Any change reports to the enclosing sheet form's save bar
+  const sheet = useSheetReport();
+
   const patch = React.useCallback((rowId: number, part: Partial<FuelEditRow>) => {
+    sheet?.touch("fuel");
     setSlots(current =>
       current.map(slot =>
         slot.id === rowId ? { ...slot, value: { ...slot.value, ...part } } : slot
       )
     );
-  }, []);
+  }, [sheet]);
 
   const removeRow = React.useCallback((rowId: number) => {
+    sheet?.touch("fuel");
     setSlots(current => current.filter(slot => slot.id !== rowId));
-  }, []);
+  }, [sheet]);
 
   function addRow() {
+    sheet?.touch("fuel");
     const id = slots.reduce((max, slot) => Math.max(max, slot.id), 0) + 1;
     setSlots(current => [...current, { id, value: { ...EMPTY_ROW, truckCode: defaultTruckCode } }]);
   }
@@ -141,9 +139,7 @@ export function FuelEditor({
   );
 
   return (
-    <form action={saveStatementFuel} aria-label="编辑按州加油">
-      <input type="hidden" name="driver_id" value={driverId} />
-      <input type="hidden" name="period" value={periodStart} />
+    <div>
       <input type="hidden" name="f_fuel_row_count" value={slots.length} />
       <RosterTable table={fuelTable}>
         <tbody className="tb-group">
@@ -259,13 +255,7 @@ export function FuelEditor({
           <PlusIcon className="mr-1 inline size-3.5" />
           添加州
         </button>
-        <SubmitButton className="h-8 px-4" pendingLabel="保存中…">
-          保存加油
-        </SubmitButton>
-        {frozen && content.length > 0 && (
-          <span className="text-[11px] text-muted-foreground">核对后修改，计入标红</span>
-        )}
       </div>
-    </form>
+    </div>
   );
 }

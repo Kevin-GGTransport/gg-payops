@@ -16,6 +16,7 @@ const MAX_GROUPS = 20;
 const MAX_ROWS_PER_GROUP = 50;
 const MAX_ROWS_TOTAL = 200;
 const MAX_FUEL_ROWS_PER_GROUP = 50;
+const MAX_FEE_ROWS_PER_GROUP = 20;
 
 type ParsedRow = {
   tripDate: string;
@@ -42,6 +43,17 @@ type ParsedFuelRow = {
   note: string;
 };
 
+/** One custom-fee row of a group's fee section (amount ADDS to the payout) */
+type ParsedFeeRow = {
+  /** Display row number as the sheet shows it (for error positions) */
+  no: number;
+  label: string;
+  /** Informational only - never part of any pricing */
+  miles: number;
+  amount: number;
+  note: string;
+};
+
 type ParsedGroup = {
   driverId: string;
   /** Group-level truck (车号): snapshotted at submit, not a stored FK */
@@ -49,6 +61,8 @@ type ParsedGroup = {
   rows: ParsedRow[];
   /** Fuel-by-state rows of this group's fuel section; empty rows skipped */
   fuelRows: ParsedFuelRow[];
+  /** Custom-fee rows of this group's fee section; empty rows skipped */
+  feeRows: ParsedFeeRow[];
 };
 
 function str(formData: FormData, key: string) {
@@ -83,6 +97,7 @@ const ROW_FIELDS = [
 ] as const;
 
 const FUEL_ROW_FIELDS = ["state_code", "gallons", "miles", "amount", "note"] as const;
+const FEE_ROW_FIELDS = ["label", "miles", "amount", "note"] as const;
 
 /**
  * Pack every group's raw input as refill params. Groups are renumbered 0..n
@@ -127,6 +142,21 @@ function packRefill(
       if (any) fuelKept++;
     }
     if (fuelKept > 0) params.set(`f_g_${kept}_fuel_row_count`, String(fuelKept));
+    // Custom-fee rows ride the same refill (renumbered over content rows)
+    const feeCount = clampCount(str(formData, `g_${g}_fee_row_count`), MAX_FEE_ROWS_PER_GROUP);
+    let feeKept = 0;
+    for (let i = 0; i < feeCount; i++) {
+      let any = false;
+      for (const field of FEE_ROW_FIELDS) {
+        const value = str(formData, `g_${g}_fee_row_${i}_${field}`);
+        if (value) {
+          params.set(`f_g_${kept}_fee_row_${feeKept}_${field}`, value);
+          any = true;
+        }
+      }
+      if (any) feeKept++;
+    }
+    if (feeKept > 0) params.set(`f_g_${kept}_fee_row_count`, String(feeKept));
     kept++;
   }
   params.set("f_group_count", String(kept));
@@ -145,13 +175,15 @@ function backWithError(
   formData: FormData,
   groups: ParsedGroup[],
   grp?: number,
-  fuel?: number
+  fuel?: number,
+  fee?: number
 ): never {
   const params = new URLSearchParams({ error });
   if (grp !== undefined) {
     params.set("grp", String(grp));
     params.set("tab", String(grp - 1));
     if (fuel !== undefined) params.set("fuel", String(fuel));
+    if (fee !== undefined) params.set("fee", String(fee));
   }
   const sheetPeriod = str(formData, "sheet_period");
   if (isIsoDate(sheetPeriod)) params.set("period", periodOf(sheetPeriod).start);
@@ -280,11 +312,33 @@ export async function addTripsBatch(formData: FormData) {
         note
       });
     }
+    // Custom-fee section: untouched reserve rows skip the same way
+    const feeRowCount = clampCount(
+      str(formData, `g_${g}_fee_row_count`),
+      MAX_FEE_ROWS_PER_GROUP
+    );
+    const feeRows: ParsedFeeRow[] = [];
+    for (let i = 0; i < feeRowCount; i++) {
+      const p = `g_${g}_fee_row_${i}_`;
+      const label = str(formData, `${p}label`).slice(0, 60);
+      const amountRaw = str(formData, `${p}amount`);
+      const milesRaw = str(formData, `${p}miles`);
+      const note = str(formData, `${p}note`).slice(0, 200);
+      if (!label && !amountRaw && !milesRaw && !note) continue;
+      feeRows.push({
+        no: i + 1,
+        label,
+        miles: num0(milesRaw),
+        amount: num0(amountRaw),
+        note
+      });
+    }
     groups.push({
       driverId: str(formData, `g_${g}_driver_id`),
       truckId: str(formData, `g_${g}_truck_id`),
       rows,
-      fuelRows
+      fuelRows,
+      feeRows
     });
   }
 
@@ -334,6 +388,15 @@ export async function addTripsBatch(formData: FormData) {
       if (!validStates.has(row.stateCode)) {
         backWithError("fuel_bad_state", formData, groups, g + 1, row.no);
       }
+    }
+  }
+
+  // Fee rows are free-form except for one thing: a carried row needs a name
+  // (the sheet shows what the money is for; a nameless amount helps nobody)
+  for (const g of active) {
+    const group = groups[g];
+    for (const row of group.feeRows) {
+      if (!row.label) backWithError("fee_missing_label", formData, groups, g + 1, undefined, row.no);
     }
   }
 
@@ -482,6 +545,54 @@ export async function addTripsBatch(formData: FormData) {
     await prisma.$executeRaw`
       UPDATE pay.payroll_statements
       SET fuel_detail = ${payload}::jsonb, edited_after_verify = true, updated_at = now()
+      WHERE driver_id = ${driverId}::bigint AND period_start = ${sheetPeriodStart.start}::date
+        AND status IN ('VERIFIED', 'DONE')
+    `;
+  }
+
+  // Custom fees follow the fuel contract: only active groups (a group with
+  // fees but no trip rows drops out - same as fuel), two groups sharing one
+  // driver concatenate in group order (fees have no merge key), and the
+  // submitted set is the week's whole truth (replace semantics)
+  const feeSaves = new Map<string, ParsedFeeRow[]>();
+  for (const g of active) {
+    const group = groups[g];
+    const existing = feeSaves.get(group.driverId);
+    if (existing) existing.push(...group.feeRows);
+    else feeSaves.set(group.driverId, [...group.feeRows]);
+  }
+  for (const [driverId, rows] of feeSaves) {
+    const payload = JSON.stringify(
+      rows.map(r => ({
+        label: r.label,
+        miles: Math.round(r.miles * 10) / 10,
+        amount: Math.round(r.amount * 100) / 100,
+        ...(r.note ? { note: r.note } : {})
+      }))
+    );
+    const total = Math.round(rows.reduce((acc, r) => acc + r.amount, 0) * 100) / 100;
+    // Same two arms as the fuel save: DRAFT upserts (aggregates arrive from
+    // syncStatements right after, which never touches these columns);
+    // VERIFIED/DONE keep their frozen pay and only take the fees plus the
+    // permanent edited flag
+    await prisma.$executeRaw`
+      INSERT INTO pay.payroll_statements
+        (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay,
+         custom_fees, total_custom_fees)
+      VALUES (${driverId}::bigint, ${sheetPeriodStart.start}::date, ${sheetPeriodStart.end}::date,
+              0, 0, 0, 0, 0, ${payload}::jsonb, ${total})
+      ON CONFLICT (driver_id, period_start) DO UPDATE SET
+        custom_fees = EXCLUDED.custom_fees,
+        total_custom_fees = EXCLUDED.total_custom_fees,
+        updated_at = now()
+      WHERE pay.payroll_statements.status = 'DRAFT'
+    `;
+    await prisma.$executeRaw`
+      UPDATE pay.payroll_statements
+      SET custom_fees = ${payload}::jsonb,
+          total_custom_fees = ${total},
+          edited_after_verify = true,
+          updated_at = now()
       WHERE driver_id = ${driverId}::bigint AND period_start = ${sheetPeriodStart.start}::date
         AND status IN ('VERIFIED', 'DONE')
     `;

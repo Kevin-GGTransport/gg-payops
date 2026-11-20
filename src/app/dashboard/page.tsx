@@ -11,7 +11,13 @@ import { activeOperationOptions } from "@/lib/queries/operations";
 import { activeTruckOptions } from "@/lib/queries/trucks";
 import { currentWageRule } from "@/lib/queries/wage-rules";
 import { activeStateOptions, fuelDetailByDriver } from "@/lib/queries/fuel";
-import { TripEntryForm, type FuelRowDefault, type RefillGroup } from "./trip-entry-form";
+import { customFeesByDriver } from "@/lib/queries/fees";
+import {
+  TripEntryForm,
+  type FeeRowDefault,
+  type FuelRowDefault,
+  type RefillGroup
+} from "./trip-entry-form";
 
 export const metadata: Metadata = { title: "录入行程 · G&G PayOps" };
 
@@ -21,7 +27,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   missing_operation: "操作类型字典为空，请先在「操作类型」页登记。",
   fuel_missing_truck: "该组录了加油但未选车号（加油记录随车号快照记入工资单）。",
   fuel_missing_state: "该行加油未选择州。",
-  fuel_bad_state: "该行加油的州不在字典中，请重新选择。"
+  fuel_bad_state: "该行加油的州不在字典中，请重新选择。",
+  fee_missing_label: "该行费用未填写名称。"
 };
 
 export default async function EntryPage({
@@ -39,6 +46,8 @@ export default async function EntryPage({
   const leg = Number.isFinite(legParam) && legParam >= 1 ? legParam : undefined;
   const fuelParam = Number.parseInt(firstValue(sp.fuel) ?? "", 10);
   const fuelRow = Number.isFinite(fuelParam) && fuelParam >= 1 ? fuelParam : undefined;
+  const feeParam = Number.parseInt(firstValue(sp.fee) ?? "", 10);
+  const feeRow = Number.isFinite(feeParam) && feeParam >= 1 ? feeParam : undefined;
   const saved = Number.parseInt(firstValue(sp.saved) ?? "", 10);
   const savedCount = Number.isFinite(saved) && saved >= 1 ? saved : undefined;
   // Tab to open first (0-based group index; redirect sets it after a
@@ -89,25 +98,42 @@ export default async function EntryPage({
                   note: firstValue(sp[`f_g_${g}_fuel_row_${i}_note`]) ?? ""
                 }))
               : [];
+          // Custom-fee rows of the failed submit (content rows, renumbered)
+          const feeCount = Number.parseInt(
+            firstValue(sp[`f_g_${g}_fee_row_count`]) ?? "",
+            10
+          );
+          const feeRows: FeeRowDefault[] =
+            Number.isFinite(feeCount) && feeCount >= 1
+              ? Array.from({ length: feeCount }, (_, i) => ({
+                  label: firstValue(sp[`f_g_${g}_fee_row_${i}_label`]) ?? "",
+                  amount: firstValue(sp[`f_g_${g}_fee_row_${i}_amount`]) ?? "",
+                  miles: firstValue(sp[`f_g_${g}_fee_row_${i}_miles`]) ?? "",
+                  note: firstValue(sp[`f_g_${g}_fee_row_${i}_note`]) ?? ""
+                }))
+              : [];
           return {
             driverId: firstValue(sp[`f_g_${g}_driver_id`]) ?? "",
             truckId: firstValue(sp[`f_g_${g}_truck_id`]) ?? "",
             rows,
             pkgState: firstValue(sp[`f_g_${g}_pkg_state`]) ?? "",
-            fuelRows: fuelRows.length > 0 ? fuelRows : undefined
+            fuelRows: fuelRows.length > 0 ? fuelRows : undefined,
+            feeRows: feeRows.length > 0 ? feeRows : undefined
           };
         })
       : undefined;
 
-  const [drivers, trucks, locations, operations, wageRule, states, fuelSaved] = await Promise.all([
-    activeDriverOptions(),
-    activeTruckOptions(),
-    activeLocationOptions(),
-    activeOperationOptions(),
-    currentWageRule(),
-    activeStateOptions(),
-    fuelDetailByDriver(initialPeriodStart)
-  ]);
+  const [drivers, trucks, locations, operations, wageRule, states, fuelSaved, feesSaved] =
+    await Promise.all([
+      activeDriverOptions(),
+      activeTruckOptions(),
+      activeLocationOptions(),
+      activeOperationOptions(),
+      currentWageRule(),
+      activeStateOptions(),
+      fuelDetailByDriver(initialPeriodStart),
+      customFeesByDriver(initialPeriodStart)
+    ]);
   // Saved fuel rows become the fuel section's string-valued defaults
   const fuelByDriver: Record<string, FuelRowDefault[]> = Object.fromEntries(
     Object.entries(fuelSaved).map(([driverId, rows]) => [
@@ -121,6 +147,19 @@ export default async function EntryPage({
       }))
     ])
   );
+  // Saved fee rows become the fee section's string-valued defaults
+  const feesByDriver: Record<string, FeeRowDefault[]> = Object.fromEntries(
+    Object.entries(feesSaved).map(([driverId, rows]) => [
+      driverId,
+      rows.map(r => ({
+        label: r.label,
+        // 0 reads as the empty placeholder, not a typed "0"
+        amount: r.amount > 0 ? String(r.amount) : "",
+        miles: r.miles > 0 ? String(r.miles) : "",
+        note: r.note
+      }))
+    ])
+  );
 
   const errorMessage = errorCode
     ? errorCode in ERROR_MESSAGES
@@ -128,9 +167,11 @@ export default async function EntryPage({
         ? `第 ${grp} 组第 ${leg} 程：${ERROR_MESSAGES[errorCode]}`
         : grp && fuelRow
           ? `第 ${grp} 组加油第 ${fuelRow} 行：${ERROR_MESSAGES[errorCode]}`
-          : grp
-            ? `第 ${grp} 组：${ERROR_MESSAGES[errorCode]}`
-            : ERROR_MESSAGES[errorCode]
+          : grp && feeRow
+            ? `第 ${grp} 组费用第 ${feeRow} 行：${ERROR_MESSAGES[errorCode]}`
+            : grp
+              ? `第 ${grp} 组：${ERROR_MESSAGES[errorCode]}`
+              : ERROR_MESSAGES[errorCode]
       : "录入出错，请检查后重试。"
     : undefined;
 
@@ -162,6 +203,7 @@ export default async function EntryPage({
         wageRule={wageRule}
         states={states}
         fuelByDriver={fuelByDriver}
+        feesByDriver={feesByDriver}
         defaultDriverId={preselectedDriver}
         refillGroups={refillGroups}
         initialActiveIndex={initialActiveIndex}

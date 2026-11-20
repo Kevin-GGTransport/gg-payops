@@ -9,6 +9,7 @@ import { calcFuelSubsidy } from "@/lib/wage";
 import { resolveEndpointId } from "@/lib/locations";
 import { syncStatements, type StatementRef } from "@/lib/statements";
 import { periodOf } from "@/lib/period";
+import { todayIso } from "@/lib/format";
 import { getTripById, type TripEditRow } from "@/lib/queries/trips";
 
 function str(formData: FormData, key: string) {
@@ -33,6 +34,11 @@ function backPath(returnTo: string) {
     : `/dashboard/trips${returnTo ? `?${returnTo}` : ""}`;
 }
 
+/** Cap for the detail sheet's appended rows (mirrors the entry sheet's caps) */
+const MAX_NEW_ROWS = 20;
+const MAX_FUEL_ROWS = 50;
+const MAX_FEE_ROWS = 20;
+
 /** Pricing context shared by every edit path: ACTIVE operation codes + the
  *  current owner fuel-subsidy rate */
 async function pricingContext() {
@@ -47,6 +53,8 @@ async function pricingContext() {
   ]);
   return {
     validOperations: new Set(operationRows.map(o => o.code)),
+    /** Dictionary's first ACTIVE code - the same default the sheets open with */
+    fallbackOperation: operationRows[0]?.code ?? "",
     fuelSubsidyRate: rateRows[0] ? Number(rateRows[0].rate) : 0
   };
 }
@@ -140,27 +148,290 @@ export async function updateTrip(formData: FormData) {
 }
 
 /**
- * Save every hand-edited leg of the driver period sheet in one submit.
- * Only the ids listed in dirty_ids are written (unchanged rows submit their
- * inputs too - parsing them would be a no-op, but why pay the round trips).
+ * Save the whole driver period detail sheet in one submit: dirty legs +
+ * appended rows (leg_new_<i>*, INSERTed with entry's lenient semantics),
+ * fuel-by-state rows (replace per driver+period, same-state rows merge) and
+ * custom-fee rows (replace, never merged). Client-side pre-validation keeps
+ * bad rows from reaching the server; the checks below remain the backstop
+ * and refuel every typed row through URL params on the way back. Fuel and
+ * fees always write (the editors open with the stored truth, so an untouched
+ * section rewrites itself); on VERIFIED/DONE sheets every write only takes
+ * the payload plus the permanent edited flag - numbers stay frozen.
  */
-export async function updateTripsBatch(formData: FormData) {
+export async function saveStatementSheet(formData: FormData) {
   await requireUser();
   const backTo = backPath(str(formData, "return_to"));
+  const driverId = str(formData, "driver_id");
+  const periodRaw = str(formData, "period");
+  if (!/^\d+$/.test(driverId) || !isIsoDate(periodRaw)) redirect("/dashboard/payroll");
+  const period = periodOf(periodRaw);
+
+  // ---- Legs: only the dirty ids are written; appended rows INSERT
   const ids = str(formData, "dirty_ids")
     .split(",")
     .map(s => s.trim())
     .filter(id => /^\d+$/.test(id));
-  if (ids.length === 0) redirect(backTo);
+  const newRowCount = Math.min(
+    Number.parseInt(str(formData, "new_row_count"), 10) || 0,
+    MAX_NEW_ROWS
+  );
+  // Untouched appended rows skip silently (the sheet opens each fresh row
+  // with a default date, so content = any endpoint / Load# / note)
+  const newRows: Array<{ p: string }> = [];
+  for (let i = 0; i < newRowCount; i++) {
+    const p = `leg_new_${i}_`;
+    const from = str(formData, `${p}from_location`);
+    const to = str(formData, `${p}to_location`);
+    const loadNo = str(formData, `${p}load_no`);
+    const notes = str(formData, `${p}notes`);
+    if (!from && !to && !loadNo && !notes) continue;
+    newRows.push({ p });
+  }
 
-  const { validOperations, fuelSubsidyRate } = await pricingContext();
+  // ---- Fuel-by-state rows (the default direction/truck code is not content)
+  type FuelRow = {
+    no: number;
+    stateCode: string;
+    truckCode: string;
+    gallons: number;
+    miles: number;
+    amount: number;
+    note: string;
+  };
+  const fuelCount = Math.min(
+    Number.parseInt(str(formData, "f_fuel_row_count"), 10) || 0,
+    MAX_FUEL_ROWS
+  );
+  const fuelRows: FuelRow[] = [];
+  for (let i = 0; i < fuelCount; i++) {
+    const p = `f_fuel_row_${i}_`;
+    const stateCode = str(formData, `${p}state_code`).toUpperCase().slice(0, 2);
+    const gallonsRaw = str(formData, `${p}gallons`);
+    const milesRaw = str(formData, `${p}miles`);
+    const amountRaw = str(formData, `${p}amount`);
+    const note = str(formData, `${p}note`).slice(0, 200);
+    if (!stateCode && !gallonsRaw && !milesRaw && !amountRaw && !note) continue;
+    fuelRows.push({
+      no: i + 1,
+      stateCode,
+      truckCode: str(formData, `${p}truck_code`).slice(0, 32),
+      gallons: num0(gallonsRaw),
+      miles: num0(milesRaw),
+      amount: num0(amountRaw),
+      note
+    });
+  }
 
+  // ---- Custom-fee rows (amount ADDS to the payout; miles informational)
+  type FeeRow = { no: number; label: string; miles: number; amount: number; note: string };
+  const feeCount = Math.min(
+    Number.parseInt(str(formData, "f_fee_row_count"), 10) || 0,
+    MAX_FEE_ROWS
+  );
+  const feeRows: FeeRow[] = [];
+  for (let i = 0; i < feeCount; i++) {
+    const p = `f_fee_row_${i}_`;
+    const label = str(formData, `${p}label`).slice(0, 60);
+    const amountRaw = str(formData, `${p}amount`);
+    const milesRaw = str(formData, `${p}miles`);
+    const note = str(formData, `${p}note`).slice(0, 200);
+    if (!label && !amountRaw && !milesRaw && !note) continue;
+    feeRows.push({ no: i + 1, label, miles: num0(milesRaw), amount: num0(amountRaw), note });
+  }
+
+  // ---- Backstop validation: refuel everything typed on the way back
+  const backWithError = (error: string, rowNo: number): never => {
+    const params = new URLSearchParams({ error, period: period.start });
+    if (error.startsWith("fuel_")) params.set("fuel", String(rowNo));
+    else params.set("fee", String(rowNo));
+    const repack = (prefix: string, fields: string[], count: number) => {
+      let kept = 0;
+      for (let i = 0; i < count; i++) {
+        let any = false;
+        for (const field of fields) {
+          const value = str(formData, `${prefix}${i}_${field}`);
+          if (value) {
+            params.set(`${prefix}${kept}_${field}`, value);
+            any = true;
+          }
+        }
+        if (any) kept++;
+      }
+      if (kept > 0) params.set(`${prefix}count`, String(kept));
+    };
+    repack("f_fuel_row_", ["state_code", "gallons", "miles", "amount", "note", "truck_code"], fuelCount);
+    repack("f_fee_row_", ["label", "miles", "amount", "note"], feeCount);
+    redirect(`${backTo}?${params.toString()}`);
+  };
+
+  const stateRows = await prisma.$queryRaw<Array<{ code: string }>>`
+    SELECT code FROM ops.state_codes WHERE is_active
+  `;
+  const validStates = new Set(stateRows.map(s => s.code));
+  for (const row of fuelRows) {
+    if (!row.stateCode) backWithError("fuel_missing_state", row.no);
+    if (!validStates.has(row.stateCode)) backWithError("fuel_bad_state", row.no);
+  }
+  for (const row of feeRows) {
+    if (!row.label) backWithError("fee_missing_label", row.no);
+  }
+
+  // Fuel/fees always write when there is anything to write OR anything to
+  // clear (an existing statement may hold rows the editor just emptied);
+  // a stray empty submit with no statement at all is a plain no-op
+  const hasSectionContent = fuelRows.length > 0 || feeRows.length > 0;
+  const existingStatement = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT id::text FROM pay.payroll_statements
+    WHERE driver_id = ${driverId}::bigint AND period_start = ${period.start}::date
+    LIMIT 1
+  `;
+  const statementExists = existingStatement.length > 0;
+  if (
+    ids.length === 0 &&
+    newRows.length === 0 &&
+    !hasSectionContent &&
+    !statementExists
+  ) {
+    redirect(backTo);
+  }
+
+  const { validOperations, fallbackOperation, fuelSubsidyRate } = await pricingContext();
+
+  // ---- Legs: updates then inserts, collecting the (driver, period) refs
   const refs: StatementRef[] = [];
   for (const id of ids) {
     const current = await getTripById(id);
     if (!current) continue;
     refs.push(...await applyTripUpdate(id, current, formData, `leg_${id}_`, validOperations, fuelSubsidyRate));
   }
+
+  if (newRows.length > 0) {
+    // One driver lookup feeds every appended row: the name snapshot and the
+    // subsidy's driver type
+    const driverRows = await prisma.$queryRaw<
+      Array<{ full_name: string; driver_type: string }>
+    >`
+      SELECT full_name, driver_type::text AS driver_type
+      FROM ops.drivers
+      WHERE id = ${driverId}::bigint
+      LIMIT 1
+    `;
+    const driver = driverRows[0];
+    if (driver) {
+      const today = todayIso();
+      for (const { p } of newRows) {
+        // Bare endpoint text goes through the txt: protocol like every edit
+        const endpoint = (key: string) => {
+          const value = str(formData, `${p}${key}`);
+          if (!value) return "";
+          return value.startsWith("loc:") || value.startsWith("txt:") ? value : `txt:${value}`;
+        };
+        const [fromId, toId] = await Promise.all([
+          resolveEndpointId(endpoint("from_location")),
+          resolveEndpointId(endpoint("to_location"))
+        ]);
+        const rawDate = str(formData, `${p}trip_date`);
+        const tripDate = isIsoDate(rawDate) ? rawDate : today;
+        const rawOperation = str(formData, `${p}operation`);
+        const milesNum = Math.round(num0(str(formData, `${p}miles`)));
+        await prisma.$executeRaw`
+          INSERT INTO pay.trips
+            (driver_id, trip_date, operation, load_no, from_location_id, to_location_id,
+             miles, fuel_gallons, pay_amount, fuel_subsidy, notes, driver_name)
+          VALUES (${driverId}::bigint, ${tripDate}::date,
+                  ${validOperations.has(rawOperation) ? rawOperation : fallbackOperation},
+                  ${str(formData, `${p}load_no`)},
+                  ${fromId || null}::bigint, ${toId || null}::bigint,
+                  ${milesNum},
+                  ${Math.round(num0(str(formData, `${p}fuel_gallons`)) * 100) / 100},
+                  ${Math.round(num0(str(formData, `${p}pay_amount`)) * 100) / 100},
+                  ${calcFuelSubsidy({ driverType: driver.driver_type === "OWNER" ? "OWNER" : "DRIVER", miles: milesNum, rate: fuelSubsidyRate })},
+                  ${str(formData, `${p}notes`) || null},
+                  ${driver.full_name})
+        `;
+        refs.push({ driverId, periodStart: periodOf(tripDate).start });
+      }
+    }
+  }
+
+  // ---- Fuel: merge same states (sums per column, first note wins), then
+  // the standard two arms - DRAFT upserts, VERIFIED/DONE take fuel + flag.
+  // Rows emptied to zero still write (an existing statement may hold the
+  // set being cleared)
+  if (hasSectionContent || statementExists) {
+    if (fuelRows.length > 0 || statementExists) {
+      const merged = new Map<string, FuelRow>();
+      for (const row of fuelRows) {
+        const dup = merged.get(row.stateCode);
+        if (dup) {
+          dup.gallons += row.gallons;
+          dup.miles += row.miles;
+          dup.amount += row.amount;
+          if (!dup.note) dup.note = row.note;
+        } else {
+          merged.set(row.stateCode, { ...row });
+        }
+      }
+      const payload = JSON.stringify(
+        [...merged.values()].map(r => ({
+          truckCode: r.truckCode,
+          stateCode: r.stateCode,
+          gallons: Math.round(r.gallons * 1000) / 1000,
+          miles: Math.round(r.miles * 10) / 10,
+          amount: Math.round(r.amount * 100) / 100,
+          ...(r.note ? { note: r.note } : {})
+        }))
+      );
+      await prisma.$executeRaw`
+        INSERT INTO pay.payroll_statements
+          (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay, fuel_detail)
+        VALUES (${driverId}::bigint, ${period.start}::date, ${period.end}::date,
+                0, 0, 0, 0, 0, ${payload}::jsonb)
+        ON CONFLICT (driver_id, period_start) DO UPDATE SET
+          fuel_detail = EXCLUDED.fuel_detail, updated_at = now()
+        WHERE pay.payroll_statements.status = 'DRAFT'
+      `;
+      await prisma.$executeRaw`
+        UPDATE pay.payroll_statements
+        SET fuel_detail = ${payload}::jsonb, edited_after_verify = true, updated_at = now()
+        WHERE driver_id = ${driverId}::bigint AND period_start = ${period.start}::date
+          AND status IN ('VERIFIED', 'DONE')
+      `;
+    }
+  }
+
+  // ---- Fees: replace semantics (no merge), sum written in lockstep
+  const feePayload = JSON.stringify(
+    feeRows.map(r => ({
+      label: r.label,
+      miles: Math.round(r.miles * 10) / 10,
+      amount: Math.round(r.amount * 100) / 100,
+      ...(r.note ? { note: r.note } : {})
+    }))
+  );
+  const feeTotal = Math.round(feeRows.reduce((acc, r) => acc + r.amount, 0) * 100) / 100;
+  await prisma.$executeRaw`
+    INSERT INTO pay.payroll_statements
+      (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay,
+       custom_fees, total_custom_fees)
+    VALUES (${driverId}::bigint, ${period.start}::date, ${period.end}::date,
+            0, 0, 0, 0, 0, ${feePayload}::jsonb, ${feeTotal})
+    ON CONFLICT (driver_id, period_start) DO UPDATE SET
+      custom_fees = EXCLUDED.custom_fees,
+      total_custom_fees = EXCLUDED.total_custom_fees,
+      updated_at = now()
+    WHERE pay.payroll_statements.status = 'DRAFT'
+  `;
+  await prisma.$executeRaw`
+    UPDATE pay.payroll_statements
+    SET custom_fees = ${feePayload}::jsonb,
+        total_custom_fees = ${feeTotal},
+        edited_after_verify = true,
+        updated_at = now()
+    WHERE driver_id = ${driverId}::bigint AND period_start = ${period.start}::date
+      AND status IN ('VERIFIED', 'DONE')
+  `;
+
   await syncStatements(refs);
 
   revalidatePath("/dashboard");

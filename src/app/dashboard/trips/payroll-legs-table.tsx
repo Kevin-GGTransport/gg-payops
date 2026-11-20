@@ -2,11 +2,11 @@
 
 import * as React from "react";
 import { type ColumnDef } from "@tanstack/react-table";
+import { PlusIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { ComboboxField } from "@/components/combobox-field";
 import { ConfirmAction } from "@/components/confirm-action";
-import { SubmitButton } from "@/components/submit-button";
 import { DateField } from "@/components/date-field";
 import { Input } from "@/components/ui/input";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
@@ -17,7 +17,8 @@ import { calcFuelSubsidy, calcTripWage, type WageRuleData } from "@/lib/wage";
 import type { OperationType } from "@/lib/labels";
 import type { OperationOption } from "../trip-entry-form";
 import type { DriverPeriodTripRow } from "@/lib/queries/trips";
-import { deleteTrip, updateTripsBatch } from "./actions";
+import { deleteTrip } from "./actions";
+import { useSheetReport } from "./[driverId]/statement-sheet";
 
 const DOW = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -494,6 +495,299 @@ const EditableLegRow = React.memo(function EditableLegRow({
   );
 });
 
+/** Pricing identity of the sheet's driver, for rows that don't exist yet */
+export type NewLegContext = {
+  driverId: string;
+  driverType: "DRIVER" | "OWNER";
+  priceAsDriver: boolean;
+  /** Date a fresh row opens with (business today inside the period) */
+  defaultDate: string;
+};
+
+/**
+ * One not-yet-saved leg appended to the sheet: the same cells and behavior
+ * as EditableLegRow (location pickers, Google-measured miles, rule-priced
+ * wage with a sticky manual override) minus everything a stored row carries
+ * (package spans, snapshot marks, server delete). Field names are positional
+ * under leg_new_<i>_ so the batch save can INSERT them alongside the UPDATEs.
+ */
+const NewLegRow = React.memo(function NewLegRow({
+  slotId,
+  rowIndex,
+  ctx,
+  locations,
+  operations,
+  wageRule,
+  onRemove,
+  onTouched
+}: {
+  /** Stable slot id (React key); travels with the row's state across removals */
+  slotId: number;
+  rowIndex: number;
+  ctx: NewLegContext;
+  locations: LocationOption[];
+  operations: OperationOption[];
+  wageRule: WageRuleData | null;
+  onRemove: (slotId: number) => void;
+  /** Any edit reports the row as carried (gates the save button) */
+  onTouched: (slotId: number) => void;
+}) {
+  const prefix = `leg_new_${rowIndex}_`;
+  const legLabel = `新行程第 ${rowIndex + 1} 行`;
+
+  const [dateValue, setDateValue] = React.useState(ctx.defaultDate);
+  const [operation, setOperation] = React.useState(operations[0]?.code ?? "");
+  const operationRequiresLoad = (code: string) =>
+    operations.find(o => o.code === code)?.requires_load ?? true;
+  const [loadNoValue, setLoadNoValue] = React.useState("");
+  const [fromValue, setFromValue] = React.useState("");
+  const [toValue, setToValue] = React.useState("");
+  const [milesValue, setMilesValue] = React.useState("0");
+  const [fuelValue, setFuelValue] = React.useState("");
+  const [status, setStatus] = React.useState<CalcStatus>("loading");
+  const [manual, setManual] = React.useState(false);
+  const requestId = React.useRef(0);
+  // Auto-priced until hand-edited; the sticky-manual contract of EditableLegRow
+  const [manualPay, setManualPay] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!fromValue || !toValue) return;
+    const id = ++requestId.current;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/distance?from=${encodeURIComponent(fromValue)}&to=${encodeURIComponent(toValue)}`
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data: { miles: number | null } = await res.json();
+        if (cancelled || id !== requestId.current) return;
+        if (typeof data.miles === "number" && data.miles > 0) {
+          setStatus("auto");
+          setManual(false);
+          setMilesValue(String(data.miles));
+        } else {
+          setStatus("failed");
+        }
+      } catch {
+        if (!cancelled && id === requestId.current) setStatus("failed");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fromValue, toValue]);
+
+  const wageEndpoint = (value: string) =>
+    locations.find(l => `loc:${l.id}` === value) ?? null;
+
+  const rule = wageRule;
+  const autoPay = React.useMemo(
+    () =>
+      rule
+        ? calcTripWage({
+            driverId: ctx.driverId,
+            driverType: ctx.driverType,
+            priceAsDriver: ctx.priceAsDriver,
+            operation: (operation || undefined) as OperationType | undefined,
+            miles: Number(milesValue) || 0,
+            from: wageEndpoint(fromValue),
+            to: wageEndpoint(toValue),
+            rule
+          })
+        : 0,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- wageEndpoint closes over the stable locations prop
+    [operation, milesValue, fromValue, toValue, rule]
+  );
+
+  const subsidyRate = rule?.fuel_subsidy_rate ?? 0;
+  const subsidyValue = calcFuelSubsidy({
+    driverType: ctx.driverType,
+    miles: Number(milesValue) || 0,
+    rate: subsidyRate
+  });
+
+  const phase = !fromValue || !toValue ? "idle" : status;
+  const milesHint =
+    phase === "loading"
+      ? "测算中…"
+      : manual
+        ? "手动输入"
+        : phase === "failed"
+          ? "未能测算，请手填"
+          : "";
+
+  return (
+    <tr>
+      <td className="px-1.5">
+        <DateField
+          name={`${prefix}trip_date`}
+          value={dateValue}
+          onValueChange={value => {
+            setDateValue(value);
+            onTouched(slotId);
+          }}
+          aria-label={`${legLabel}日期`}
+          size="sm"
+          groupClassName={cellDate}
+        />
+      </td>
+      <td className="px-1.5">
+        <LocationPicker
+          name={`${prefix}from_location`}
+          locations={locations}
+          creatable
+          value={fromValue}
+          placeholder="起点"
+          aria-label={`${legLabel}起点`}
+          triggerClassName={`h-8 px-2 ${cellPick}`}
+          onValueChange={value => {
+            setFromValue(value);
+            onTouched(slotId);
+          }}
+        />
+      </td>
+      <td className="px-1.5">
+        <LocationPicker
+          name={`${prefix}to_location`}
+          locations={locations}
+          creatable
+          value={toValue}
+          placeholder="终点"
+          aria-label={`${legLabel}终点`}
+          triggerClassName={`h-8 px-2 ${cellPick}`}
+          onValueChange={value => {
+            setToValue(value);
+            onTouched(slotId);
+          }}
+        />
+      </td>
+      <td className="px-1.5">
+        <ComboboxField
+          name={`${prefix}operation`}
+          value={operation}
+          clearable={false}
+          searchable={false}
+          aria-label={`${legLabel}操作`}
+          triggerClassName={`h-8 px-2 ${cellPick}`}
+          onValueChange={value => {
+            setOperation(value);
+            if (!operationRequiresLoad(value)) setLoadNoValue("");
+            onTouched(slotId);
+          }}
+          options={operations.map(op => ({ value: op.code, label: op.code }))}
+        />
+      </td>
+      <td className="px-1.5">
+        <Input
+          name={`${prefix}load_no`}
+          value={loadNoValue}
+          onChange={e => {
+            setLoadNoValue(e.target.value);
+            onTouched(slotId);
+          }}
+          disabled={!operationRequiresLoad(operation)}
+          maxLength={64}
+          placeholder={operationRequiresLoad(operation) ? "如 LD101" : "该操作免填"}
+          aria-label={`${legLabel}Load#`}
+          className={`${cellInput} font-mono font-semibold`}
+        />
+      </td>
+      <td className="px-1.5">
+        <Input
+          type="number"
+          name={`${prefix}miles`}
+          min={0}
+          step="any"
+          value={milesValue}
+          onChange={e => {
+            setMilesValue(e.target.value);
+            setManual(true);
+            onTouched(slotId);
+          }}
+          aria-label={`${legLabel}里程`}
+          className={`${cellInput} font-mono`}
+        />
+        {milesHint && (
+          <span className={`${cellHint} ${phase === "failed" ? "text-destructive" : ""}`}>
+            {milesHint}
+          </span>
+        )}
+      </td>
+      <td className="px-1.5">
+        <Input
+          type="number"
+          name={`${prefix}fuel_gallons`}
+          min={0}
+          step={0.1}
+          value={fuelValue}
+          onChange={e => {
+            setFuelValue(e.target.value);
+            onTouched(slotId);
+          }}
+          placeholder="—"
+          aria-label={`${legLabel}加油量`}
+          className={`${cellInput} font-mono`}
+        />
+      </td>
+      <td className="px-1.5 font-mono text-[13px]">
+        {ctx.driverType === "OWNER" && subsidyRate > 0
+          ? money(subsidyValue.toFixed(2))
+          : "—"}
+      </td>
+      <td className="px-1.5">
+        <Input
+          type="number"
+          name={`${prefix}pay_amount`}
+          min={0}
+          step={0.01}
+          value={manualPay ?? autoPay.toFixed(2)}
+          onChange={e => {
+            setManualPay(e.target.value);
+            onTouched(slotId);
+          }}
+          aria-label={`${legLabel}工资`}
+          className={`${cellInput} font-mono`}
+        />
+        {manualPay !== null && (
+          <span className={cellHint}>
+            手动 ·{" "}
+            <button
+              type="button"
+              className="linklike"
+              onClick={() => {
+                setManualPay(null);
+                onTouched(slotId);
+              }}
+            >
+              重算
+            </button>
+          </span>
+        )}
+      </td>
+      <td className="px-1.5">
+        <Input
+          name={`${prefix}notes`}
+          defaultValue=""
+          placeholder="选填"
+          aria-label={`${legLabel}备注`}
+          className={cellInput}
+          onChange={() => onTouched(slotId)}
+        />
+      </td>
+      <td className="actions px-1.5">
+        <button
+          type="button"
+          className="linklike danger"
+          onClick={() => onRemove(slotId)}
+        >
+          删除
+        </button>
+      </td>
+    </tr>
+  );
+});
+
 /** Per-leg delete: calls the server action directly - a nested <form> inside
  *  the save form would be invalid HTML */
 function DeleteLegButton({ legId, returnTo }: { legId: string; returnTo: string }) {
@@ -537,19 +831,18 @@ export function PayrollLegsTable({
   days,
   returnTo,
   edit,
-  /** True when the statement is VERIFIED: saves won't move the frozen
-   *  numbers, they only mark the sheet red - say so up front */
-  frozen = false,
+  /** Pricing identity + opening date for appended rows */
+  newLegCtx,
   storageKey = "payops.payroll.legs.cols",
   /** Verification-snapshot diff: field keys per changed leg + post-verify
    *  additions (undefined on legacy statements without a snapshot) */
   changes
 }: {
   days: DayGroup[];
-  /** Where the batch save redirects back to (full path with ?period=) */
+  /** Where the per-row delete redirects back to (full path with ?period=) */
   returnTo: string;
   edit: TripEditDictionaries;
-  frozen?: boolean;
+  newLegCtx: NewLegContext;
   storageKey?: string;
   changes?: { changedFieldsByLeg: Record<string, string[]>; addedLegIds: string[] };
 }) {
@@ -570,6 +863,11 @@ export function PayrollLegsTable({
     )
   );
   const [dirty, setDirty] = React.useState<Set<string>>(new Set());
+  // Appended (not-yet-saved) rows: stable slot ids only - each NewLegRow owns
+  // its values; touched ids gate the save button (the server skips empties)
+  const [newSlots, setNewSlots] = React.useState<number[]>([]);
+  const [newTouched, setNewTouched] = React.useState<Set<number>>(new Set());
+  const nextNewSlotId = React.useRef(1);
 
   // Package pay cells merge across each carrier's contiguous run (stable
   // across renders: EditableLegRow is memo'd on these props)
@@ -586,6 +884,22 @@ export function PayrollLegsTable({
   const onValues = React.useCallback((id: string, values: LegValues) => {
     setLive(prev => ({ ...prev, [id]: values }));
   }, []);
+  const removeNewRow = React.useCallback((slotId: number) => {
+    setNewSlots(prev => prev.filter(id => id !== slotId));
+    setNewTouched(prev => {
+      if (!prev.has(slotId)) return prev;
+      const next = new Set(prev);
+      next.delete(slotId);
+      return next;
+    });
+  }, []);
+  const touchNewRow = React.useCallback((slotId: number) => {
+    setNewTouched(prev => (prev.has(slotId) ? prev : new Set(prev).add(slotId)));
+  }, []);
+  function addNewRow() {
+    const id = nextNewSlotId.current++;
+    setNewSlots(prev => [...prev, id]);
+  }
 
   const valuesOf = (id: string): LegValues =>
     live[id] ?? { miles: 0, fuel: 0, pay: 0, subsidy: 0 };
@@ -619,11 +933,19 @@ export function PayrollLegsTable({
 
   const table = useRosterTable({ data: NO_ROWS, columns: SHEET_COLUMNS, storageKey });
   const dirtyCount = dirty.size;
+  const newCount = newTouched.size;
+
+  // Lift the counts to the enclosing sheet form's save bar (same documented
+  // deviation as onValues: counts live behind this component's state wall)
+  const sheet = useSheetReport();
+  React.useEffect(() => {
+    sheet?.reportLegs(dirtyCount, newCount);
+  }, [dirtyCount, newCount, sheet]);
 
   return (
-    <form action={updateTripsBatch} aria-label="行程修改表">
+    <div>
       <input type="hidden" name="dirty_ids" value={[...dirty].join(",")} />
-      <input type="hidden" name="return_to" value={returnTo} />
+      <input type="hidden" name="new_row_count" value={newSlots.length} />
       <RosterTable table={table}>
         <tbody>
           {days.length === 0 && (
@@ -676,34 +998,38 @@ export function PayrollLegsTable({
               <td colSpan={2} />
             </tr>
           )}
+          {newSlots.length > 0 && (
+            <>
+              {/* Appended rows sit below the week total: their date may belong
+                  to any day, so they join the day blocks only after saving */}
+              <tr className="matrix-sub">
+                <td colSpan={SHEET_COLUMNS.length}>
+                  新增行程 · {newSlots.length} 行 · 保存后并入对应日期
+                </td>
+              </tr>
+              {newSlots.map((slotId, i) => (
+                <NewLegRow
+                  key={slotId}
+                  slotId={slotId}
+                  rowIndex={i}
+                  ctx={newLegCtx}
+                  locations={edit.locations}
+                  operations={edit.operations}
+                  wageRule={edit.wageRule}
+                  onRemove={removeNewRow}
+                  onTouched={touchNewRow}
+                />
+              ))}
+            </>
+          )}
         </tbody>
       </RosterTable>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-dashed border-line px-4 py-3">
-        <span className="text-[13px] text-muted-foreground">
-          {dirtyCount > 0
-            ? `${dirtyCount} 段已修改未保存`
-            : "直接点击格子修改行程，和录入页一样"}
-          {frozen && dirtyCount > 0 && (
-            <span className="text-red-700">
-              {" "}· 本周期已核对：保存不会改动核对金额，工资单将标红
-            </span>
-          )}
-        </span>
-        <div className="flex items-center gap-2">
-          {dirtyCount > 0 && (
-            <button
-              type="button"
-              className="button button-quiet"
-              onClick={() => window.location.reload()}
-            >
-              放弃修改
-            </button>
-          )}
-          <SubmitButton className="button button-dark" disabled={dirtyCount === 0} pendingLabel="保存中…">
-            保存修改{dirtyCount > 0 ? `（${dirtyCount} 段）` : ""}
-          </SubmitButton>
-        </div>
-      </div>
-    </form>
+      {/* Add-row bar mirrors the entry sheet: finishing the last row, the
+          clerk continues right there */}
+      <button type="button" className="add-row-bar" onClick={addNewRow}>
+        <PlusIcon className="size-3.5" />
+        添加行程
+      </button>
+    </div>
   );
 }
