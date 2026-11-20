@@ -9,11 +9,13 @@ export type StatementRef = { driverId: string; periodStart: string };
  *
  * - missing statement is created as DRAFT with the live aggregates
  *   (entry = generation - no separate "generate" step exists)
- * - DRAFT numbers are recomputed in place (drafts always track the trips)
- * - VERIFIED/DONE numbers stay frozen; the mutation only sets
- *   edited_after_verify - a permanent audit flag that is never cleared
- *   anywhere
- * - a DRAFT whose trips are all gone is dropped (no legs, no statement)
+ * - DRAFT and VERIFIED numbers are recomputed in place (核对 is a checked
+ *   mark, NOT an archive: the sheet keeps tracking the trips live)
+ * - DONE (driver-confirmed) numbers stay frozen on the confirmation-time
+ *   snapshot; the mutation only sets edited_after_verify - a permanent audit
+ *   flag that is never cleared anywhere
+ * - a DRAFT/VERIFIED sheet whose trips are all gone is dropped (no legs, no
+ *   statement)
  */
 export async function syncStatements(refs: StatementRef[]) {
   const pairs = [
@@ -22,9 +24,9 @@ export async function syncStatements(refs: StatementRef[]) {
   for (const { driverId, periodStart } of pairs) {
     const period = periodOf(periodStart);
     await prisma.$transaction([
-      // Upsert the live aggregates; the DO UPDATE arm is guarded so VERIFIED
-      // rows keep their frozen numbers. LEFT JOIN keeps zero-trip drivers at
-      // one all-zero row, which the empty-draft cleanup below then removes.
+      // Upsert the live aggregates; the DO UPDATE arm is guarded so DONE rows
+      // keep their frozen numbers. LEFT JOIN keeps zero-trip drivers at one
+      // all-zero row, which the empty-sheet cleanup below then removes.
       prisma.$executeRaw`
         INSERT INTO pay.payroll_statements(
           driver_id, period_start, period_end,
@@ -70,26 +72,28 @@ export async function syncStatements(refs: StatementRef[]) {
           op_counts = EXCLUDED.op_counts,
           trucks = EXCLUDED.trucks,
           updated_at = now()
-        WHERE pay.payroll_statements.status = 'DRAFT'
+        WHERE pay.payroll_statements.status IN ('DRAFT', 'VERIFIED')
       `,
-      // VERIFIED/DONE: numbers frozen forever; the change is only flagged
-      // (detail-sheet red - the list no longer surfaces this flag)
+      // DONE: numbers frozen on the confirmation snapshot forever; the change
+      // is only flagged (detail-sheet red - the list no longer surfaces this
+      // flag)
       prisma.$executeRaw`
         UPDATE pay.payroll_statements
         SET edited_after_verify = true, updated_at = now()
         WHERE driver_id = ${driverId}::bigint
           AND period_start = ${period.start}::date
-          AND status IN ('VERIFIED', 'DONE')
+          AND status = 'DONE'
       `,
-      // Draft with every leg deleted: remove the empty statement. Custom fees
-      // are deliberately entered money (a fees-only draft can exist), so a
-      // statement carrying them survives; fuel_detail is intentionally NOT
-      // part of this guard (scoped decision kept from the fuel feature)
+      // Live sheet with every leg deleted: remove the empty statement.
+      // Custom fees are deliberately entered money (a fees-only sheet can
+      // exist), so a statement carrying them survives; fuel_detail is
+      // intentionally NOT part of this guard (scoped decision kept from the
+      // fuel feature)
       prisma.$executeRaw`
         DELETE FROM pay.payroll_statements
         WHERE driver_id = ${driverId}::bigint
           AND period_start = ${period.start}::date
-          AND status = 'DRAFT'
+          AND status IN ('DRAFT', 'VERIFIED')
           AND leg_count = 0
           AND custom_fees = '[]'::jsonb
       `

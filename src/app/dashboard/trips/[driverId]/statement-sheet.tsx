@@ -40,7 +40,8 @@ export function StatementSheetForm({
   driverId: string;
   periodStart: string;
   returnTo: string;
-  /** VERIFIED statement: saves flag the sheet, numbers stay frozen */
+  /** DONE statement (driver-confirmed archive): saves flag the sheet,
+   *  numbers stay frozen on the confirmation snapshot */
   frozen: boolean;
   /** USPS dictionary for the client-side fuel-state pre-check */
   states: StateOption[];
@@ -131,7 +132,7 @@ export function StatementSheetForm({
             {hasUnsaved ? `${unsavedParts.join(" · ")}未保存` : "行程、加油、费用一次保存"}
             {frozen && hasUnsaved && (
               <span className="text-red-700">
-                {" "}· 本周期已核对：保存不会改动核对工资，行程/加油改动将标红，费用净额照常更新
+                {" "}· 司机已确认（留档）：保存不会改动留档工资，行程/加油改动将标红，费用净额照常更新
               </span>
             )}
           </span>

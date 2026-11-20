@@ -540,13 +540,13 @@ export async function addTripsBatch(formData: FormData) {
               0, 0, 0, 0, 0, ${payload}::jsonb)
       ON CONFLICT (driver_id, period_start) DO UPDATE SET
         fuel_detail = EXCLUDED.fuel_detail, updated_at = now()
-      WHERE pay.payroll_statements.status = 'DRAFT'
+      WHERE pay.payroll_statements.status IN ('DRAFT', 'VERIFIED')
     `;
     await prisma.$executeRaw`
       UPDATE pay.payroll_statements
       SET fuel_detail = ${payload}::jsonb, edited_after_verify = true, updated_at = now()
       WHERE driver_id = ${driverId}::bigint AND period_start = ${sheetPeriodStart.start}::date
-        AND status IN ('VERIFIED', 'DONE')
+        AND status = 'DONE'
     `;
   }
 
@@ -585,7 +585,7 @@ export async function addTripsBatch(formData: FormData) {
         custom_fees = EXCLUDED.custom_fees,
         total_custom_fees = EXCLUDED.total_custom_fees,
         updated_at = now()
-      WHERE pay.payroll_statements.status = 'DRAFT'
+      WHERE pay.payroll_statements.status IN ('DRAFT', 'VERIFIED')
     `;
     await prisma.$executeRaw`
       UPDATE pay.payroll_statements
@@ -594,7 +594,7 @@ export async function addTripsBatch(formData: FormData) {
           edited_after_verify = true,
           updated_at = now()
       WHERE driver_id = ${driverId}::bigint AND period_start = ${sheetPeriodStart.start}::date
-        AND status IN ('VERIFIED', 'DONE')
+        AND status = 'DONE'
     `;
   }
 

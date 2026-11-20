@@ -155,8 +155,9 @@ export async function updateTrip(formData: FormData) {
  * bad rows from reaching the server; the checks below remain the backstop
  * and refuel every typed row through URL params on the way back. Fuel and
  * fees always write (the editors open with the stored truth, so an untouched
- * section rewrites itself); on VERIFIED/DONE sheets every write only takes
- * the payload plus the permanent edited flag - numbers stay frozen.
+ * section rewrites itself); DRAFT/VERIFIED sheets take the payload live,
+ * while DONE (archived) sheets only take the payload plus the permanent
+ * edited flag - their numbers stay frozen.
  */
 export async function saveStatementSheet(formData: FormData) {
   await requireUser();
@@ -389,13 +390,13 @@ export async function saveStatementSheet(formData: FormData) {
                 0, 0, 0, 0, 0, ${payload}::jsonb)
         ON CONFLICT (driver_id, period_start) DO UPDATE SET
           fuel_detail = EXCLUDED.fuel_detail, updated_at = now()
-        WHERE pay.payroll_statements.status = 'DRAFT'
+        WHERE pay.payroll_statements.status IN ('DRAFT', 'VERIFIED')
       `;
       await prisma.$executeRaw`
         UPDATE pay.payroll_statements
         SET fuel_detail = ${payload}::jsonb, edited_after_verify = true, updated_at = now()
         WHERE driver_id = ${driverId}::bigint AND period_start = ${period.start}::date
-          AND status IN ('VERIFIED', 'DONE')
+          AND status = 'DONE'
       `;
     }
   }
@@ -420,7 +421,7 @@ export async function saveStatementSheet(formData: FormData) {
       custom_fees = EXCLUDED.custom_fees,
       total_custom_fees = EXCLUDED.total_custom_fees,
       updated_at = now()
-    WHERE pay.payroll_statements.status = 'DRAFT'
+    WHERE pay.payroll_statements.status IN ('DRAFT', 'VERIFIED')
   `;
   await prisma.$executeRaw`
     UPDATE pay.payroll_statements
@@ -429,7 +430,7 @@ export async function saveStatementSheet(formData: FormData) {
         edited_after_verify = true,
         updated_at = now()
     WHERE driver_id = ${driverId}::bigint AND period_start = ${period.start}::date
-      AND status IN ('VERIFIED', 'DONE')
+      AND status = 'DONE'
   `;
 
   await syncStatements(refs);

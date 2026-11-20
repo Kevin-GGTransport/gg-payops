@@ -226,17 +226,18 @@ export default async function DriverPeriodPage({
   const returnTo = `/dashboard/trips/${driver.id}?period=${period.start}`;
   const navHref = (p: { start: string }) => `/dashboard/trips/${driver.id}?period=${p.start}`;
 
-  // Draft numbers always equal the live ledger; checked sheets (VERIFIED and
-  // DONE alike) freeze them. The permanent edited_after_verify flag (not a
-  // live comparison) drives the detail-only red
-  const statementFrozen = statement !== null && statement.status !== "DRAFT";
+  // 核对 (VERIFIED) keeps tracking the live ledger; only the driver-confirmed
+  // DONE sheet is archived - its numbers freeze on the confirmation-time
+  // snapshot. The permanent edited_after_verify flag (not a live comparison)
+  // drives the detail-only red
+  const archived = statement !== null && statement.status === "DONE";
 
-  // Post-verify change localization: diff the live legs against the frozen
-  // snapshot so the sheet can mark exactly WHICH cells moved. Legacy rows
-  // (null snapshot, verified before 0031) keep the statement-level red only.
+  // Post-confirmation change localization: diff the live legs against the
+  // frozen snapshot so the sheet can mark exactly WHICH cells moved. Legacy
+  // rows (null snapshot) keep the statement-level red only.
   const numEq = (a: string | null, b: string | null) => Number(a ?? 0) === Number(b ?? 0);
   const textEq = (a: string | null, b: string | null) => (a ?? "") === (b ?? "");
-  const snapshot = statementFrozen ? parseVerifySnapshot(statement.verify_snapshot) : null;
+  const snapshot = archived && statement ? parseVerifySnapshot(statement.verify_snapshot) : null;
   const changedFieldsByLeg: Record<string, string[]> = {};
   const addedLegIds: string[] = [];
   const changedFuelStates: string[] = [];
@@ -298,11 +299,12 @@ export default async function DriverPeriodPage({
         .join(" · ")
     : "";
   // Muted name tone for the whole page: dark green once verified, dark red
-  // once driver-confirmed or edited after checking - dim shades only
+  // once driver-confirmed (archived) or edited after confirmation - dim
+  // shades only
   const nameTone = statement
     ? statement.edited_after_verify || statement.status === "DONE"
       ? "text-red-800"
-      : statementFrozen
+      : statement.status === "VERIFIED"
         ? "text-emerald-800"
         : undefined
     : undefined;
@@ -324,16 +326,16 @@ export default async function DriverPeriodPage({
               <>
                 <StatementStatusBadge status={statement.status} edited />
                 <span className="text-red-700">
-                  {" "}核对后行程有改动{changeSummary && `（${changeSummary}）`}：核对金额 {money(statement.total_pay)} 已冻结（改动不自动计入）{snapshot ? "，改动处已标红" : ""}，请人工复核。
+                  {" "}司机确认后行程有改动{changeSummary && `（${changeSummary}）`}：留档金额 {money(statement.total_pay)} 已冻结（改动不自动计入）{snapshot ? "，改动处已标红" : ""}，请人工复核。
                 </span>
               </>
             ) : (
               <>
                 工资单 <StatementStatusBadge status={statement.status} />
                 {statement.status === "DONE"
-                  ? " 司机已确认，金额冻结；再改行程只在详情页标红。"
-                  : statementFrozen
-                    ? " 已核对，金额冻结；可标记司机确认；再改行程只在详情页标红。"
+                  ? " 司机已确认（留档），金额冻结；再改行程只在详情页标红。"
+                  : statement.status === "VERIFIED"
+                    ? " 已核对（数字仍实时跟随行程）；可标记司机确认，确认后冻结留档。"
                     : " 草稿中，数字实时跟随行程。"}
               </>
             )
@@ -463,7 +465,7 @@ export default async function DriverPeriodPage({
         driverId={driver.id}
         periodStart={period.start}
         returnTo={returnTo}
-        frozen={statementFrozen}
+        frozen={archived}
         states={stateOptions}
       >
         <section aria-label="按日明细" className="mt-4">

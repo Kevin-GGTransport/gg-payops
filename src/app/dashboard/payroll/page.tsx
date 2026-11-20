@@ -103,7 +103,7 @@ export default async function PayrollPage({
         title="工资单"
         description={
           view === "period" && shownPeriod
-            ? `${periodLabel(shownPeriod)} 的汇总：录入行程自动生成草稿工资单，草稿数字实时跟随行程；点「核对」（列表或详情页）后金额冻结，再「司机确认」；核对后的行程改动只在详情页标红。`
+            ? `${periodLabel(shownPeriod)} 的汇总：录入行程自动生成草稿工资单，数字实时跟随行程；「核对」只标记已检查（数字仍实时），「司机确认」后金额冻结留档；确认后的行程改动只在详情页标红。`
             : "所有周期的工资单档案；行程汇总在「按周期」页签。"
         }
         actions={

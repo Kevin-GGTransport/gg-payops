@@ -17,10 +17,10 @@ function revalidateStatementViews() {
 }
 
 /**
- * Freeze one statement: refresh the aggregates off the live trips one last
- * time (drafts always track live, so this only guards against a race) and
- * flip to VERIFIED. One-way and permanent - there is no un-verify, and later
- * trip changes only set the red edited_after_verify flag.
+ * Mark one statement checked (核对): a checked sheet keeps tracking the live
+ * trips - no numbers freeze and no snapshot is taken here. The final sync
+ * only guards against a race so the flip lands on current aggregates.
+ * One-way: there is no un-verify.
  */
 export async function verifyStatement(formData: FormData) {
   await requireUser();
@@ -42,39 +42,10 @@ export async function verifyStatement(formData: FormData) {
     await syncStatements([
       { driverId: target.driver_id, periodStart: target.period_start }
     ]);
-    // The flip and the snapshot land atomically: the same UPDATE freezes the
-    // numbers AND captures the period's whole editable leg set plus the then
-    // fuel_detail, so the detail sheet can later diff cell-by-cell. Endpoint
-    // codes join the location dictionary the same way the sheet's query does.
     await prisma.$executeRaw`
-      UPDATE pay.payroll_statements s
-      SET status = 'VERIFIED', edited_after_verify = false, updated_at = now(),
-          verify_snapshot = (
-            SELECT jsonb_build_object(
-              'legs', COALESCE((
-                SELECT jsonb_agg(jsonb_build_object(
-                  'id', t.id::text,
-                  'trip_date', to_char(t.trip_date, 'YYYY-MM-DD'),
-                  'operation', t.operation,
-                  'load_no', t.load_no,
-                  'from_code', f.code,
-                  'to_code', o.code,
-                  'miles', to_char(t.miles, 'FM999999990.00'),
-                  'fuel_gallons', to_char(t.fuel_gallons, 'FM999999990.000'),
-                  'pay_amount', to_char(t.pay_amount, 'FM999999990.00'),
-                  'notes', t.notes
-                ) ORDER BY t.id)
-                FROM pay.trips t
-                LEFT JOIN ops.locations f ON f.id = t.from_location_id
-                LEFT JOIN ops.locations o ON o.id = t.to_location_id
-                WHERE t.driver_id = s.driver_id
-                  AND t.trip_date >= s.period_start
-                  AND t.trip_date <= s.period_end
-              ), '[]'::jsonb),
-              'fuel', s.fuel_detail
-            )
-          )
-      WHERE s.id = ${id}::bigint AND s.status = 'DRAFT'
+      UPDATE pay.payroll_statements
+      SET status = 'VERIFIED', edited_after_verify = false, updated_at = now()
+      WHERE id = ${id}::bigint AND status = 'DRAFT'
     `;
   }
 
@@ -83,10 +54,12 @@ export async function verifyStatement(formData: FormData) {
 }
 
 /**
- * Mark one statement as driver-confirmed (the DONE enum slot): only a
- * VERIFIED sheet can advance - verification stays the required first step -
- * and the numbers are already frozen since then, so nothing is recomputed.
- * One-way like verify: no un-confirm exists.
+ * Driver confirmation (DONE) is the archive step: the flip and the snapshot
+ * land atomically - the same UPDATE freezes the numbers AND captures the
+ * period's whole editable leg set plus the then fuel_detail, so the detail
+ * sheet can later diff cell-by-cell. Only a VERIFIED sheet can advance
+ * (verification stays the required first step). One-way: no un-confirm
+ * exists, and later changes only set the red edited_after_verify flag.
  */
 export async function confirmDriverStatement(formData: FormData) {
   await requireUser();
@@ -96,9 +69,34 @@ export async function confirmDriverStatement(formData: FormData) {
   if (!id) redirect("/dashboard/payroll");
 
   await prisma.$executeRaw`
-    UPDATE pay.payroll_statements
-    SET status = 'DONE', updated_at = now()
-    WHERE id = ${id}::bigint AND status = 'VERIFIED'
+    UPDATE pay.payroll_statements s
+    SET status = 'DONE', edited_after_verify = false, updated_at = now(),
+        verify_snapshot = (
+          SELECT jsonb_build_object(
+            'legs', COALESCE((
+              SELECT jsonb_agg(jsonb_build_object(
+                'id', t.id::text,
+                'trip_date', to_char(t.trip_date, 'YYYY-MM-DD'),
+                'operation', t.operation,
+                'load_no', t.load_no,
+                'from_code', f.code,
+                'to_code', o.code,
+                'miles', to_char(t.miles, 'FM999999990.00'),
+                'fuel_gallons', to_char(t.fuel_gallons, 'FM999999990.000'),
+                'pay_amount', to_char(t.pay_amount, 'FM999999990.00'),
+                'notes', t.notes
+              ) ORDER BY t.id)
+              FROM pay.trips t
+              LEFT JOIN ops.locations f ON f.id = t.from_location_id
+              LEFT JOIN ops.locations o ON o.id = t.to_location_id
+              WHERE t.driver_id = s.driver_id
+                AND t.trip_date >= s.period_start
+                AND t.trip_date <= s.period_end
+            ), '[]'::jsonb),
+            'fuel', s.fuel_detail
+          )
+        )
+    WHERE s.id = ${id}::bigint AND s.status = 'VERIFIED'
   `;
 
   revalidateStatementViews();
@@ -188,7 +186,8 @@ export async function copyStatement(
     if (!target) return { code: "target_missing" as const };
 
     // If the target already has a statement, lock its row and require DRAFT -
-    // copying into a verified one would only raise the permanent red flag
+    // copying is a draft-sheet operation (a checked sheet stays the clerk's
+    // own to edit; an archived one must never take new work)
     const existing = await tx.$queryRaw<Array<{ status: string }>>`
       SELECT status::text AS status
       FROM pay.payroll_statements

@@ -198,14 +198,15 @@ export function StatementsTable({
       header: "本周期工资",
       size: 116,
       meta: { cellClass: "mono num strong", headerClass: "num" },
-      // Main value = frozen pay + fees (fees stay editable after verify).
-      // Two independent sub-lines may stack: the fee total and, on frozen
-      // sheets whose live sum drifted, the live number
+      // Main value = archived pay + fees (fees stay editable after confirm).
+      // Two independent sub-lines may stack: the fee total and, on archived
+      // (DONE) sheets whose live sum drifted, the live number - VERIFIED
+      // sheets track live so they never drift
       cell: ({ row }) => {
         const s = row.original;
         const fees = Number(s.total_custom_fees);
         const drifted =
-          s.status !== null && s.status !== "DRAFT" && Number(s.live_pay) !== Number(s.total_pay);
+          s.status === "DONE" && Number(s.live_pay) !== Number(s.total_pay);
         return drifted || fees !== 0 ? (
           <>
             <span>{money(Number(s.total_pay) + fees)}</span>
