@@ -65,6 +65,16 @@ export function stripGeoSuffix(value: string): string {
   return at >= 0 ? value.slice(0, at) : value;
 }
 
+/** Module-level option factories: stable identities keep the memoized
+ *  ComboboxField from re-rendering on every host keystroke */
+const labelForFreeText = (v: string) => (v.startsWith("txt:") ? stripGeoSuffix(v.slice(4)) : undefined);
+
+const freeTextOption = (text: string) => ({
+  value: `txt:${text.slice(0, FREE_TEXT_MAX)}`,
+  label: `使用 “${text.slice(0, FREE_TEXT_MAX)}”`,
+  description: "手动输入的地点，提交后自动存档"
+});
+
 type LocationPickerProps = {
   /** Field label; omit inside tables (column headers already label the cell) */
   label?: string;
@@ -91,7 +101,7 @@ type LocationPickerProps = {
  * 地图选点 action opens the map (search / click / drag) whose pick submits as
  * txt:<address>|geo:<lat>,<lng>;… carrying coordinates + address components.
  */
-export function LocationPicker({
+function LocationPickerBase({
   label,
   name,
   locations,
@@ -112,15 +122,45 @@ export function LocationPicker({
   const [mapOpen, setMapOpen] = React.useState(false);
   const [mapPick, setMapPick] = React.useState<MapPick | null>(null);
 
-  function commit(next: string) {
-    if (!isControlled) setInternal(next);
-    onValueChange?.(next);
-  }
-
-  function openMap(closePopover: () => void) {
+  // Stable identity: a fresh array per render would pierce ComboboxField's
+  // groups memo and regroup the full location list on every keystroke
+  const options = React.useMemo(
+    () =>
+      locations.map(l => ({
+        value: `loc:${l.id}`,
+        label: l.code,
+        description: l.address ?? l.name,
+        group: LOCATION_TYPE_LABELS[l.location_type]
+      })),
+    [locations]
+  );
+  const openMap = React.useCallback((closePopover: () => void) => {
     closePopover();
     setMapPick(null);
     setMapOpen(true);
+  }, []);
+  const footerAction = React.useCallback(
+    ({ close }: { close: () => void }) => (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="w-full justify-start gap-2 px-2 font-normal text-[13px]"
+        onClick={() => openMap(close)}
+      >
+        <MapPinIcon className="size-4 shrink-0 opacity-60" />
+        地图选点
+        <span className="ml-auto text-[11px] font-normal text-muted-foreground">
+          搜索或点选地图位置
+        </span>
+      </Button>
+    ),
+    [openMap]
+  );
+
+  function commit(next: string) {
+    if (!isControlled) setInternal(next);
+    onValueChange?.(next);
   }
 
   function confirmMapPick() {
@@ -147,42 +187,11 @@ export function LocationPicker({
         // address stays in the dropdown and the hover title
         triggerLabelOnly
         onValueChange={commit}
-        labelForValue={v => (v.startsWith("txt:") ? stripGeoSuffix(v.slice(4)) : undefined)}
+        labelForValue={labelForFreeText}
         aria-label={rest["aria-label"] ?? (label ? `选择${label}` : undefined)}
-        options={locations.map(l => ({
-          value: `loc:${l.id}`,
-          label: l.code,
-          description: l.address ?? l.name,
-          group: LOCATION_TYPE_LABELS[l.location_type]
-        }))}
-        customOption={
-          creatable
-            ? text => ({
-                value: `txt:${text.slice(0, FREE_TEXT_MAX)}`,
-                label: `使用 “${text.slice(0, FREE_TEXT_MAX)}”`,
-                description: "手动输入的地点，提交后自动存档"
-              })
-            : undefined
-        }
-        footerAction={
-          creatable
-            ? ({ close }) => (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start gap-2 px-2 font-normal text-[13px]"
-                  onClick={() => openMap(close)}
-                >
-                  <MapPinIcon className="size-4 shrink-0 opacity-60" />
-                  地图选点
-                  <span className="ml-auto text-[11px] font-normal text-muted-foreground">
-                    搜索或点选地图位置
-                  </span>
-                </Button>
-              )
-            : undefined
-        }
+        options={options}
+        customOption={creatable ? freeTextOption : undefined}
+        footerAction={creatable ? footerAction : undefined}
       />
 
       {/* Radix unmounts closed dialog content, so the map starts fresh per open */}
@@ -221,3 +230,7 @@ export function LocationPicker({
     </>
   );
 }
+
+// memo: entry rows host two of these each; stable locations/callback props let
+// them skip the per-keystroke re-renders of the row they live in
+export const LocationPicker = React.memo(LocationPickerBase);

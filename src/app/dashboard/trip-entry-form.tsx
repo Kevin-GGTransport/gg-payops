@@ -139,6 +139,38 @@ const FUEL_INITIAL_ROWS = 2;
 /** Draft-restored groups take ids from here so they always mount fresh */
 const DRAFT_GROUP_ID_BASE = 1_000;
 
+/** Sheet bootstrap from the server's error-refill params (the draft-restore
+ *  path bypasses this via its one-shot effect). Built once per mount:
+ *  parsePkgState JSON-parses per group, so rebuilding it on every render
+ *  burned that work for state initializers that only read it the first time. */
+function buildInitialGroups(
+  refillGroups: RefillGroup[] | undefined,
+  defaultDriverId: string
+): GroupSlot[] {
+  return (
+    refillGroups
+      ? refillGroups.map((g, i) => ({
+          id: i + 1,
+          driverId: g.driverId,
+          truckId: g.truckId,
+          rows: g.rows.map((row, j) => ({ id: j + 1, defaults: row })),
+          pkg: parsePkgState(g.pkgState ?? ""),
+          fuelDefaults:
+            g.fuelRows && g.fuelRows.length > 0 ? g.fuelRows.map(row => ({ ...row })) : undefined,
+          feeDefaults:
+            g.feeRows && g.feeRows.length > 0 ? g.feeRows.map(row => ({ ...row })) : undefined
+        }))
+      : [
+          {
+            id: 1,
+            driverId: defaultDriverId,
+            truckId: "",
+            rows: Array.from({ length: INITIAL_ROWS }, (_, i) => ({ id: i + 1 }))
+          }
+        ]
+  );
+}
+
 /** Locations carrying this class tag are container docks (wage rules key on it) */
 const DOCK_CLASS_TAG = "码头";
 /** Dock -> base (HW/SHIPPER) leg defaults to this operation: 提柜 - the
@@ -460,6 +492,12 @@ const EntryRow = React.memo(function EntryRow({
 }) {
   const prefix = `g_${groupIndex}_row_${rowIndex}_`;
   const legLabel = `第 ${groupIndex + 1} 组第 ${rowIndex + 1} 程`;
+  // Stable options identity: this row re-renders on every own keystroke, and
+  // a fresh array would pierce the memoized ComboboxField below
+  const operationOptions = React.useMemo(
+    () => operations.map(op => ({ value: op.code, label: op.code })),
+    [operations]
+  );
   // Dictionary order decides the opening choice (seeds: DEL first)
   const defaultOperation = operations[0]?.code ?? "DEL";
   const [operation, setOperation] = React.useState(defaults?.operation || defaultOperation);
@@ -702,10 +740,7 @@ const EntryRow = React.memo(function EntryRow({
             onDirty();
           }}
           // Code-only labels keep the trigger narrow in the table row
-          options={operations.map(op => ({
-            value: op.code,
-            label: op.code
-          }))}
+          options={operationOptions}
         />
       </td>
       <td className="px-1.5">
@@ -843,6 +878,11 @@ const FuelRow = React.memo(function FuelRow({
 }) {
   const prefix = `g_${groupIndex}_fuel_row_${rowIndex}_`;
   const label = `第 ${groupIndex + 1} 组加油第 ${rowIndex + 1} 行`;
+  // Stable options identity for the memoized state ComboboxField
+  const stateOptions = React.useMemo(
+    () => states.map(s => ({ value: s.code, label: s.code, description: s.name })),
+    [states]
+  );
   return (
     <tr>
       <td className="ctr px-1.5 font-mono text-[12px] tabular-nums text-foreground">
@@ -862,7 +902,7 @@ const FuelRow = React.memo(function FuelRow({
             onChange(rowId, { state: next });
             onDirty();
           }}
-          options={states.map(s => ({ value: s.code, label: s.code, description: s.name }))}
+          options={stateOptions}
         />
         {dupOf !== null && (
           <span className={`${cellHint} text-amber-600`}>
@@ -1497,8 +1537,9 @@ const GroupSection = React.memo(function GroupSection({
   }
 
   // Fuel dup hints and totals derive straight off the slots in this render -
-  // one frame, no report-back round-trips. Content rows only.
-  const fuelContent = fuelSlots.filter(fuelSlotHasContent);
+  // one frame, no report-back round-trips. Content rows only. Memoized so the
+  // filtered identity stays stable and fuelTotals' deps actually hit.
+  const fuelContent = React.useMemo(() => fuelSlots.filter(fuelSlotHasContent), [fuelSlots]);
   const fuelDupOf = React.useMemo(() => {
     const firstByState = new Map<string, number>();
     const dupOf = new Map<number, number>();
@@ -2022,26 +2063,8 @@ export function TripEntryForm({
     columns: SHEET_COLUMNS,
     storageKey: "payops.entry.sheet.cols"
   });
-  const initialGroups: GroupSlot[] = refillGroups
-    ? refillGroups.map((g, i) => ({
-        id: i + 1,
-        driverId: g.driverId,
-        truckId: g.truckId,
-        rows: g.rows.map((row, j) => ({ id: j + 1, defaults: row })),
-        pkg: parsePkgState(g.pkgState ?? ""),
-        fuelDefaults:
-          g.fuelRows && g.fuelRows.length > 0 ? g.fuelRows.map(row => ({ ...row })) : undefined,
-        feeDefaults:
-          g.feeRows && g.feeRows.length > 0 ? g.feeRows.map(row => ({ ...row })) : undefined
-      }))
-    : [
-        {
-          id: 1,
-          driverId: defaultDriverId,
-          truckId: "",
-          rows: Array.from({ length: INITIAL_ROWS }, (_, i) => ({ id: i + 1 }))
-        }
-      ];
+  // One-shot lazy build: see buildInitialGroups above
+  const [initialGroups] = React.useState(() => buildInitialGroups(refillGroups, defaultDriverId));
   const [groups, setGroups] = React.useState<GroupSlot[]>(initialGroups);
   const nextGroupId = React.useRef(initialGroups.length + 1);
   // groupId -> picked driver id (tab labels follow the picked 车号)
@@ -2077,25 +2100,46 @@ export function TripEntryForm({
   const totalPay = Object.values(pays).reduce((acc, v) => acc + (Number(v) || 0), 0);
 
   // Owner fuel subsidy: live per-row miles x the ACTIVE version's rate (each
-  // leg rounded to cents, matching the server-side per-trip snapshot)
+  // leg rounded to cents, matching the server-side per-trip snapshot).
+  // Per-group rollups (pay sum + owner subsidy) in ONE memoized pass: an
+  // unrelated root render (tab switch, photo panel open, drag state) skips
+  // the O(groups x rows) rescans; a pays/miles keystroke recomputes once.
   const subsidyRate = wageRule?.fuel_subsidy_rate ?? 0;
-  const subsidyOf = (groupId: number) => {
-    const prefix = `${groupId}:`;
-    let milesSum = 0;
-    let amount = 0;
-    for (const [key, value] of Object.entries(milesByRow)) {
-      if (!key.startsWith(prefix)) continue;
-      const milesNum = Number(value) || 0;
-      milesSum += milesNum;
-      amount += calcFuelSubsidy({ driverType: "OWNER", miles: milesNum, rate: subsidyRate });
+  const groupStats = React.useMemo(() => {
+    const stats = new Map<number, { paySum: number; subsidyMiles: number; subsidyAmount: number }>();
+    const bucketOf = (groupId: number) => {
+      let bucket = stats.get(groupId);
+      if (!bucket) {
+        bucket = { paySum: 0, subsidyMiles: 0, subsidyAmount: 0 };
+        stats.set(groupId, bucket);
+      }
+      return bucket;
+    };
+    for (const [key, value] of Object.entries(pays)) {
+      bucketOf(Number(key.slice(0, key.indexOf(":")))).paySum += Number(value) || 0;
     }
-    return { milesSum, amount };
-  };
-  const isOwnerGroup = (groupId: number) =>
-    drivers.find(d => d.id === driverByGroup[groupId])?.driver_type === "OWNER";
-  const totalSubsidy = subsidyRate > 0
-    ? groups.reduce((acc, g) => acc + (isOwnerGroup(g.id) ? subsidyOf(g.id).amount : 0), 0)
-    : 0;
+    if (subsidyRate > 0) {
+      const ownerGroups = new Set(
+        groups.flatMap(g =>
+          drivers.find(d => d.id === driverByGroup[g.id])?.driver_type === "OWNER" ? [g.id] : []
+        )
+      );
+      for (const [key, value] of Object.entries(milesByRow)) {
+        const groupId = Number(key.slice(0, key.indexOf(":")));
+        if (!ownerGroups.has(groupId)) continue;
+        const milesNum = Number(value) || 0;
+        const bucket = bucketOf(groupId);
+        bucket.subsidyMiles += milesNum;
+        bucket.subsidyAmount += calcFuelSubsidy({ driverType: "OWNER", miles: milesNum, rate: subsidyRate });
+      }
+    }
+    return stats;
+  }, [pays, milesByRow, groups, drivers, driverByGroup, subsidyRate]);
+  const totalSubsidy = React.useMemo(() => {
+    let sum = 0;
+    for (const bucket of groupStats.values()) sum += bucket.subsidyAmount;
+    return sum;
+  }, [groupStats]);
 
   const handlePayChange = React.useCallback((groupId: number, rowId: number, value: string) => {
     setPays(current => {
@@ -2313,14 +2357,6 @@ export function TripEntryForm({
     scheduleSave();
   }
 
-  function groupPaySum(id: number) {
-    const prefix = `${id}:`;
-    return Object.entries(pays).reduce(
-      (acc, [key, v]) => (key.startsWith(prefix) ? acc + (Number(v) || 0) : acc),
-      0
-    );
-  }
-
   /**
    * Drop one recognized photo sheet in as a new tab (one driver, rows keep
    * their own dates). Appends after anything typed; only an untouched form is
@@ -2487,7 +2523,7 @@ export function TripEntryForm({
 
           {/* forceMount keeps every tab's fields in the DOM (and the submit) */}
           {groups.map((group, gi) => {
-            const subsidy = isOwnerGroup(group.id) && subsidyRate > 0 ? subsidyOf(group.id) : null;
+            const stats = groupStats.get(group.id);
             return (
               <TabsContent key={group.id} value={String(group.id)} forceMount>
                 <GroupSection
@@ -2512,10 +2548,10 @@ export function TripEntryForm({
                   onDirty={handleDirty}
                   dragging={dragging}
                   onDraggingChange={setDragging}
-                  paySum={groupPaySum(group.id)}
+                  paySum={stats?.paySum ?? 0}
                   subsidyRate={subsidyRate}
-                  subsidyMiles={subsidy?.milesSum ?? 0}
-                  subsidyAmount={subsidy?.amount ?? 0}
+                  subsidyMiles={stats?.subsidyMiles ?? 0}
+                  subsidyAmount={stats?.subsidyAmount ?? 0}
                 />
               </TabsContent>
             );

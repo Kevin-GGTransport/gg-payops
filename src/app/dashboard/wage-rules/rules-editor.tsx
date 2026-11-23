@@ -4,13 +4,13 @@ import * as React from "react";
 import { PlusIcon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { ComboboxField } from "@/components/combobox-field";
+import { ComboboxField, type ComboboxOption } from "@/components/combobox-field";
 import { FormGrid, NumberField, TextField } from "@/components/form-fields";
 import type { LocationOption } from "@/components/location-picker";
 import type { WageRuleVersionDetail } from "@/lib/queries/wage-rules";
 import { saveVersion } from "./actions";
 
-type TierRow = { miles_from: string; amount: string };
+type TierSlot = { miles_from: string; amount: string };
 type PriceRow = {
   driver_id: string;
   unit: string;
@@ -38,6 +38,14 @@ const cellInput =
  *  one step of fill feedback on hover/open */
 const cellPickTrigger =
   "h-8 border-0 bg-transparent px-1.5 text-[13px] shadow-none rounded-none hover:bg-muted/40 data-[state=open]:bg-muted/40";
+
+/** Creatable tag option shared by both endpoint pickers - module identity so
+ *  memoized rows never re-render their pickers for it */
+const tagCustomOption = (text: string) => ({
+  value: `tag:${text.slice(0, 40)}`,
+  label: `新建类标签 #${text.slice(0, 40)}`,
+  description: "在位置管理里给位置打这个标签后生效"
+});
 
 /** Compact cell dropdown on the shadcn combo (Popover + Command) - the same
  *  picker family as the 适用司机 column, cell-sized; value submits via the
@@ -76,6 +84,206 @@ function CellSelect({
 }
 
 /**
+ * One price-rule row, memoized: a keystroke in any cell used to re-render
+ * every row's five pickers (Popover + Command each). Props are all stable
+ * identities except the edited row's own slice, so only that row re-renders.
+ * key/index stay positional on purpose - the FormData contract is positional.
+ */
+const PriceRuleRow = React.memo(function PriceRuleRow({
+  index,
+  row,
+  hidden,
+  driverPickOptions,
+  sideOptions,
+  operationOptions,
+  sideLabelFor,
+  onFieldChange,
+  onRemove
+}: {
+  index: number;
+  row: PriceRow;
+  /** Driver lens: filtered-out rows stay mounted (hidden) so positional
+   *  names never shift while the lens is active */
+  hidden: boolean;
+  driverPickOptions: ReadonlyArray<ComboboxOption>;
+  sideOptions: ReadonlyArray<ComboboxOption>;
+  operationOptions: ReadonlyArray<{ value: string; label: string }>;
+  sideLabelFor: (value: string) => string | undefined;
+  onFieldChange: (index: number, patch: Partial<PriceRow>) => void;
+  onRemove: (index: number) => void;
+}) {
+  const i = index;
+  return (
+    <tr className={hidden ? "hidden" : undefined}>
+      <td>
+        <ComboboxField
+          name={`price_${i}_driver_id`}
+          value={row.driver_id}
+          placeholder="所有人"
+          searchPlaceholder="搜索姓名"
+          clearable
+          triggerClassName="h-8 w-32 text-[13px]"
+          onValueChange={value => onFieldChange(i, { driver_id: value })}
+          aria-label={`价格规则 ${i + 1} 适用司机`}
+          options={driverPickOptions}
+        />
+      </td>
+      <td>
+        <ComboboxField
+          name={`price_${i}_from`}
+          value={row.from}
+          placeholder="任意"
+          searchPlaceholder="标签或位置代码"
+          clearable
+          triggerClassName="h-8 w-28 text-[13px]"
+          onValueChange={value => onFieldChange(i, { from: value })}
+          aria-label={`价格规则 ${i + 1} 起点`}
+          labelForValue={sideLabelFor}
+          options={sideOptions}
+          customOption={tagCustomOption}
+        />
+      </td>
+      <td>
+        <ComboboxField
+          name={`price_${i}_to`}
+          value={row.to}
+          placeholder="任意"
+          searchPlaceholder="标签或位置代码"
+          clearable
+          triggerClassName="h-8 w-28 text-[13px]"
+          onValueChange={value => onFieldChange(i, { to: value })}
+          aria-label={`价格规则 ${i + 1} 终点`}
+          labelForValue={sideLabelFor}
+          options={sideOptions}
+          customOption={tagCustomOption}
+        />
+      </td>
+      <td>
+        <CellSelect
+          name={`price_${i}_operation`}
+          value={row.operation}
+          onChange={value => onFieldChange(i, { operation: value })}
+          options={operationOptions}
+          clearable
+          placeholder="不限"
+          ariaLabel={`价格规则 ${i + 1} 操作限定`}
+        />
+      </td>
+      <td>
+        <CellSelect
+          name={`price_${i}_unit`}
+          value={row.unit}
+          onChange={value => onFieldChange(i, { unit: value })}
+          options={PRICE_UNITS}
+          ariaLabel={`价格规则 ${i + 1} 计价类型`}
+        />
+      </td>
+      <td>
+        <Input
+          name={`price_${i}_label`}
+          value={row.label}
+          onChange={e => onFieldChange(i, { label: e.target.value })}
+          maxLength={100}
+          placeholder="如 东湾海柜一圈"
+          aria-label={`价格规则 ${i + 1} 规则名`}
+          className={`${cellInput} w-40`}
+        />
+      </td>
+      <td>
+        <Input
+          type="number"
+          name={`price_${i}_driver_amount`}
+          min={0}
+          step={0.01}
+          value={row.driver_amount}
+          onChange={e => onFieldChange(i, { driver_amount: e.target.value })}
+          aria-label={`价格规则 ${i + 1} 司机价`}
+          className={`${cellInput} w-24 text-right font-mono`}
+        />
+      </td>
+      <td>
+        <Input
+          type="number"
+          name={`price_${i}_owner_amount`}
+          min={0}
+          step={0.01}
+          value={row.owner_amount}
+          onChange={e => onFieldChange(i, { owner_amount: e.target.value })}
+          placeholder="×乘数"
+          aria-label={`价格规则 ${i + 1} 车主价`}
+          className={`${cellInput} w-24 text-right font-mono`}
+        />
+      </td>
+      <td className="actions">
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-7 px-2 text-xs text-destructive"
+          onClick={() => onRemove(i)}
+          aria-label={`删除价格规则 ${i + 1}`}
+        >
+          <XIcon className="size-3.5" />
+        </Button>
+      </td>
+    </tr>
+  );
+});
+
+/** One mileage-tier row, memoized alongside the price rows (a tier keystroke
+ *  must not reconcile the price table, and vice versa) */
+const TierRow = React.memo(function TierRow({
+  index,
+  row,
+  onFieldChange,
+  onRemove
+}: {
+  index: number;
+  row: TierSlot;
+  onFieldChange: (index: number, patch: Partial<TierSlot>) => void;
+  onRemove: (index: number) => void;
+}) {
+  const i = index;
+  return (
+    <tr>
+      <td>
+        <Input
+          type="number"
+          name={`tier_${i}_miles_from`}
+          min={1}
+          value={row.miles_from}
+          onChange={e => onFieldChange(i, { miles_from: e.target.value })}
+          aria-label={`第 ${i + 1} 档起算里程`}
+          className={`${cellInput} w-24 font-mono`}
+        />
+      </td>
+      <td>
+        <Input
+          type="number"
+          name={`tier_${i}_amount`}
+          min={0}
+          step={0.01}
+          value={row.amount}
+          onChange={e => onFieldChange(i, { amount: e.target.value })}
+          aria-label={`第 ${i + 1} 档司机价`}
+          className={`${cellInput} w-28 text-right font-mono`}
+        />
+      </td>
+      <td className="actions">
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-7 px-2 text-xs text-destructive"
+          onClick={() => onRemove(i)}
+          aria-label={`删除第 ${i + 1} 档`}
+        >
+          <XIcon className="size-3.5" />
+        </Button>
+      </td>
+    </tr>
+  );
+});
+
+/**
  * Whole-ruleset editor for one wage-rule version: the price-rule table is the
  * ONLY pricing primitive (适用司机 x 起点/终点位置 x 操作 x 计价单位 x 两档价),
  * with the mileage tiers as the no-match fallback. Positional FormData, same
@@ -93,7 +301,7 @@ export function RulesEditor({
   operations: OperationOption[];
   locations: LocationOption[];
 }) {
-  const [tiers, setTiers] = React.useState<TierRow[]>(
+  const [tiers, setTiers] = React.useState<TierSlot[]>(
     version.tiers.map(t => ({
       miles_from: String(t.miles_from),
       amount: Number(t.amount).toFixed(2)
@@ -156,9 +364,31 @@ export function RulesEditor({
     },
     [locations]
   );
+  const operationCellOptions = React.useMemo(
+    () => operations.map(op => ({ value: op.code, label: op.code })),
+    [operations]
+  );
 
-  const updatePrice = (i: number, patch: Partial<PriceRow>) =>
-    setPrices(current => current.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  // Stable row callbacks: the memoized rows take (index, patch) so one edit
+  // re-renders only the edited row
+  const updatePrice = React.useCallback(
+    (i: number, patch: Partial<PriceRow>) =>
+      setPrices(current => current.map((r, j) => (j === i ? { ...r, ...patch } : r))),
+    []
+  );
+  const removePrice = React.useCallback(
+    (i: number) => setPrices(current => current.filter((_, j) => j !== i)),
+    []
+  );
+  const updateTier = React.useCallback(
+    (i: number, patch: Partial<TierSlot>) =>
+      setTiers(current => current.map((t, j) => (j === i ? { ...t, ...patch } : t))),
+    []
+  );
+  const removeTier = React.useCallback(
+    (i: number) => setTiers(current => current.filter((_, j) => j !== i)),
+    []
+  );
 
   const overage = Number(version.overage_increment);
   // New band = the next multiple of 50 above the last one (1 -> 50 -> 100 ...)
@@ -278,133 +508,18 @@ export function RulesEditor({
               {/* All rows stay in the DOM (filtered ones hidden) so positional
                   names never shift while the lens is active */}
               {prices.map((price, i) => (
-                <tr
+                <PriceRuleRow
                   key={i}
-                  className={
-                    driverFilter && price.driver_id !== driverFilter && price.driver_id !== ""
-                      ? "hidden"
-                      : undefined
-                  }
-                >
-                  <td>
-                    <ComboboxField
-                      name={`price_${i}_driver_id`}
-                      value={price.driver_id}
-                      placeholder="所有人"
-                      searchPlaceholder="搜索姓名"
-                      clearable
-                      triggerClassName="h-8 w-32 text-[13px]"
-                      onValueChange={value => updatePrice(i, { driver_id: value })}
-                      aria-label={`价格规则 ${i + 1} 适用司机`}
-                      options={driverPickOptions}
-                    />
-                  </td>
-                  <td>
-                    <ComboboxField
-                      name={`price_${i}_from`}
-                      value={price.from}
-                      placeholder="任意"
-                      searchPlaceholder="标签或位置代码"
-                      clearable
-                      triggerClassName="h-8 w-28 text-[13px]"
-                      onValueChange={value => updatePrice(i, { from: value })}
-                      aria-label={`价格规则 ${i + 1} 起点`}
-                      labelForValue={sideLabelFor}
-                      options={sideOptions}
-                      customOption={text => ({
-                        value: `tag:${text.slice(0, 40)}`,
-                        label: `新建类标签 #${text.slice(0, 40)}`,
-                        description: "在位置管理里给位置打这个标签后生效"
-                      })}
-                    />
-                  </td>
-                  <td>
-                    <ComboboxField
-                      name={`price_${i}_to`}
-                      value={price.to}
-                      placeholder="任意"
-                      searchPlaceholder="标签或位置代码"
-                      clearable
-                      triggerClassName="h-8 w-28 text-[13px]"
-                      onValueChange={value => updatePrice(i, { to: value })}
-                      aria-label={`价格规则 ${i + 1} 终点`}
-                      labelForValue={sideLabelFor}
-                      options={sideOptions}
-                      customOption={text => ({
-                        value: `tag:${text.slice(0, 40)}`,
-                        label: `新建类标签 #${text.slice(0, 40)}`,
-                        description: "在位置管理里给位置打这个标签后生效"
-                      })}
-                    />
-                  </td>
-                  <td>
-                    <CellSelect
-                      name={`price_${i}_operation`}
-                      value={price.operation}
-                      onChange={value => updatePrice(i, { operation: value })}
-                      options={operations.map(op => ({ value: op.code, label: op.code }))}
-                      clearable
-                      placeholder="不限"
-                      ariaLabel={`价格规则 ${i + 1} 操作限定`}
-                    />
-                  </td>
-                  <td>
-                    <CellSelect
-                      name={`price_${i}_unit`}
-                      value={price.unit}
-                      onChange={value => updatePrice(i, { unit: value })}
-                      options={PRICE_UNITS}
-                      ariaLabel={`价格规则 ${i + 1} 计价类型`}
-                    />
-                  </td>
-                  <td>
-                    <Input
-                      name={`price_${i}_label`}
-                      value={price.label}
-                      onChange={e => updatePrice(i, { label: e.target.value })}
-                      maxLength={100}
-                      placeholder="如 东湾海柜一圈"
-                      aria-label={`价格规则 ${i + 1} 规则名`}
-                      className={`${cellInput} w-40`}
-                    />
-                  </td>
-                  <td>
-                    <Input
-                      type="number"
-                      name={`price_${i}_driver_amount`}
-                      min={0}
-                      step={0.01}
-                      value={price.driver_amount}
-                      onChange={e => updatePrice(i, { driver_amount: e.target.value })}
-                      aria-label={`价格规则 ${i + 1} 司机价`}
-                      className={`${cellInput} w-24 text-right font-mono`}
-                    />
-                  </td>
-                  <td>
-                    <Input
-                      type="number"
-                      name={`price_${i}_owner_amount`}
-                      min={0}
-                      step={0.01}
-                      value={price.owner_amount}
-                      onChange={e => updatePrice(i, { owner_amount: e.target.value })}
-                      placeholder="×乘数"
-                      aria-label={`价格规则 ${i + 1} 车主价`}
-                      className={`${cellInput} w-24 text-right font-mono`}
-                    />
-                  </td>
-                  <td className="actions">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="h-7 px-2 text-xs text-destructive"
-                      onClick={() => setPrices(current => current.filter((_, j) => j !== i))}
-                      aria-label={`删除价格规则 ${i + 1}`}
-                    >
-                      <XIcon className="size-3.5" />
-                    </Button>
-                  </td>
-                </tr>
+                  index={i}
+                  row={price}
+                  hidden={Boolean(driverFilter && price.driver_id !== driverFilter && price.driver_id !== "")}
+                  driverPickOptions={driverPickOptions}
+                  sideOptions={sideOptions}
+                  operationOptions={operationCellOptions}
+                  sideLabelFor={sideLabelFor}
+                  onFieldChange={updatePrice}
+                  onRemove={removePrice}
+                />
               ))}
               {prices.length === 0 && (
                 <tr>
@@ -437,50 +552,13 @@ export function RulesEditor({
             </thead>
             <tbody>
               {tiers.map((tier, i) => (
-                <tr key={i}>
-                  <td>
-                    <Input
-                      type="number"
-                      name={`tier_${i}_miles_from`}
-                      min={1}
-                      value={tier.miles_from}
-                      onChange={e =>
-                        setTiers(current =>
-                          current.map((t, j) => (j === i ? { ...t, miles_from: e.target.value } : t))
-                        )
-                      }
-                      aria-label={`第 ${i + 1} 档起算里程`}
-                      className={`${cellInput} w-24 font-mono`}
-                    />
-                  </td>
-                  <td>
-                    <Input
-                      type="number"
-                      name={`tier_${i}_amount`}
-                      min={0}
-                      step={0.01}
-                      value={tier.amount}
-                      onChange={e =>
-                        setTiers(current =>
-                          current.map((t, j) => (j === i ? { ...t, amount: e.target.value } : t))
-                        )
-                      }
-                      aria-label={`第 ${i + 1} 档司机价`}
-                      className={`${cellInput} w-28 text-right font-mono`}
-                    />
-                  </td>
-                  <td className="actions">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="h-7 px-2 text-xs text-destructive"
-                      onClick={() => setTiers(current => current.filter((_, j) => j !== i))}
-                      aria-label={`删除第 ${i + 1} 档`}
-                    >
-                      <XIcon className="size-3.5" />
-                    </Button>
-                  </td>
-                </tr>
+                <TierRow
+                  key={i}
+                  index={i}
+                  row={tier}
+                  onFieldChange={updateTier}
+                  onRemove={removeTier}
+                />
               ))}
             </tbody>
           </table>

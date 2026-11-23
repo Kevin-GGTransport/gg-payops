@@ -59,6 +59,116 @@ function toSlots(rows: FuelEditRow[] | undefined, defaultTruckCode: string): Fue
 }
 
 /**
+ * One fuel row, memoized: any keystroke used to re-render every row's picker.
+ * Props are stable identities except the edited row's own value slice, so a
+ * keystroke reconciles only that row.
+ */
+const FuelEditorRow = React.memo(function FuelEditorRow({
+  index,
+  rowId,
+  value,
+  dup,
+  mark,
+  removable,
+  stateOptions,
+  onPatch,
+  onRemove
+}: {
+  index: number;
+  rowId: number;
+  value: FuelEditRow;
+  /** Row number of the first row sharing this state (dup hint), if any */
+  dup: number | undefined;
+  /** Post-verify snapshot diff, drives the red tint + tag */
+  mark: "added" | "changed" | null;
+  removable: boolean;
+  stateOptions: ReadonlyArray<{ value: string; label: string; description?: string }>;
+  onPatch: (rowId: number, part: Partial<FuelEditRow>) => void;
+  onRemove: (rowId: number) => void;
+}) {
+  const label = `加油第 ${index + 1} 行`;
+  return (
+    <tr className={mark ? "bg-red-50/40" : undefined}>
+      <td className="ctr px-1.5 font-mono text-[12px] tabular-nums text-foreground">
+        {index + 1}
+        {mark && (
+          <span className="block text-[9px] leading-tight text-red-700">
+            {mark === "added" ? "核对后新增" : "核对后已改"}
+          </span>
+        )}
+      </td>
+      <td className="px-1.5">
+        <input type="hidden" name={`f_fuel_row_${index}_truck_code`} value={value.truckCode} />
+        <ComboboxField
+          name={`f_fuel_row_${index}_state_code`}
+          value={value.state}
+          placeholder="州"
+          searchPlaceholder="搜索缩写 / 州名"
+          mono
+          triggerLabelOnly
+          triggerClassName={`h-8 w-full px-2 ${cellPick}`}
+          aria-label={`${label}州`}
+          onValueChange={next => onPatch(rowId, { state: next })}
+          options={stateOptions}
+        />
+        {dup !== undefined && (
+          <span className="block text-[10px] leading-tight font-normal text-amber-600">
+            与第 {dup + 1} 行重复，保存时合并
+          </span>
+        )}
+      </td>
+      <td className="px-1.5">
+        <Input
+          type="number" name={`f_fuel_row_${index}_gallons`} min={0} step={0.001}
+          value={value.gallons}
+          onChange={e => onPatch(rowId, { gallons: e.target.value })}
+          placeholder="—" aria-label={`${label}加仑`}
+          className={`${cellInput} font-mono`}
+        />
+      </td>
+      <td className="px-1.5">
+        <Input
+          type="number" name={`f_fuel_row_${index}_miles`} min={0} step={0.1}
+          value={value.miles}
+          onChange={e => onPatch(rowId, { miles: e.target.value })}
+          placeholder="—" aria-label={`${label}里程`}
+          className={`${cellInput} font-mono`}
+        />
+      </td>
+      <td className="px-1.5">
+        <Input
+          type="number" name={`f_fuel_row_${index}_amount`} min={0} step={0.01}
+          value={value.amount}
+          onChange={e => onPatch(rowId, { amount: e.target.value })}
+          placeholder="—" aria-label={`${label}金额`}
+          className={`${cellInput} font-mono`}
+        />
+      </td>
+      <td className="px-1.5">
+        <Input
+          name={`f_fuel_row_${index}_note`} maxLength={200}
+          value={value.note}
+          onChange={e => onPatch(rowId, { note: e.target.value })}
+          placeholder="选填" aria-label={`${label}备注`}
+          className={cellInput}
+        />
+      </td>
+      <td className="actions px-1.5">
+        {removable && (
+          <button
+            type="button"
+            className="linklike danger"
+            onClick={() => onRemove(rowId)}
+          >
+            删除
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+});
+
+/**
  * Fuel-by-state editor on the statement detail sheet - the same grid family
  * as the legs sheet above it (shared TanStack shell + cell sizing). Values
  * live in this component's state (no draft: a failed save refills through
@@ -111,6 +221,12 @@ export function FuelEditor({
     setSlots(current => [...current, { id, value: { ...EMPTY_ROW, truckCode: defaultTruckCode } }]);
   }
 
+  // Stable options identity for the memoized state picker rows
+  const stateOptions = React.useMemo(
+    () => states.map(s => ({ value: s.code, label: s.code, description: s.name })),
+    [states]
+  );
+
   // Dup hints and totals derive off the slots in this render (single frame);
   // post-verify change marks come in as plain lookups (render-derived)
   const changedStates = new Set(markings?.changed ?? []);
@@ -143,94 +259,26 @@ export function FuelEditor({
       <input type="hidden" name="f_fuel_row_count" value={slots.length} />
       <RosterTable table={fuelTable}>
         <tbody className="tb-group">
-          {slots.map((slot, i) => {
-            const dup = dupOf.get(slot.id);
-            const label = `加油第 ${i + 1} 行`;
-            const rowAdded = addedStates.has(slot.value.state);
-            const rowChanged = changedStates.has(slot.value.state);
-            return (
-              <tr
-                key={slot.id}
-                className={rowAdded || rowChanged ? "bg-red-50/40" : undefined}
-              >
-                <td className="ctr px-1.5 font-mono text-[12px] tabular-nums text-foreground">
-                  {i + 1}
-                  {(rowAdded || rowChanged) && (
-                    <span className="block text-[9px] leading-tight text-red-700">
-                      {rowAdded ? "核对后新增" : "核对后已改"}
-                    </span>
-                  )}
-                </td>
-                <td className="px-1.5">
-                  <input type="hidden" name={`f_fuel_row_${i}_truck_code`} value={slot.value.truckCode} />
-                  <ComboboxField
-                    name={`f_fuel_row_${i}_state_code`}
-                    value={slot.value.state}
-                    placeholder="州"
-                    searchPlaceholder="搜索缩写 / 州名"
-                    mono
-                    triggerLabelOnly
-                    triggerClassName={`h-8 w-full px-2 ${cellPick}`}
-                    aria-label={`${label}州`}
-                    onValueChange={next => patch(slot.id, { state: next })}
-                    options={states.map(s => ({ value: s.code, label: s.code, description: s.name }))}
-                  />
-                  {dup !== undefined && (
-                    <span className="block text-[10px] leading-tight font-normal text-amber-600">
-                      与第 {dup + 1} 行重复，保存时合并
-                    </span>
-                  )}
-                </td>
-                <td className="px-1.5">
-                  <Input
-                    type="number" name={`f_fuel_row_${i}_gallons`} min={0} step={0.001}
-                    value={slot.value.gallons}
-                    onChange={e => patch(slot.id, { gallons: e.target.value })}
-                    placeholder="—" aria-label={`${label}加仑`}
-                    className={`${cellInput} font-mono`}
-                  />
-                </td>
-                <td className="px-1.5">
-                  <Input
-                    type="number" name={`f_fuel_row_${i}_miles`} min={0} step={0.1}
-                    value={slot.value.miles}
-                    onChange={e => patch(slot.id, { miles: e.target.value })}
-                    placeholder="—" aria-label={`${label}里程`}
-                    className={`${cellInput} font-mono`}
-                  />
-                </td>
-                <td className="px-1.5">
-                  <Input
-                    type="number" name={`f_fuel_row_${i}_amount`} min={0} step={0.01}
-                    value={slot.value.amount}
-                    onChange={e => patch(slot.id, { amount: e.target.value })}
-                    placeholder="—" aria-label={`${label}金额`}
-                    className={`${cellInput} font-mono`}
-                  />
-                </td>
-                <td className="px-1.5">
-                  <Input
-                    name={`f_fuel_row_${i}_note`} maxLength={200}
-                    value={slot.value.note}
-                    onChange={e => patch(slot.id, { note: e.target.value })}
-                    placeholder="选填" aria-label={`${label}备注`}
-                    className={cellInput}
-                  />
-                </td>
-                <td className="actions px-1.5">
-                  {slots.length > 1 && (
-                    <button
-                      type="button"
-                      className="linklike danger"
-                      onClick={() => removeRow(slot.id)}
-                    >
-                      删除
-                    </button>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
+          {slots.map((slot, i) => (
+            <FuelEditorRow
+              key={slot.id}
+              index={i}
+              rowId={slot.id}
+              value={slot.value}
+              dup={dupOf.get(slot.id)}
+              mark={
+                addedStates.has(slot.value.state)
+                  ? "added"
+                  : changedStates.has(slot.value.state)
+                    ? "changed"
+                    : null
+              }
+              removable={slots.length > 1}
+              stateOptions={stateOptions}
+              onPatch={patch}
+              onRemove={removeRow}
+            />
+          ))}
           {content.length > 0 && (
             <tr className="font-medium">
               <td className="px-1.5 py-2" colSpan={2}>

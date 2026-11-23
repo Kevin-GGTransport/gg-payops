@@ -81,7 +81,7 @@ function toGroups(options: ReadonlyArray<ComboboxOption>) {
  * Generic single-select combobox (shadcn pattern: Popover + Command).
  * Searchable, groupable, clearable; the value submits via a hidden input.
  */
-export function ComboboxField({
+function ComboboxFieldBase({
   label,
   name,
   options,
@@ -279,3 +279,7 @@ export function ComboboxField({
     </div>
   );
 }
+
+// memo: row hosts re-render on every keystroke of a sibling cell; with stable
+// options/callbacks the Popover+Command subtree skips those re-renders entirely
+export const ComboboxField = React.memo(ComboboxFieldBase);

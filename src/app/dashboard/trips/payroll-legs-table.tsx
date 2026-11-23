@@ -148,6 +148,12 @@ const EditableLegRow = React.memo(function EditableLegRow({
 }) {
   const prefix = `leg_${leg.id}_`;
   const legLabel = `${leg.trip_date} 的第 ${leg.load_no || "—"} 程`;
+  // Stable options identity for the memoized ComboboxField (own keystrokes
+  // re-render this row; a fresh array would pierce the memo)
+  const operationOptions = React.useMemo(
+    () => operations.map(op => ({ value: op.code, label: op.code })),
+    [operations]
+  );
   // Snapshot-diff marks: red class swaps per field (see cellInputRed note)
   const changed = new Set(changedFields ?? []);
   const redIf = (field: string, red: string, plain: string) =>
@@ -345,7 +351,7 @@ const EditableLegRow = React.memo(function EditableLegRow({
             onDirty(leg.id);
           }}
           // Code-only labels keep the trigger narrow in the table row
-          options={operations.map(op => ({ value: op.code, label: op.code }))}
+          options={operationOptions}
         />
       </td>
       <td className="px-1.5">
@@ -534,6 +540,11 @@ const NewLegRow = React.memo(function NewLegRow({
 }) {
   const prefix = `leg_new_${rowIndex}_`;
   const legLabel = `新行程第 ${rowIndex + 1} 行`;
+  // Stable options identity for the memoized ComboboxField
+  const operationOptions = React.useMemo(
+    () => operations.map(op => ({ value: op.code, label: op.code })),
+    [operations]
+  );
 
   const [dateValue, setDateValue] = React.useState(ctx.defaultDate);
   const [operation, setOperation] = React.useState(operations[0]?.code ?? "");
@@ -675,7 +686,7 @@ const NewLegRow = React.memo(function NewLegRow({
             if (!operationRequiresLoad(value)) setLoadNoValue("");
             onTouched(slotId);
           }}
-          options={operations.map(op => ({ value: op.code, label: op.code }))}
+          options={operationOptions}
         />
       </td>
       <td className="px-1.5">
@@ -901,35 +912,33 @@ export function PayrollLegsTable({
     setNewSlots(prev => [...prev, id]);
   }
 
-  const valuesOf = (id: string): LegValues =>
-    live[id] ?? { miles: 0, fuel: 0, pay: 0, subsidy: 0 };
-
-  // Day subtotals live off the current inputs (what you see is what saves)
-  const dayTotals = (day: DayGroup) =>
-    day.legs.reduce(
-      (acc, l) => {
-        const v = valuesOf(l.id);
-        return {
-          miles: acc.miles + v.miles,
-          fuel: acc.fuel + v.fuel,
-          pay: acc.pay + v.pay,
-          subsidy: acc.subsidy + (l.driver_type === "OWNER" ? v.subsidy : 0)
-        };
-      },
-      { miles: 0, fuel: 0, pay: 0, subsidy: 0 }
-    );
-  const week = days.reduce(
-    (acc, d) => {
-      const t = dayTotals(d);
-      return {
-        miles: acc.miles + t.miles,
-        fuel: acc.fuel + t.fuel,
-        pay: acc.pay + t.pay,
-        subsidy: acc.subsidy + t.subsidy
-      };
-    },
-    { miles: 0, fuel: 0, pay: 0, subsidy: 0 }
-  );
+  // Day subtotals live off the current inputs (what you see is what saves).
+  // One memoized pass feeding both the per-day rows and the week total: the
+  // old dayTotals()/week chain rescanned every leg twice per keystroke and on
+  // every unrelated state flip (dirty marks, appended rows) alike.
+  const { totalsByDay, week } = React.useMemo(() => {
+    const totalsByDay = new Map<
+      string,
+      { miles: number; fuel: number; pay: number; subsidy: number }
+    >();
+    const weekAcc = { miles: 0, fuel: 0, pay: 0, subsidy: 0 };
+    for (const day of days) {
+      const acc = { miles: 0, fuel: 0, pay: 0, subsidy: 0 };
+      for (const l of day.legs) {
+        const v = live[l.id] ?? { miles: 0, fuel: 0, pay: 0, subsidy: 0 };
+        acc.miles += v.miles;
+        acc.fuel += v.fuel;
+        acc.pay += v.pay;
+        if (l.driver_type === "OWNER") acc.subsidy += v.subsidy;
+      }
+      totalsByDay.set(day.date, acc);
+      weekAcc.miles += acc.miles;
+      weekAcc.fuel += acc.fuel;
+      weekAcc.pay += acc.pay;
+      weekAcc.subsidy += acc.subsidy;
+    }
+    return { totalsByDay, week: weekAcc };
+  }, [days, live]);
 
   const table = useRosterTable({ data: NO_ROWS, columns: SHEET_COLUMNS, storageKey });
   const dirtyCount = dirty.size;
@@ -973,7 +982,8 @@ export function PayrollLegsTable({
               />
             )),
             (() => {
-              const t = dayTotals(day);
+              // Every rendered day came through the totals pass above
+              const t = totalsByDay.get(day.date) ?? { miles: 0, fuel: 0, pay: 0, subsidy: 0 };
               return (
                 <tr key={`sub-${day.date}`} className="matrix-sub">
                   <td colSpan={5}>

@@ -87,7 +87,7 @@ type DateFieldProps = {
  * popover. Accepts "2026-11-14" and short "11/14" forms on the keyboard;
  * ArrowDown opens the calendar. Submits ISO via a hidden input.
  */
-export function DateField({
+function DateFieldBase({
   label,
   name,
   defaultValue = "",
@@ -207,3 +207,6 @@ export function DateField({
     </div>
   );
 }
+
+// memo: dense table rows re-render per keystroke; stable props skip the calendar subtree
+export const DateField = React.memo(DateFieldBase);
