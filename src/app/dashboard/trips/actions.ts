@@ -6,11 +6,11 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, assertDriverScope, getLinkedDriverId } from "@/lib/permissions";
 import { calcFuelSubsidy } from "@/lib/wage";
-import { resolveEndpointId } from "@/lib/locations";
-import { syncStatements, type StatementRef } from "@/lib/statements";
+import { resolveEndpointId, resolveEndpointIds } from "@/lib/locations";
+import { syncStatements, syncStatementsInTx, type StatementRef } from "@/lib/statements";
 import { periodOf } from "@/lib/period";
 import { todayIso } from "@/lib/format";
-import { getTripById, type TripEditRow } from "@/lib/queries/trips";
+import { getTripById, getTripsByIds, type TripEditRow } from "@/lib/queries/trips";
 import { isIsoDate, str } from "@/lib/action-helpers";
 
 /** Bad or negative numbers fall back to 0 - same lenient semantics as entry */
@@ -68,7 +68,12 @@ async function applyTripUpdate(
   /** Field-name prefix: "" for the dialog, `leg_<id>_` for inline ledger rows */
   prefix: string,
   validOperations: Set<string>,
-  fuelSubsidyRate: number
+  fuelSubsidyRate: number,
+  /** Batch callers pass a shared transaction + pre-resolved endpoints */
+  options?: {
+    tx?: Prisma.TransactionClient;
+    endpointIds?: Map<string, string>;
+  }
 ): Promise<StatementRef[]> {
   const rawOperation = str(formData, `${prefix}operation`);
 
@@ -80,10 +85,11 @@ async function applyTripUpdate(
     return value.startsWith("loc:") || value.startsWith("txt:") ? value : `txt:${value}`;
   };
 
-  const [fromId, toId] = await Promise.all([
-    resolveEndpointId(endpoint("from_location")),
-    resolveEndpointId(endpoint("to_location"))
-  ]);
+  const fromToken = endpoint("from_location");
+  const toToken = endpoint("to_location");
+  const [fromId, toId] = options?.endpointIds
+    ? [options.endpointIds.get(fromToken) ?? "", options.endpointIds.get(toToken) ?? ""]
+    : await Promise.all([resolveEndpointId(fromToken), resolveEndpointId(toToken)]);
 
   // Owner fuel subsidy re-snapshots on every edit (miles x the ACTIVE rate;
   // plain drivers stay 0 - driver type itself never changes on an edit).
@@ -93,7 +99,7 @@ async function applyTripUpdate(
     ? str(formData, `${prefix}trip_date`)
     : current.trip_date;
 
-  await prisma.$executeRaw`
+  await (options?.tx ?? prisma).$executeRaw`
     UPDATE pay.trips SET
       trip_date = ${newDate}::date,
       operation = ${validOperations.has(rawOperation) ? rawOperation : current.operation},
@@ -293,148 +299,183 @@ export async function saveStatementSheet(formData: FormData) {
 
   const { validOperations, fallbackOperation, fuelSubsidyRate } = await pricingContext();
 
-  // ---- Legs: updates then inserts, collecting the (driver, period) refs
-  const refs: StatementRef[] = [];
-  for (const id of ids) {
-    const current = await getTripById(id);
-    if (!current) continue;
-    refs.push(...await applyTripUpdate(id, current, formData, `leg_${id}_`, validOperations, fuelSubsidyRate));
-  }
+  // ---- Legs: one batch read for the dirty rows + one parallel endpoint
+  // resolve for the whole sheet (each dirty row used to cost a point read,
+  // each row a pair of sequential resolutions); every write below - leg
+  // updates, the appended-rows INSERT, fuel, fees and the statement sync -
+  // shares ONE transaction, so a mid-sheet failure rolls back the whole save.
+  const endpointToken = (key: string) => {
+    const value = str(formData, key);
+    if (!value) return "";
+    return value.startsWith("loc:") || value.startsWith("txt:") ? value : `txt:${value}`;
+  };
+  const endpointIds = await resolveEndpointIds([
+    ...ids.flatMap(id => [
+      endpointToken(`leg_${id}_from_location`),
+      endpointToken(`leg_${id}_to_location`)
+    ]),
+    ...newRows.flatMap(({ p }) => [
+      endpointToken(`${p}from_location`),
+      endpointToken(`${p}to_location`)
+    ])
+  ]);
+  const currentById = new Map((await getTripsByIds(ids)).map(row => [row.id, row]));
 
-  if (newRows.length > 0) {
-    // One driver lookup feeds every appended row: the name snapshot and the
-    // subsidy's driver type
-    const driverRows = await prisma.$queryRaw<
-      Array<{ full_name: string; driver_type: string }>
-    >`
-      SELECT full_name, driver_type::text AS driver_type
-      FROM ops.drivers
-      WHERE id = ${driverId}::bigint
-      LIMIT 1
-    `;
-    const driver = driverRows[0];
-    if (driver) {
-      const today = todayIso();
-      for (const { p } of newRows) {
-        // Bare endpoint text goes through the txt: protocol like every edit
-        const endpoint = (key: string) => {
-          const value = str(formData, `${p}${key}`);
-          if (!value) return "";
-          return value.startsWith("loc:") || value.startsWith("txt:") ? value : `txt:${value}`;
-        };
-        const [fromId, toId] = await Promise.all([
-          resolveEndpointId(endpoint("from_location")),
-          resolveEndpointId(endpoint("to_location"))
-        ]);
-        const rawDate = str(formData, `${p}trip_date`);
-        const tripDate = isIsoDate(rawDate) ? rawDate : today;
-        const rawOperation = str(formData, `${p}operation`);
-        const milesNum = Math.round(num0(str(formData, `${p}miles`)));
-        await prisma.$executeRaw`
+  // One driver lookup feeds every appended row: the name snapshot and the
+  // subsidy's driver type
+  const driverRows = newRows.length > 0
+    ? await prisma.$queryRaw<Array<{ full_name: string; driver_type: string }>>`
+        SELECT full_name, driver_type::text AS driver_type
+        FROM ops.drivers
+        WHERE id = ${driverId}::bigint
+        LIMIT 1
+      `
+    : [];
+  const driver = driverRows[0];
+  const today = todayIso();
+
+  // Appended rows as one INSERT's VALUES list (entry's lenient semantics)
+  const newLegs =
+    driver
+      ? newRows.map(({ p }) => {
+          const rawDate = str(formData, `${p}trip_date`);
+          const tripDate = isIsoDate(rawDate) ? rawDate : today;
+          const rawOperation = str(formData, `${p}operation`);
+          const milesNum = Math.round(num0(str(formData, `${p}miles`)));
+          return {
+            tripDate,
+            sql: Prisma.sql`
+              (${driverId}::bigint, ${tripDate}::date,
+               ${validOperations.has(rawOperation) ? rawOperation : fallbackOperation},
+               ${str(formData, `${p}load_no`)},
+               ${endpointIds.get(endpointToken(`${p}from_location`)) || null}::bigint,
+               ${endpointIds.get(endpointToken(`${p}to_location`)) || null}::bigint,
+               ${milesNum},
+               ${Math.round(num0(str(formData, `${p}fuel_gallons`)) * 100) / 100},
+               ${Math.round(num0(str(formData, `${p}pay_amount`)) * 100) / 100},
+               ${calcFuelSubsidy({ driverType: driver.driver_type === "OWNER" ? "OWNER" : "DRIVER", miles: milesNum, rate: fuelSubsidyRate })},
+               ${str(formData, `${p}notes`) || null},
+               ${driver.full_name})
+            `
+          };
+        })
+      : [];
+
+  const refs: StatementRef[] = [];
+  await prisma.$transaction(
+    async tx => {
+      for (const id of ids) {
+        const current = currentById.get(id);
+        if (!current) continue;
+        refs.push(
+          ...(await applyTripUpdate(id, current, formData, `leg_${id}_`, validOperations, fuelSubsidyRate, {
+            tx,
+            endpointIds
+          }))
+        );
+      }
+
+      if (newLegs.length > 0) {
+        await tx.$executeRaw`
           INSERT INTO pay.trips
             (driver_id, trip_date, operation, load_no, from_location_id, to_location_id,
              miles, fuel_gallons, pay_amount, fuel_subsidy, notes, driver_name)
-          VALUES (${driverId}::bigint, ${tripDate}::date,
-                  ${validOperations.has(rawOperation) ? rawOperation : fallbackOperation},
-                  ${str(formData, `${p}load_no`)},
-                  ${fromId || null}::bigint, ${toId || null}::bigint,
-                  ${milesNum},
-                  ${Math.round(num0(str(formData, `${p}fuel_gallons`)) * 100) / 100},
-                  ${Math.round(num0(str(formData, `${p}pay_amount`)) * 100) / 100},
-                  ${calcFuelSubsidy({ driverType: driver.driver_type === "OWNER" ? "OWNER" : "DRIVER", miles: milesNum, rate: fuelSubsidyRate })},
-                  ${str(formData, `${p}notes`) || null},
-                  ${driver.full_name})
+          VALUES ${Prisma.join(newLegs.map(leg => leg.sql))}
         `;
-        refs.push({ driverId, periodStart: periodOf(tripDate).start });
-      }
-    }
-  }
-
-  // ---- Fuel: merge same states (sums per column, first note wins), then
-  // the standard two arms - DRAFT upserts, VERIFIED/DONE take fuel + flag.
-  // Rows emptied to zero still write (an existing statement may hold the
-  // set being cleared)
-  if (hasSectionContent || statementExists) {
-    if (fuelRows.length > 0 || statementExists) {
-      const merged = new Map<string, FuelRow>();
-      for (const row of fuelRows) {
-        const dup = merged.get(row.stateCode);
-        if (dup) {
-          dup.gallons += row.gallons;
-          dup.miles += row.miles;
-          dup.amount += row.amount;
-          if (!dup.note) dup.note = row.note;
-        } else {
-          merged.set(row.stateCode, { ...row });
+        for (const leg of newLegs) {
+          refs.push({ driverId, periodStart: periodOf(leg.tripDate).start });
         }
       }
-      const payload = JSON.stringify(
-        [...merged.values()].map(r => ({
-          truckCode: r.truckCode,
-          stateCode: r.stateCode,
-          gallons: Math.round(r.gallons * 1000) / 1000,
+
+      // ---- Fuel: merge same states (sums per column, first note wins), then
+      // the standard two arms - DRAFT upserts, VERIFIED/DONE take fuel + flag.
+      // Rows emptied to zero still write (an existing statement may hold the
+      // set being cleared)
+      if (hasSectionContent || statementExists) {
+        if (fuelRows.length > 0 || statementExists) {
+          const merged = new Map<string, FuelRow>();
+          for (const row of fuelRows) {
+            const dup = merged.get(row.stateCode);
+            if (dup) {
+              dup.gallons += row.gallons;
+              dup.miles += row.miles;
+              dup.amount += row.amount;
+              if (!dup.note) dup.note = row.note;
+            } else {
+              merged.set(row.stateCode, { ...row });
+            }
+          }
+          const payload = JSON.stringify(
+            [...merged.values()].map(r => ({
+              truckCode: r.truckCode,
+              stateCode: r.stateCode,
+              gallons: Math.round(r.gallons * 1000) / 1000,
+              miles: Math.round(r.miles * 10) / 10,
+              amount: Math.round(r.amount * 100) / 100,
+              ...(r.note ? { note: r.note } : {})
+            }))
+          );
+          await tx.$executeRaw`
+            INSERT INTO pay.payroll_statements
+              (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay, fuel_detail)
+            VALUES (${driverId}::bigint, ${period.start}::date, ${period.end}::date,
+                    0, 0, 0, 0, 0, ${payload}::jsonb)
+            ON CONFLICT (driver_id, period_start) DO UPDATE SET
+              fuel_detail = EXCLUDED.fuel_detail, updated_at = now()
+            WHERE pay.payroll_statements.status IN ('DRAFT', 'VERIFIED')
+          `;
+          await tx.$executeRaw`
+            UPDATE pay.payroll_statements
+            SET fuel_detail = ${payload}::jsonb, edited_after_verify = true, updated_at = now()
+            WHERE driver_id = ${driverId}::bigint AND period_start = ${period.start}::date
+              AND status = 'DONE'
+          `;
+        }
+      }
+
+      // ---- Fees: replace semantics (no merge), sum written in lockstep
+      const feePayload = JSON.stringify(
+        feeRows.map(r => ({
+          label: r.label,
           miles: Math.round(r.miles * 10) / 10,
           amount: Math.round(r.amount * 100) / 100,
           ...(r.note ? { note: r.note } : {})
         }))
       );
-      await prisma.$executeRaw`
+      const feeTotal = Math.round(feeRows.reduce((acc, r) => acc + r.amount, 0) * 100) / 100;
+      await tx.$executeRaw`
         INSERT INTO pay.payroll_statements
-          (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay, fuel_detail)
+          (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay,
+           custom_fees, total_custom_fees)
         VALUES (${driverId}::bigint, ${period.start}::date, ${period.end}::date,
-                0, 0, 0, 0, 0, ${payload}::jsonb)
+                0, 0, 0, 0, 0, ${feePayload}::jsonb, ${feeTotal})
         ON CONFLICT (driver_id, period_start) DO UPDATE SET
-          fuel_detail = EXCLUDED.fuel_detail, updated_at = now()
+          custom_fees = EXCLUDED.custom_fees,
+          total_custom_fees = EXCLUDED.total_custom_fees,
+          updated_at = now()
         WHERE pay.payroll_statements.status IN ('DRAFT', 'VERIFIED')
       `;
-      await prisma.$executeRaw`
+      await tx.$executeRaw`
         UPDATE pay.payroll_statements
-        SET fuel_detail = ${payload}::jsonb, edited_after_verify = true, updated_at = now()
+        SET custom_fees = ${feePayload}::jsonb,
+            total_custom_fees = ${feeTotal},
+            edited_after_verify = true,
+            updated_at = now()
         WHERE driver_id = ${driverId}::bigint AND period_start = ${period.start}::date
           AND status = 'DONE'
       `;
-    }
-  }
 
-  // ---- Fees: replace semantics (no merge), sum written in lockstep
-  const feePayload = JSON.stringify(
-    feeRows.map(r => ({
-      label: r.label,
-      miles: Math.round(r.miles * 10) / 10,
-      amount: Math.round(r.amount * 100) / 100,
-      ...(r.note ? { note: r.note } : {})
-    }))
+      await syncStatementsInTx(tx, refs);
+    },
+    { timeout: 30_000 }
   );
-  const feeTotal = Math.round(feeRows.reduce((acc, r) => acc + r.amount, 0) * 100) / 100;
-  await prisma.$executeRaw`
-    INSERT INTO pay.payroll_statements
-      (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay,
-       custom_fees, total_custom_fees)
-    VALUES (${driverId}::bigint, ${period.start}::date, ${period.end}::date,
-            0, 0, 0, 0, 0, ${feePayload}::jsonb, ${feeTotal})
-    ON CONFLICT (driver_id, period_start) DO UPDATE SET
-      custom_fees = EXCLUDED.custom_fees,
-      total_custom_fees = EXCLUDED.total_custom_fees,
-      updated_at = now()
-    WHERE pay.payroll_statements.status IN ('DRAFT', 'VERIFIED')
-  `;
-  await prisma.$executeRaw`
-    UPDATE pay.payroll_statements
-    SET custom_fees = ${feePayload}::jsonb,
-        total_custom_fees = ${feeTotal},
-        edited_after_verify = true,
-        updated_at = now()
-    WHERE driver_id = ${driverId}::bigint AND period_start = ${period.start}::date
-      AND status = 'DONE'
-  `;
-
-  await syncStatements(refs);
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/trips");
   revalidatePath("/dashboard/payroll");
   redirect(`${backTo}${backTo.includes("?") ? "&" : "?"}saved=1`);
 }
+
 
 export async function deleteTrip(formData: FormData) {
   await requirePermission("trip.write");

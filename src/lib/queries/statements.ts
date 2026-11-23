@@ -39,6 +39,9 @@ export type StatementRow = {
   live_pay: string;
   /** Verification-time snapshot (jsonb as stored; null before 0031 / drafts) */
   verify_snapshot: unknown;
+  /** By-state fuel rows (jsonb as stored; detail-shape only, parse via
+   *  parseFuelDetail - absent on the list shape's rows) */
+  fuel_detail?: unknown;
 };
 
 /** A stored statement: id/status always present (merged rows may lack them) */
@@ -137,7 +140,52 @@ export type StatementStatusCounts = {
   verified: number;
 };
 
-const STATEMENT_SELECT = Prisma.sql`
+/**
+ * List/dashboard shape: drops the payloads the lists never read. The heavy
+ * jsonb columns (verify_snapshot ≈ every leg + fuel of the period,
+ * custom_fees) come off every row, and the live_pay trips scan only runs for
+ * DONE rows - the "differs from frozen" hint is only consumed for those.
+ */
+export type StatementListRow = Omit<
+  StatementRow,
+  "verify_snapshot" | "custom_fees" | "live_pay"
+> & {
+  /** NULL unless status = DONE (see above; readers gate on DONE) */
+  live_pay: string | null;
+};
+
+/** A stored statement: id/status always present (merged rows may lack them) */
+export type GeneratedStatementListRow = Omit<StatementListRow, "id" | "status"> & {
+  id: string;
+  status: StatementStatus;
+};
+
+const STATEMENT_LIST_SELECT = Prisma.sql`
+  SELECT s.id::text, s.driver_id::text, d.full_name, d.driver_type::text AS driver_type,
+         to_char(s.period_start, 'YYYY-MM-DD') AS period_start,
+         to_char(s.period_end, 'YYYY-MM-DD') AS period_end,
+         s.status::text AS status, s.edited_after_verify,
+         s.trip_days, s.leg_count,
+         s.total_miles::text AS total_miles, s.total_fuel::text AS total_fuel,
+         s.total_pay::text AS total_pay, s.total_fuel_subsidy::text AS total_fuel_subsidy,
+         s.total_custom_fees::text AS total_custom_fees,
+         s.op_counts, s.trucks, s.note,
+         (SELECT COALESCE(sum((e->>'gallons')::numeric), 0)
+          FROM jsonb_array_elements(s.fuel_detail) e)::text AS fuel_gal,
+         (CASE WHEN s.status = 'DONE' THEN
+           (SELECT COALESCE(sum(t.pay_amount), 0)
+            FROM pay.trips t
+            WHERE t.driver_id = s.driver_id
+              AND t.trip_date >= s.period_start
+              AND t.trip_date <= s.period_end)
+         END)::text AS live_pay
+  FROM pay.payroll_statements s
+  JOIN ops.drivers d ON d.id = s.driver_id
+`;
+
+/** Detail shape: adds the jsonb payloads the detail sheet parses
+ *  (verify_snapshot diff marks, custom-fee editing). */
+const STATEMENT_DETAIL_SELECT = Prisma.sql`
   SELECT s.id::text, s.driver_id::text, d.full_name, d.driver_type::text AS driver_type,
          to_char(s.period_start, 'YYYY-MM-DD') AS period_start,
          to_char(s.period_end, 'YYYY-MM-DD') AS period_end,
@@ -154,7 +202,7 @@ const STATEMENT_SELECT = Prisma.sql`
           WHERE t.driver_id = s.driver_id
             AND t.trip_date >= s.period_start
             AND t.trip_date <= s.period_end)::text AS live_pay,
-         s.verify_snapshot
+         s.verify_snapshot, s.fuel_detail
   FROM pay.payroll_statements s
   JOIN ops.drivers d ON d.id = s.driver_id
 `;
@@ -186,8 +234,8 @@ export async function listStatements(filter: {
         : Prisma.sql` AND s.status = ${filter.status}::pay.statement_status`;
 
   const [rows, counts] = await Promise.all([
-    prisma.$queryRaw<GeneratedStatementRow[]>`
-      ${STATEMENT_SELECT}
+    prisma.$queryRaw<GeneratedStatementListRow[]>`
+      ${STATEMENT_LIST_SELECT}
       WHERE 1 = 1 ${scope[0]} ${scope[1]} ${scope[2]} ${statusClause}
       ORDER BY s.period_start DESC, d.full_name
     `,
@@ -205,7 +253,7 @@ export async function listStatements(filter: {
 
 export async function getStatementById(id: string) {
   const rows = await prisma.$queryRaw<GeneratedStatementRow[]>`
-    ${STATEMENT_SELECT} WHERE s.id = ${id}::bigint LIMIT 1
+    ${STATEMENT_DETAIL_SELECT} WHERE s.id = ${id}::bigint LIMIT 1
   `;
   return rows[0] ?? null;
 }
@@ -213,7 +261,7 @@ export async function getStatementById(id: string) {
 /** The driver's statement for one period, shown on the period detail sheet */
 export async function getStatementByDriverPeriod(driverId: string, periodStart: string) {
   const rows = await prisma.$queryRaw<GeneratedStatementRow[]>`
-    ${STATEMENT_SELECT}
+    ${STATEMENT_DETAIL_SELECT}
     WHERE s.driver_id = ${driverId}::bigint AND s.period_start = ${periodStart}::date
     LIMIT 1
   `;
@@ -249,7 +297,7 @@ export async function statementPeriodTotals(driverId?: string | null) {
 export async function mergedPeriodStatements(
   period: Period,
   driverId?: string | null
-): Promise<StatementRow[]> {
+): Promise<StatementListRow[]> {
   const [generated, actives] = await Promise.all([
     listStatements({ period: period.start, status: "all", q: "", driverId }),
     driverId
@@ -270,7 +318,7 @@ export async function mergedPeriodStatements(
   ]);
   const byDriver = new Map(generated.rows.map(s => [s.driver_id, s]));
 
-  const rows: StatementRow[] = [...generated.rows];
+  const rows: StatementListRow[] = [...generated.rows];
   for (const d of actives) {
     if (byDriver.has(d.driver_id)) continue;
     rows.push({
@@ -289,13 +337,11 @@ export async function mergedPeriodStatements(
       total_pay: "0",
       total_fuel_subsidy: "0",
       total_custom_fees: "0",
-      custom_fees: null,
       op_counts: {},
       trucks: "",
       note: null,
       fuel_gal: "0",
-      live_pay: "0",
-      verify_snapshot: null
+      live_pay: "0"
     });
   }
   rows.sort((a, b) => a.full_name.localeCompare(b.full_name, "zh-Hans-CN"));

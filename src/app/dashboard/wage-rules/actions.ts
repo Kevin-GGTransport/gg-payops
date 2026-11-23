@@ -215,28 +215,34 @@ export async function createVersion(formData: FormData) {
   if (!sourceId) redirect(back("bad_source"));
   if (!name) redirect(back("missing_name"));
 
-  const inserted = await prisma.$queryRaw<{ id: string }[]>`
-    INSERT INTO pay.wage_rule_versions(name, status, owner_multiplier, bobtail_multiplier, overage_increment, fuel_subsidy_rate, notes)
-    SELECT ${name}, 'INACTIVE', v.owner_multiplier, v.bobtail_multiplier, v.overage_increment,
-           v.fuel_subsidy_rate, concat('基于版本 #', v.id::text, ' 复制')
-    FROM pay.wage_rule_versions v WHERE v.id = ${sourceId}::bigint
-    RETURNING id::text
-  `;
-  const newId = inserted[0]?.id;
-  if (!newId) redirect(back("bad_source"));
+  // Version row + both child copies land atomically (a half-copied version
+  // would price trips against a partial ruleset)
+  const newId = await prisma.$transaction(async tx => {
+    const inserted = await tx.$queryRaw<{ id: string }[]>`
+      INSERT INTO pay.wage_rule_versions(name, status, owner_multiplier, bobtail_multiplier, overage_increment, fuel_subsidy_rate, notes)
+      SELECT ${name}, 'INACTIVE', v.owner_multiplier, v.bobtail_multiplier, v.overage_increment,
+             v.fuel_subsidy_rate, concat('基于版本 #', v.id::text, ' 复制')
+      FROM pay.wage_rule_versions v WHERE v.id = ${sourceId}::bigint
+      RETURNING id::text
+    `;
+    const id = inserted[0]?.id;
+    if (!id) return null;
 
-  await prisma.$executeRaw`
-    INSERT INTO pay.wage_rule_tiers(version_id, miles_from, amount)
-    SELECT ${newId}::bigint, miles_from, amount FROM pay.wage_rule_tiers
-    WHERE version_id = ${sourceId}::bigint
-  `;
-  await prisma.$executeRaw`
-    INSERT INTO pay.wage_rule_prices(version_id, driver_id, unit, from_location_id, to_location_id,
-                                     from_tag, to_tag, operation, label, driver_amount, owner_amount)
-    SELECT ${newId}::bigint, driver_id, unit, from_location_id, to_location_id, from_tag, to_tag, operation, label,
-           driver_amount, owner_amount
-    FROM pay.wage_rule_prices WHERE version_id = ${sourceId}::bigint
-  `;
+    await tx.$executeRaw`
+      INSERT INTO pay.wage_rule_tiers(version_id, miles_from, amount)
+      SELECT ${id}::bigint, miles_from, amount FROM pay.wage_rule_tiers
+      WHERE version_id = ${sourceId}::bigint
+    `;
+    await tx.$executeRaw`
+      INSERT INTO pay.wage_rule_prices(version_id, driver_id, unit, from_location_id, to_location_id,
+                                       from_tag, to_tag, operation, label, driver_amount, owner_amount)
+      SELECT ${id}::bigint, driver_id, unit, from_location_id, to_location_id, from_tag, to_tag, operation, label,
+             driver_amount, owner_amount
+      FROM pay.wage_rule_prices WHERE version_id = ${sourceId}::bigint
+    `;
+    return id;
+  });
+  if (!newId) redirect(back("bad_source"));
 
   revalidatePath("/dashboard/wage-rules");
   revalidatePath("/dashboard");

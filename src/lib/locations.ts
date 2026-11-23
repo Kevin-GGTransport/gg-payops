@@ -86,3 +86,16 @@ export async function resolveEndpointId(value: string): Promise<string> {
   }
   return "";
 }
+
+/**
+ * Resolve a batch of submitted endpoints in parallel (distinct values only -
+ * a sheet's rows repeat the same handful of endpoints, and each value costs
+ * up to 4 sequential queries when resolved one by one).
+ */
+export async function resolveEndpointIds(values: string[]): Promise<Map<string, string>> {
+  const distinct = [...new Set(values.filter(Boolean))];
+  const resolved = await Promise.all(
+    distinct.map(value => resolveEndpointId(value).then(id => [value, id] as const))
+  );
+  return new Map(resolved);
+}

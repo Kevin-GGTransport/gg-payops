@@ -19,8 +19,8 @@ import { activeLocationOptions } from "@/lib/queries/locations";
 import { currentWageRule } from "@/lib/queries/wage-rules";
 import { driverPeriodTrips, periodPayTotals, type DriverPeriodTripRow } from "@/lib/queries/trips";
 import { getStatementByDriverPeriod, parseVerifySnapshot } from "@/lib/queries/statements";
-import { activeStateOptions, statementFuelDetail } from "@/lib/queries/fuel";
-import { feesTotal, statementCustomFees } from "@/lib/queries/fees";
+import { activeStateOptions, parseFuelDetail } from "@/lib/queries/fuel";
+import { feesTotal, parseCustomFees } from "@/lib/queries/fees";
 import { FuelEditor, type FuelEditRow } from "./fuel-editor";
 import { FeeEditor, type FeeEditRow } from "./fee-editor";
 import { StatementSheetForm } from "./statement-sheet";
@@ -98,25 +98,27 @@ export default async function DriverPeriodPage({
   searchParams: Promise<SearchParams>;
 }) {
   await requirePermission("trip.read");
-  const { driverId } = await params;
+  const [{ driverId }, sp] = await Promise.all([params, searchParams]);
   if (!/^\d+$/.test(driverId)) notFound();
 
-  const driver = await getDriverById(driverId);
+  // Driver record, scope and permissions are independent - fetch together
+  // (they used to serialize three awaits before the page's data load)
+  const [driver, scopedDriverId, permissions] = await Promise.all([
+    getDriverById(driverId),
+    getLinkedDriverId(),
+    getUserPermissions()
+  ]);
   if (!driver) notFound();
 
   // Driver-linked accounts bounce off other drivers' sheets (gently, back to
   // their own payroll list); they read a static sheet and may only confirm
-  const scopedDriverId = await getLinkedDriverId();
   if (scopedDriverId !== null && scopedDriverId !== driverId) {
     redirect("/dashboard/payroll");
   }
-  const permissions = await getUserPermissions();
   const canWrite = permissions.has("trip.write");
   const canVerify = permissions.has("payroll.write");
   const canConfirm = permissions.has("payroll.confirm");
   const readOnly = !canWrite || scopedDriverId !== null;
-
-  const sp = await searchParams;
   // Trip edits saved (inline batch or dialog) redirect back here
   const saved = firstValue(sp.saved) === "1";
   // Same landing default as the payroll list: the week that just closed
@@ -127,15 +129,11 @@ export default async function DriverPeriodPage({
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
 
-  const [legs, periodTotals, statement, fuelDetail, feeDetail, stateOptions, locations, wageRule, operationOptions, driverOptions, truckOptions] =
+  const [legs, periodTotals, statement, stateOptions, locations, wageRule, operationOptions, driverOptions, truckOptions] =
     await Promise.all([
       driverPeriodTrips(period, driver.id),
       periodPayTotals(),
       getStatementByDriverPeriod(driver.id, period.start),
-      // Fuel-by-state rollup off the statement (frozen once verified)
-      statementFuelDetail(driver.id, period.start),
-      // Custom fees off the statement (stay editable after verify, no red marks)
-      statementCustomFees(driver.id, period.start),
       // Fuel-editor state dictionary
       activeStateOptions(),
       // Edit-dialog dictionaries (in-page client dialog, always mounted)
@@ -146,6 +144,11 @@ export default async function DriverPeriodPage({
       activeDriverOptions(),
       activeTruckOptions()
     ]);
+  // Fuel-by-state (frozen once verified) and custom fees (stay editable after
+  // verify, no red marks) parse straight off the statement row - the detail
+  // SELECT carries both payloads (two point queries on the same row dropped)
+  const fuelDetail = statement ? parseFuelDetail(statement.fuel_detail) : [];
+  const feeDetail = statement ? parseCustomFees(statement.custom_fees) : [];
   const days = groupByDay(legs);
   const totals = legs.reduce(
     (acc, leg) => ({

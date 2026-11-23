@@ -13,7 +13,7 @@ import { CleanForm } from "@/components/clean-form";
 import { requirePermission, getLinkedDriverId, getUserPermissions } from "@/lib/permissions";
 import { allValues, dateParam, firstValue, type SearchParams } from "@/lib/search-params";
 import { type OperationType } from "@/lib/labels";
-import { listOperationTypes, activeOperationOptions } from "@/lib/queries/operations";
+import { listOperationTypes } from "@/lib/queries/operations";
 import { listTrips } from "@/lib/queries/trips";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeLocationOptions } from "@/lib/queries/locations";
@@ -87,8 +87,18 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
     operationParam && knownCodes.has(operationParam) ? (operationParam as OperationType) : undefined;
   const hasFilter =
     selectedIds.length > 0 || Boolean(operation) || Boolean(q) || Boolean(dateFrom) || Boolean(dateTo);
+  // Edit-dialog options map off the dictionary already fetched above (a
+  // separate ACTIVE-only query used to scan the same table twice per view)
+  const operationOptions = operations
+    .filter(o => o.status === "ACTIVE")
+    .map(o => ({
+      code: o.code,
+      label: o.label,
+      description: o.description,
+      requires_load: o.requires_load
+    }));
 
-  const [drivers, trips, locations, wageRule, operationOptions] = await Promise.all([
+  const [drivers, trips, locations, wageRule] = await Promise.all([
     activeDriverOptions(),
     listTrips({
       ...(selectedIds.length > 0 ? { driverIds: selectedIds } : {}),
@@ -101,8 +111,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
     }),
     // Edit-dialog dictionaries (in-page client dialog, always mounted)
     activeLocationOptions(),
-    currentWageRule(),
-    activeOperationOptions()
+    currentWageRule()
   ]);
   const total = trips[0]?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));

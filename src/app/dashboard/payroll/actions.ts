@@ -9,7 +9,7 @@ import {
   requirePermission,
   getLinkedDriverId
 } from "@/lib/permissions";
-import { syncStatements } from "@/lib/statements";
+import { syncStatements, syncStatementsInTx } from "@/lib/statements";
 import { str } from "@/lib/action-helpers";
 
 function revalidateStatementViews() {
@@ -41,14 +41,22 @@ export async function verifyStatement(formData: FormData) {
   `;
   const target = rows[0];
   if (target) {
-    await syncStatements([
-      { driverId: target.driver_id, periodStart: target.period_start }
-    ]);
-    await prisma.$executeRaw`
-      UPDATE pay.payroll_statements
-      SET status = 'VERIFIED', edited_after_verify = false, updated_at = now()
-      WHERE id = ${id}::bigint AND status = 'DRAFT'
-    `;
+    // Sync + flip in ONE transaction: the comment above guards against the
+    // race, and sharing the transaction removes it entirely (a concurrent
+    // flip mid-sync rolls back with the sync)
+    await prisma.$transaction(
+      async tx => {
+        await syncStatementsInTx(tx, [
+          { driverId: target.driver_id, periodStart: target.period_start }
+        ]);
+        await tx.$executeRaw`
+          UPDATE pay.payroll_statements
+          SET status = 'VERIFIED', edited_after_verify = false, updated_at = now()
+          WHERE id = ${id}::bigint AND status = 'DRAFT'
+        `;
+      },
+      { timeout: 30_000 }
+    );
   }
 
   revalidateStatementViews();
@@ -386,22 +394,30 @@ export async function changeStatementTruck(
 
   // Drafts recompute in place (trucks included); VERIFIED/DONE only get the
   // red flag - which is why their frozen trucks annotation needs the extra
-  // refresh
-  await syncStatements([{ driverId: result.driverId, periodStart: result.periodStart }]);
-  await prisma.$executeRaw`
-    UPDATE pay.payroll_statements s
-    SET trucks = COALESCE(agg.trucks, ''), updated_at = now()
-    FROM (
-      SELECT string_agg(DISTINCT t.truck_snapshot->>'truck_code', ', ' ORDER BY t.truck_snapshot->>'truck_code') AS trucks
-      FROM pay.trips t
-      WHERE t.driver_id = ${result.driverId}::bigint
-        AND t.trip_date >= ${result.periodStart}::date
-        AND t.trip_date <= ${result.periodEnd}::date
-    ) agg
-    WHERE s.driver_id = ${result.driverId}::bigint
-      AND s.period_start = ${result.periodStart}::date
-      AND s.status IN ('VERIFIED', 'DONE')
-  `;
+  // refresh. Sync + refresh share one transaction (same all-or-nothing unit
+  // as the guard's own writes)
+  await prisma.$transaction(
+    async tx => {
+      await syncStatementsInTx(tx, [
+        { driverId: result.driverId, periodStart: result.periodStart }
+      ]);
+      await tx.$executeRaw`
+        UPDATE pay.payroll_statements s
+        SET trucks = COALESCE(agg.trucks, ''), updated_at = now()
+        FROM (
+          SELECT string_agg(DISTINCT t.truck_snapshot->>'truck_code', ', ' ORDER BY t.truck_snapshot->>'truck_code') AS trucks
+          FROM pay.trips t
+          WHERE t.driver_id = ${result.driverId}::bigint
+            AND t.trip_date >= ${result.periodStart}::date
+            AND t.trip_date <= ${result.periodEnd}::date
+        ) agg
+        WHERE s.driver_id = ${result.driverId}::bigint
+          AND s.period_start = ${result.periodStart}::date
+          AND s.status IN ('VERIFIED', 'DONE')
+      `;
+    },
+    { timeout: 30_000 }
+  );
 
   revalidateStatementViews();
   redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}saved=1`);

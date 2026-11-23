@@ -7,8 +7,8 @@ import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/permissions";
 import { calcFuelSubsidy } from "@/lib/wage";
 import type { DriverType } from "@/lib/labels";
-import { resolveEndpointId } from "@/lib/locations";
-import { syncStatements } from "@/lib/statements";
+import { resolveEndpointIds } from "@/lib/locations";
+import { syncStatementsInTx } from "@/lib/statements";
 import { periodOf } from "@/lib/period";
 import { todayIso } from "@/lib/format";
 import { isIsoDate, str } from "@/lib/action-helpers";
@@ -436,13 +436,9 @@ export async function addTripsBatch(formData: FormData) {
 
   // Resolve every distinct submitted endpoint once (free text may create a
   // new location); unresolvable ones simply store NULL
-  const endpointIds = new Map<string, string>();
-  for (const value of [
-    ...new Set(active.flatMap(g => groups[g].rows.flatMap(r => [r.from, r.to])).filter(Boolean))
-  ]) {
-    if (endpointIds.has(value)) continue;
-    endpointIds.set(value, await resolveEndpointId(value));
-  }
+  const endpointIds = await resolveEndpointIds(
+    active.flatMap(g => groups[g].rows.flatMap(r => [r.from, r.to]))
+  );
 
   const insertRows = active.flatMap(gi =>
     groups[gi].rows.map(row => {
@@ -477,127 +473,139 @@ export async function addTripsBatch(formData: FormData) {
      ${r.subsidyNum}, ${r.notes}, ${r.driverName}, ${r.truckSnapshot ?? null}::jsonb,
      ${r.packageId}, ${r.packageNote})
   `);
-  await prisma.$executeRaw`
-    INSERT INTO pay.trips(driver_id, trip_date, operation, load_no,
-      from_location_id, to_location_id, miles, pay_amount, fuel_subsidy, notes,
-      driver_name, truck_snapshot, package_id, package_note)
-    VALUES ${Prisma.join(values)}
-  `;
 
-  // Fuel-by-state rollup onto the statement of the sheet's cover week. Every
-  // active group writes its driver's whole fuel set (replace semantics): the
-  // sheet shows the week's saved rows on open, so what is submitted IS the
-  // week's truth - emptied rows mean the clerk cleared them. Two submitted
-  // groups sharing one driver merge (sums per state, first note wins); a
-  // non-submitted group's fuel is never touched.
-  const sheetPeriodStart = periodOf(
-    isIsoDate(str(formData, "sheet_period"))
-      ? str(formData, "sheet_period")
-      : insertRows[0].tripDate
-  );
-  const fuelSaves = new Map<string, { truckCode: string; rows: ParsedFuelRow[] }>();
-  for (const g of active) {
-    const group = groups[g];
-    const driverId = group.driverId;
-    const existing = fuelSaves.get(driverId);
-    if (existing) {
-      mergeFuelRows(existing.rows, group.fuelRows);
-      continue;
+  // One transaction owns the whole write chain (trips INSERT + fuel + fees +
+  // statement sync): a mid-batch failure used to leave the trips saved while
+  // the statement aggregates never caught up. Statements grow linearly with
+  // driver count, past the default 5s interactive budget - hence the raised
+  // timeout. Redirects stay outside (NEXT_REDIRECT must not roll back).
+  await prisma.$transaction(
+    async tx => {
+      await tx.$executeRaw`
+        INSERT INTO pay.trips(driver_id, trip_date, operation, load_no,
+          from_location_id, to_location_id, miles, pay_amount, fuel_subsidy, notes,
+          driver_name, truck_snapshot, package_id, package_note)
+        VALUES ${Prisma.join(values)}
+      `;
+
+    // Fuel-by-state rollup onto the statement of the sheet's cover week. Every
+    // active group writes its driver's whole fuel set (replace semantics): the
+    // sheet shows the week's saved rows on open, so what is submitted IS the
+    // week's truth - emptied rows mean the clerk cleared them. Two submitted
+    // groups sharing one driver merge (sums per state, first note wins); a
+    // non-submitted group's fuel is never touched.
+    const sheetPeriodStart = periodOf(
+      isIsoDate(str(formData, "sheet_period"))
+        ? str(formData, "sheet_period")
+        : insertRows[0].tripDate
+    );
+    const fuelSaves = new Map<string, { truckCode: string; rows: ParsedFuelRow[] }>();
+    for (const g of active) {
+      const group = groups[g];
+      const driverId = group.driverId;
+      const existing = fuelSaves.get(driverId);
+      if (existing) {
+        mergeFuelRows(existing.rows, group.fuelRows);
+        continue;
+      }
+      const rows: ParsedFuelRow[] = [];
+      mergeFuelRows(rows, group.fuelRows);
+      fuelSaves.set(driverId, {
+        truckCode: truckCodeById.get(group.truckId) ?? "",
+        rows
+      });
     }
-    const rows: ParsedFuelRow[] = [];
-    mergeFuelRows(rows, group.fuelRows);
-    fuelSaves.set(driverId, {
-      truckCode: truckCodeById.get(group.truckId) ?? "",
-      rows
-    });
-  }
-  for (const [driverId, save] of fuelSaves) {
-    const payload = JSON.stringify(
-      save.rows.map(r => ({
-        truckCode: save.truckCode,
-        stateCode: r.stateCode,
-        gallons: Math.round(r.gallons * 1000) / 1000,
-        miles: Math.round(r.miles * 10) / 10,
-        amount: Math.round(r.amount * 100) / 100,
-        ...(r.note ? { note: r.note } : {})
-      }))
-    );
-    // DRAFT arm creates the statement when missing (aggregates arrive from
-    // syncStatements right after, which never touches fuel_detail);
-    // VERIFIED/DONE keep their frozen numbers and only take the fuel plus the
-    // permanent edited flag - the same red as a trip edit
-    await prisma.$executeRaw`
-      INSERT INTO pay.payroll_statements
-        (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay, fuel_detail)
-      VALUES (${driverId}::bigint, ${sheetPeriodStart.start}::date, ${sheetPeriodStart.end}::date,
-              0, 0, 0, 0, 0, ${payload}::jsonb)
-      ON CONFLICT (driver_id, period_start) DO UPDATE SET
-        fuel_detail = EXCLUDED.fuel_detail, updated_at = now()
-      WHERE pay.payroll_statements.status IN ('DRAFT', 'VERIFIED')
-    `;
-    await prisma.$executeRaw`
-      UPDATE pay.payroll_statements
-      SET fuel_detail = ${payload}::jsonb, edited_after_verify = true, updated_at = now()
-      WHERE driver_id = ${driverId}::bigint AND period_start = ${sheetPeriodStart.start}::date
-        AND status = 'DONE'
-    `;
-  }
+    for (const [driverId, save] of fuelSaves) {
+      const payload = JSON.stringify(
+        save.rows.map(r => ({
+          truckCode: save.truckCode,
+          stateCode: r.stateCode,
+          gallons: Math.round(r.gallons * 1000) / 1000,
+          miles: Math.round(r.miles * 10) / 10,
+          amount: Math.round(r.amount * 100) / 100,
+          ...(r.note ? { note: r.note } : {})
+        }))
+      );
+      // DRAFT arm creates the statement when missing (aggregates arrive from
+      // syncStatements right after, which never touches fuel_detail);
+      // VERIFIED/DONE keep their frozen numbers and only take the fuel plus the
+      // permanent edited flag - the same red as a trip edit
+      await tx.$executeRaw`
+        INSERT INTO pay.payroll_statements
+          (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay, fuel_detail)
+        VALUES (${driverId}::bigint, ${sheetPeriodStart.start}::date, ${sheetPeriodStart.end}::date,
+                0, 0, 0, 0, 0, ${payload}::jsonb)
+        ON CONFLICT (driver_id, period_start) DO UPDATE SET
+          fuel_detail = EXCLUDED.fuel_detail, updated_at = now()
+        WHERE pay.payroll_statements.status IN ('DRAFT', 'VERIFIED')
+      `;
+      await tx.$executeRaw`
+        UPDATE pay.payroll_statements
+        SET fuel_detail = ${payload}::jsonb, edited_after_verify = true, updated_at = now()
+        WHERE driver_id = ${driverId}::bigint AND period_start = ${sheetPeriodStart.start}::date
+          AND status = 'DONE'
+      `;
+    }
 
-  // Custom fees follow the fuel contract: only active groups (a group with
-  // fees but no trip rows drops out - same as fuel), two groups sharing one
-  // driver concatenate in group order (fees have no merge key), and the
-  // submitted set is the week's whole truth (replace semantics)
-  const feeSaves = new Map<string, ParsedFeeRow[]>();
-  for (const g of active) {
-    const group = groups[g];
-    const existing = feeSaves.get(group.driverId);
-    if (existing) existing.push(...group.feeRows);
-    else feeSaves.set(group.driverId, [...group.feeRows]);
-  }
-  for (const [driverId, rows] of feeSaves) {
-    const payload = JSON.stringify(
-      rows.map(r => ({
-        label: r.label,
-        miles: Math.round(r.miles * 10) / 10,
-        amount: Math.round(r.amount * 100) / 100,
-        ...(r.note ? { note: r.note } : {})
-      }))
-    );
-    const total = Math.round(rows.reduce((acc, r) => acc + r.amount, 0) * 100) / 100;
-    // Same two arms as the fuel save: DRAFT upserts (aggregates arrive from
-    // syncStatements right after, which never touches these columns);
-    // VERIFIED/DONE keep their frozen pay and only take the fees plus the
-    // permanent edited flag
-    await prisma.$executeRaw`
-      INSERT INTO pay.payroll_statements
-        (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay,
-         custom_fees, total_custom_fees)
-      VALUES (${driverId}::bigint, ${sheetPeriodStart.start}::date, ${sheetPeriodStart.end}::date,
-              0, 0, 0, 0, 0, ${payload}::jsonb, ${total})
-      ON CONFLICT (driver_id, period_start) DO UPDATE SET
-        custom_fees = EXCLUDED.custom_fees,
-        total_custom_fees = EXCLUDED.total_custom_fees,
-        updated_at = now()
-      WHERE pay.payroll_statements.status IN ('DRAFT', 'VERIFIED')
-    `;
-    await prisma.$executeRaw`
-      UPDATE pay.payroll_statements
-      SET custom_fees = ${payload}::jsonb,
-          total_custom_fees = ${total},
-          edited_after_verify = true,
+    // Custom fees follow the fuel contract: only active groups (a group with
+    // fees but no trip rows drops out - same as fuel), two groups sharing one
+    // driver concatenate in group order (fees have no merge key), and the
+    // submitted set is the week's whole truth (replace semantics)
+    const feeSaves = new Map<string, ParsedFeeRow[]>();
+    for (const g of active) {
+      const group = groups[g];
+      const existing = feeSaves.get(group.driverId);
+      if (existing) existing.push(...group.feeRows);
+      else feeSaves.set(group.driverId, [...group.feeRows]);
+    }
+    for (const [driverId, rows] of feeSaves) {
+      const payload = JSON.stringify(
+        rows.map(r => ({
+          label: r.label,
+          miles: Math.round(r.miles * 10) / 10,
+          amount: Math.round(r.amount * 100) / 100,
+          ...(r.note ? { note: r.note } : {})
+        }))
+      );
+      const total = Math.round(rows.reduce((acc, r) => acc + r.amount, 0) * 100) / 100;
+      // Same two arms as the fuel save: DRAFT upserts (aggregates arrive from
+      // syncStatements right after, which never touches these columns);
+      // VERIFIED/DONE keep their frozen pay and only take the fees plus the
+      // permanent edited flag
+      await tx.$executeRaw`
+        INSERT INTO pay.payroll_statements
+          (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay,
+           custom_fees, total_custom_fees)
+        VALUES (${driverId}::bigint, ${sheetPeriodStart.start}::date, ${sheetPeriodStart.end}::date,
+                0, 0, 0, 0, 0, ${payload}::jsonb, ${total})
+        ON CONFLICT (driver_id, period_start) DO UPDATE SET
+          custom_fees = EXCLUDED.custom_fees,
+          total_custom_fees = EXCLUDED.total_custom_fees,
           updated_at = now()
-      WHERE driver_id = ${driverId}::bigint AND period_start = ${sheetPeriodStart.start}::date
-        AND status = 'DONE'
-    `;
-  }
+        WHERE pay.payroll_statements.status IN ('DRAFT', 'VERIFIED')
+      `;
+      await tx.$executeRaw`
+        UPDATE pay.payroll_statements
+        SET custom_fees = ${payload}::jsonb,
+            total_custom_fees = ${total},
+            edited_after_verify = true,
+            updated_at = now()
+        WHERE driver_id = ${driverId}::bigint AND period_start = ${sheetPeriodStart.start}::date
+          AND status = 'DONE'
+      `;
+    }
 
-  // Entry IS generation: every touched (driver, period) gets its statement
-  // synced - created as DRAFT if missing, recomputed otherwise
-  await syncStatements(
-    insertRows.map(r => ({
-      driverId: r.driverId,
-      periodStart: periodOf(r.tripDate).start
-    }))
+    // Entry IS generation: every touched (driver, period) gets its statement
+    // synced - created as DRAFT if missing, recomputed otherwise
+    await syncStatementsInTx(
+      tx,
+      insertRows.map(r => ({
+        driverId: r.driverId,
+        periodStart: periodOf(r.tripDate).start
+      }))
+    );
+    },
+    { timeout: 30_000 }
   );
 
   revalidatePath("/dashboard");

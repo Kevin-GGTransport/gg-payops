@@ -10,7 +10,7 @@ import { DriverTypeBadge, StatementStatusBadge } from "@/components/badges";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
 import { fuel as fmtFuel, miles as fmtMiles, money } from "@/lib/format";
 import { isRedirectError } from "@/lib/action-result";
-import type { StatementRow } from "@/lib/queries/statements";
+import type { StatementListRow } from "@/lib/queries/statements";
 import { confirmDriverStatement, verifyStatement } from "./actions";
 import {
   CopyStatementButton,
@@ -104,7 +104,7 @@ export function StatementsTable({
   canCopy,
   empty
 }: {
-  statements: StatementRow[];
+  statements: StatementListRow[];
   /** Copy-dialog pickers, pulled by the host page (same sources as entry) */
   drivers: CopyDriverOption[];
   trucks: CopyTruckOption[];
@@ -117,7 +117,7 @@ export function StatementsTable({
   // Stable identity across client re-renders (toasts, dialogs): a fresh array
   // per render churns TanStack's sizing sync (same family as the entry-sheet
   // freeze); rebuilt only when the server sends new copy-dialog pickers
-  const columns = React.useMemo<ColumnDef<StatementRow, unknown>[]>(() => [
+  const columns = React.useMemo<ColumnDef<StatementListRow, unknown>[]>(() => [
     {
       id: "period",
       header: "周期",

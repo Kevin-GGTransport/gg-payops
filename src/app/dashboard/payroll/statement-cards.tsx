@@ -7,7 +7,7 @@ import { ConfirmAction } from "@/components/confirm-action";
 import { StatementStatusBadge } from "@/components/badges";
 import { miles as fmtMiles, money } from "@/lib/format";
 import { isRedirectError } from "@/lib/action-result";
-import type { StatementRow } from "@/lib/queries/statements";
+import type { StatementListRow } from "@/lib/queries/statements";
 import { confirmDriverStatement } from "./actions";
 
 function shortPeriod(start: string, end: string) {
@@ -59,7 +59,7 @@ export function StatementCards({
   canConfirm,
   empty
 }: {
-  statements: StatementRow[];
+  statements: StatementListRow[];
   /** Convenience only - the action re-checks permissions server-side */
   canConfirm: boolean;
   empty: string;

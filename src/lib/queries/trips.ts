@@ -79,8 +79,15 @@ export type TripEditRow = {
 };
 
 export async function getTripById(id: string): Promise<TripEditRow | null> {
-  if (!/^\d+$/.test(id)) return null;
-  const rows = await prisma.$queryRaw<TripEditRow[]>`
+  const rows = await getTripsByIds([id]);
+  return rows[0] ?? null;
+}
+
+/** Batch projection of getTripById (one IN query instead of N point reads) */
+export async function getTripsByIds(ids: string[]): Promise<TripEditRow[]> {
+  const valid = [...new Set(ids.filter(id => /^\d+$/.test(id)))];
+  if (valid.length === 0) return [];
+  return prisma.$queryRaw<TripEditRow[]>`
     SELECT t.id::text, t.driver_id::text, t.driver_name,
            d.driver_type::text AS driver_type, d.price_as_driver,
            to_char(t.trip_date, 'YYYY-MM-DD') AS trip_date,
@@ -95,9 +102,8 @@ export async function getTripById(id: string): Promise<TripEditRow | null> {
     LEFT JOIN ops.drivers d ON d.id = t.driver_id
     LEFT JOIN ops.locations f ON f.id = t.from_location_id
     LEFT JOIN ops.locations o ON o.id = t.to_location_id
-    WHERE t.id = ${id}::bigint
+    WHERE t.id IN (${Prisma.join(valid.map(id => Prisma.sql`${id}::bigint`))})
   `;
-  return rows[0] ?? null;
 }
 
 /** Trip ledger: filter by date range, drivers, operation, keyword; paginated, each row carries window total */
