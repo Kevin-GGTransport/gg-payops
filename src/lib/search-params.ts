@@ -27,3 +27,33 @@ export function withFlash(path: string, query: string, flag: string, value = "1"
   params.set(flag, value);
   return `${path}?${params.toString()}`;
 }
+
+/**
+ * The shared CRUD-page URL params: which row is being edited, the last error
+ * code, whether the "new" modal should open, and the saved-flash message
+ * (callers map flash values to their own Chinese copy, e.g. { "1": "…已保存" }).
+ */
+export function parseCrudParams(sp: SearchParams, savedMessages: Record<string, string>) {
+  const savedFlash = firstValue(sp.saved);
+  return {
+    editId: (firstValue(sp.edit) ?? "").trim(),
+    errorCode: firstValue(sp.error),
+    isNew: firstValue(sp.new) === "1",
+    savedMessage: savedFlash !== undefined ? savedMessages[savedFlash] : undefined
+  };
+}
+
+/** Collect ids riding under a URL prefix (e.g. role_<id>=1 checkbox refills) */
+export function collectPrefixedIds(sp: SearchParams, prefix: string): Set<string> {
+  return new Set(
+    Object.keys(sp)
+      .filter(key => key.startsWith(prefix))
+      .map(key => key.slice(prefix.length))
+  );
+}
+
+/** Strict YYYY-MM-DD from a URL param, undefined when absent/invalid */
+export function dateParam(value: string | string[] | undefined): string | undefined {
+  const v = (firstValue(value) ?? "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(v).toString() !== "Invalid Date" ? v : undefined;
+}

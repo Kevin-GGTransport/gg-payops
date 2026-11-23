@@ -13,8 +13,9 @@ import {
   TextField
 } from "@/components/form-fields";
 import { ComboboxField } from "@/components/combobox-field";
+import { ToolbarSearch, ToolbarTabs } from "@/components/crud-toolbar";
 import { requirePermission, getUserPermissions } from "@/lib/permissions";
-import { firstValue, formField, type SearchParams } from "@/lib/search-params";
+import { collectPrefixedIds, firstValue, formField, parseCrudParams, type SearchParams } from "@/lib/search-params";
 import {
   listAccounts,
   getAccountById,
@@ -59,19 +60,12 @@ export default async function AccountsPage({
   const statusFilter: StatusFilter =
     statusParam === "active" || statusParam === "inactive" ? statusParam : "all";
   const q = (firstValue(sp.q) ?? "").trim();
-  const editId = (firstValue(sp.edit) ?? "").trim();
   const resetId = (firstValue(sp.reset) ?? "").trim();
-  const errorCode = firstValue(sp.error);
-  const isNew = firstValue(sp.new) === "1" && canWrite;
-  const savedFlash = firstValue(sp.saved);
-  const savedMessage =
-    savedFlash === "1"
-      ? "账号已保存"
-      : savedFlash === "status"
-        ? "账号状态已更新"
-        : savedFlash === "pwd"
-          ? "密码已重置"
-          : undefined;
+  const { editId, errorCode, isNew, savedMessage } = parseCrudParams(sp, {
+    "1": "账号已保存",
+    status: "账号状态已更新",
+    pwd: "密码已重置"
+  });
 
   const [{ rows, counts }, editing, resetting, roles, drivers] = await Promise.all([
     listAccounts({ q, status: statusFilter }),
@@ -95,11 +89,7 @@ export default async function AccountsPage({
     displayName: formField(sp, "display_name", editing?.display_name),
     phone: formField(sp, "phone", editing?.phone)
   };
-  const refillRoles = new Set(
-    Object.keys(sp)
-      .filter(key => key.startsWith("role_"))
-      .map(key => key.slice("role_".length))
-  );
+  const refillRoles = collectPrefixedIds(sp, "role_");
   // Roles are keyed by id in forms; the editing row carries codes - resolve
   const editingRoleIds = new Set(
     roles.filter(r => editing?.roles.some(er => er.code === r.code)).map(r => r.id)
@@ -128,28 +118,21 @@ export default async function AccountsPage({
 
       <section aria-label="账号名单">
         <div className="toolbar">
-          <nav className="tabs" aria-label="按状态筛选">
-            {tabs.map(tab => {
-              const params = new URLSearchParams(filterQuery);
-              if (tab.key === "all") params.delete("status");
-              else params.set("status", tab.key);
-              const active = statusFilter === tab.key;
-              return (
-                <Link
-                  key={tab.key}
-                  href={`/dashboard/accounts${params.toString() ? `?${params.toString()}` : ""}`}
-                  {...(active ? { "aria-current": "page" as const } : {})}
-                >
-                  {tab.label}<b>{tab.count}</b>
-                </Link>
-              );
-            })}
-          </nav>
-          <form className="search" action="/dashboard/accounts" method="get">
-            {statusFilter !== "all" && <input type="hidden" name="status" value={statusFilter} />}
-            <input type="search" name="q" defaultValue={q} placeholder="搜索账号或姓名" aria-label="搜索账号" />
-            <button type="submit">搜索</button>
-          </form>
+          <ToolbarTabs
+            tabs={tabs}
+            basePath="/dashboard/accounts"
+            paramKey="status"
+            activeKey={statusFilter}
+            baseParams={filterQuery}
+            ariaLabel="按状态筛选"
+          />
+          <ToolbarSearch
+            basePath="/dashboard/accounts"
+            query={q}
+            placeholder="搜索账号或姓名"
+            ariaLabel="搜索账号"
+            hiddenFields={statusFilter !== "all" ? { status: statusFilter } : undefined}
+          />
         </div>
 
         <LedgerPanel>

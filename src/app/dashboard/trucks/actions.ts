@@ -1,11 +1,20 @@
 "use server";
 
+import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/permissions";
 import { withFlash } from "@/lib/search-params";
 import { todayIso, isoPlusDays } from "@/lib/format";
+import {
+  codeTaken,
+  isDuplicateKey,
+  isIsoDate,
+  makeBackWithError,
+  setRecordStatus,
+  str
+} from "@/lib/action-helpers";
 
 const FIELDS = [
   "truck_code",
@@ -17,25 +26,7 @@ const FIELDS = [
   "owner_driver_id"
 ] as const;
 
-function str(formData: FormData, key: string) {
-  return String(formData.get(key) ?? "").trim();
-}
-
-function backWithError(error: string, formData: FormData): never {
-  const params = new URLSearchParams();
-  const id = str(formData, "id");
-  if (id) params.set("edit", id);
-  params.set("error", error);
-  for (const field of FIELDS) {
-    const value = str(formData, field);
-    if (value) params.set(`f_${field}`, value);
-  }
-  redirect(`/dashboard/trucks?${params.toString()}`);
-}
-
-function isIsoDate(value: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(value).toString() !== "Invalid Date";
-}
+const backWithError = makeBackWithError({ basePath: "/dashboard/trucks", fields: FIELDS });
 
 /**
  * Apply the ownership change: close the open row (valid_to = day before the
@@ -98,19 +89,16 @@ export async function saveTruck(formData: FormData) {
     if (owners.length === 0) backWithError("owner_invalid", formData);
   }
 
-  const conflicts = id
-    ? await prisma.$queryRaw<{ one: number }[]>`
-        SELECT 1 AS one FROM ops.trucks
-        WHERE truck_code = ${code}
-          AND id <> ${id}::bigint
-        LIMIT 1
-      `
-    : await prisma.$queryRaw<{ one: number }[]>`
-        SELECT 1 AS one FROM ops.trucks
-        WHERE truck_code = ${code}
-        LIMIT 1
-      `;
-  if (conflicts.length > 0) backWithError("dup_code", formData);
+  if (
+    await codeTaken({
+      table: Prisma.sql`ops.trucks`,
+      column: Prisma.sql`truck_code`,
+      value: code,
+      excludeId: id || undefined
+    })
+  ) {
+    backWithError("dup_code", formData);
+  }
 
   let truckId = id;
   let duplicate = false;
@@ -135,8 +123,7 @@ export async function saveTruck(formData: FormData) {
       truckId = inserted[0].id;
     }
   } catch (error) {
-    const err = error as { message?: unknown };
-    if (typeof err.message === "string" && err.message.includes("23505")) {
+    if (isDuplicateKey(error)) {
       duplicate = true;
     } else {
       throw error;
@@ -152,25 +139,12 @@ export async function saveTruck(formData: FormData) {
 }
 
 export async function setTruckStatus(formData: FormData) {
-  await requirePermission("truck.write");
-
-  const id = str(formData, "id");
-  const status = str(formData, "status");
-  const returnTo = str(formData, "return_to");
-
-  if (!id || !["ACTIVE", "INACTIVE"].includes(status)) {
-    redirect(returnTo ? `/dashboard/trucks?${returnTo}` : "/dashboard/trucks");
-  }
-
-  await prisma.$executeRaw`
-    UPDATE ops.trucks
-    SET status = ${status}::common.record_status, updated_at = now()
-    WHERE id = ${id}::bigint
-  `;
-
-  revalidatePath("/dashboard/trucks");
-  revalidatePath("/dashboard");
-  redirect(withFlash("/dashboard/trucks", returnTo, "saved", "status"));
+  await setRecordStatus(formData, {
+    permission: "truck.write",
+    table: Prisma.sql`ops.trucks`,
+    basePath: "/dashboard/trucks",
+    revalidatePaths: ["/dashboard"]
+  });
 }
 
 export async function addOdometerReading(formData: FormData) {

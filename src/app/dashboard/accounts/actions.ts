@@ -7,28 +7,16 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/permissions";
 import { withFlash } from "@/lib/search-params";
+import { isDuplicateKey, makeBackWithError, str } from "@/lib/action-helpers";
 
 const FIELDS = ["email", "display_name", "phone", "linked_driver_id"] as const;
 
-function str(formData: FormData, key: string) {
-  return String(formData.get(key) ?? "").trim();
-}
-
-function backWithError(error: string, formData: FormData): never {
-  const params = new URLSearchParams();
-  const id = str(formData, "id");
-  if (id) params.set("edit", id);
-  params.set("error", error);
-  for (const field of FIELDS) {
-    const value = str(formData, field);
-    if (value) params.set(`f_${field}`, value);
-  }
-  // Role checkboxes ride along under their own role_<id> keys
-  for (const [key, value] of formData.entries()) {
-    if (key.startsWith("role_") && value === "1") params.set(key, "1");
-  }
-  redirect(`/dashboard/accounts?${params.toString()}`);
-}
+// Role checkboxes ride along under their own role_<id> keys
+const backWithError = makeBackWithError({
+  basePath: "/dashboard/accounts",
+  fields: FIELDS,
+  extraPrefixes: ["role_"]
+});
 
 /** Login lowercases whatever is typed; store it the same way */
 function normalizedEmail(formData: FormData) {
@@ -49,21 +37,6 @@ async function validRoleIds(formData: FormData): Promise<Set<string>> {
     WHERE id IN (${Prisma.join([...submitted].map(id => Prisma.sql`${id}::bigint`))})
   `;
   return new Set(rows.map(r => r.id));
-}
-
-/**
- * Postgres unique-violation marker. Raw SQL failures surface as
- * PrismaClientKnownRequestError P2010 whose meta.message carries the PG
- * diagnostic (23505 / "duplicate key"); plain text errors also carry it.
- */
-function isDuplicateKey(error: unknown): boolean {
-  if (error instanceof Prisma.PrismaClientKnownRequestError) {
-    const meta = error.meta as { message?: string } | undefined;
-    const text = `${error.message} ${meta?.message ?? ""}`;
-    return text.includes("23505") || text.includes("duplicate key");
-  }
-  const message = String((error as { message?: string })?.message ?? "");
-  return message.includes("23505") || message.includes("duplicate key");
 }
 
 function revalidateAccounts() {

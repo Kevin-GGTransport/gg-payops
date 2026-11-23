@@ -7,26 +7,16 @@ import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/permissions";
 import { isPermissionCode } from "@/lib/permission-catalog";
 import { withFlash } from "@/lib/search-params";
+import { isDuplicateKey, makeBackWithError, str } from "@/lib/action-helpers";
 
-function str(formData: FormData, key: string) {
-  return String(formData.get(key) ?? "").trim();
-}
-
-function backWithError(error: string, formData: FormData): never {
-  const params = new URLSearchParams();
-  const id = str(formData, "id");
-  if (id) params.set("edit", id);
-  else params.set("new", "1");
-  params.set("error", error);
-  const name = str(formData, "name");
-  const code = str(formData, "code");
-  if (name) params.set("f_name", name);
-  if (code) params.set("f_code", code);
-  for (const [key, value] of formData.entries()) {
-    if (key.startsWith("perm_") && value === "1") params.set(key, "1");
-  }
-  redirect(`/dashboard/roles?${params.toString()}`);
-}
+// Matrix checkboxes ride along under their own perm_<code> keys; a failed
+// create reopens the "new" modal (no id in play yet)
+const backWithError = makeBackWithError({
+  basePath: "/dashboard/roles",
+  fields: ["name", "code"],
+  extraPrefixes: ["perm_"],
+  reopenNewWhenNoId: true
+});
 
 /** Uppercase snake codes in the house style of SUPER_ADMIN / FINANCE_CLERK */
 const CODE_PATTERN = /^[A-Z][A-Z0-9_]{1,30}$/;
@@ -110,10 +100,7 @@ export async function saveRole(formData: FormData) {
     }
   } catch (error) {
     // Raw-SQL unique violation (P2010 + PG 23505) = the code is taken
-    const text = error instanceof Prisma.PrismaClientKnownRequestError
-      ? `${error.message} ${((error.meta as { message?: string } | undefined)?.message ?? "")}`
-      : String((error as { message?: string })?.message ?? "");
-    if (text.includes("23505") || text.includes("duplicate key")) {
+    if (isDuplicateKey(error)) {
       backWithError("dup_code", formData);
     }
     throw error;
@@ -151,5 +138,5 @@ export async function deleteRole(formData: FormData) {
   `;
 
   revalidateRoles();
-  redirect(withFlash("/dashboard/roles", "", "deleted"));
+  redirect(withFlash("/dashboard/roles", "", "saved", "deleted"));
 }

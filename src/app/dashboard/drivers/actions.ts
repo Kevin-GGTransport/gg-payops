@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/permissions";
 import { withFlash } from "@/lib/search-params";
+import { Prisma } from "@prisma/client";
+import { makeBackWithError, setRecordStatus, str } from "@/lib/action-helpers";
 
 const FIELDS = [
   "full_name",
@@ -22,21 +24,7 @@ const FIELDS = [
 /** pricing_mode whitelist - anything else falls back to per-leg pricing */
 const PRICING_MODES = new Set(["LEG", "DAY", "ROUND_TRIP"]);
 
-function str(formData: FormData, key: string) {
-  return String(formData.get(key) ?? "").trim();
-}
-
-function backWithError(error: string, formData: FormData): never {
-  const params = new URLSearchParams();
-  const id = str(formData, "id");
-  if (id) params.set("edit", id);
-  params.set("error", error);
-  for (const field of FIELDS) {
-    const value = str(formData, field);
-    if (value) params.set(`f_${field}`, value);
-  }
-  redirect(`/dashboard/drivers?${params.toString()}`);
-}
+const backWithError = makeBackWithError({ basePath: "/dashboard/drivers", fields: FIELDS });
 
 export async function saveDriver(formData: FormData) {
   await requirePermission("driver.write");
@@ -95,23 +83,10 @@ export async function saveDriver(formData: FormData) {
 }
 
 export async function setDriverStatus(formData: FormData) {
-  await requirePermission("driver.write");
-
-  const id = str(formData, "id");
-  const status = str(formData, "status");
-  const returnTo = str(formData, "return_to");
-
-  if (!id || !["ACTIVE", "INACTIVE"].includes(status)) {
-    redirect(returnTo ? `/dashboard/drivers?${returnTo}` : "/dashboard/drivers");
-  }
-
-  await prisma.$executeRaw`
-    UPDATE ops.drivers
-    SET status = ${status}::common.record_status, updated_at = now()
-    WHERE id = ${id}::bigint
-  `;
-
-  revalidatePath("/dashboard/drivers");
-  revalidatePath("/dashboard");
-  redirect(withFlash("/dashboard/drivers", returnTo, "saved", "status"));
+  await setRecordStatus(formData, {
+    permission: "driver.write",
+    table: Prisma.sql`ops.drivers`,
+    basePath: "/dashboard/drivers",
+    revalidatePaths: ["/dashboard"]
+  });
 }

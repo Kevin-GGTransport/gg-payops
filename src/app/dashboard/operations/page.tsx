@@ -13,7 +13,7 @@ import {
 } from "@/components/form-fields";
 import { FlashToast } from "@/components/flash-toast";
 import { requirePermission, getUserPermissions } from "@/lib/permissions";
-import { firstValue, formField, type SearchParams } from "@/lib/search-params";
+import { formField, parseCrudParams, type SearchParams } from "@/lib/search-params";
 import { getOperationTypeById, listOperationTypes } from "@/lib/queries/operations";
 import { saveOperation } from "./actions";
 import { OperationsTable } from "./operations-table";
@@ -40,18 +40,11 @@ export default async function OperationsPage({
   const canWrite = (await getUserPermissions()).has("operation.write");
   const sp = await searchParams;
 
-  const editId = (firstValue(sp.edit) ?? "").trim();
-  const errorCode = firstValue(sp.error);
-  const isNew = firstValue(sp.new) === "1";
-  const savedFlash = firstValue(sp.saved);
-  const savedMessage =
-    savedFlash === "1"
-      ? "操作类型已保存"
-      : savedFlash === "status"
-        ? "状态已更新"
-        : savedFlash === "deleted"
-          ? "操作类型已删除"
-          : undefined;
+  const { editId, errorCode, isNew, savedMessage } = parseCrudParams(sp, {
+    "1": "操作类型已保存",
+    status: "状态已更新",
+    deleted: "操作类型已删除"
+  });
 
   const [operations, editing] = await Promise.all([
     listOperationTypes(),

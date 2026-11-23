@@ -11,7 +11,7 @@ import { FilterSelect } from "@/components/filter-select";
 import { BatchDeleteTrips } from "@/components/batch-delete";
 import { CleanForm } from "@/components/clean-form";
 import { requirePermission, getLinkedDriverId, getUserPermissions } from "@/lib/permissions";
-import { allValues, firstValue, type SearchParams } from "@/lib/search-params";
+import { allValues, dateParam, firstValue, type SearchParams } from "@/lib/search-params";
 import { type OperationType } from "@/lib/labels";
 import { listOperationTypes, activeOperationOptions } from "@/lib/queries/operations";
 import { listTrips } from "@/lib/queries/trips";
@@ -23,11 +23,6 @@ import { TripsTable } from "./trips-table";
 export const metadata: Metadata = { title: "行程台账 · G&G PayOps" };
 
 const PAGE_SIZE = 20;
-
-function dateParam(value: string | undefined) {
-  const v = (value ?? "").trim();
-  return /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(v).toString() !== "Invalid Date" ? v : undefined;
-}
 
 function intFromParam(value: string | undefined) {
   const n = Number.parseInt(value ?? "", 10);

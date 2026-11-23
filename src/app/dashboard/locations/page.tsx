@@ -7,8 +7,9 @@ import { FormGrid, TextField, SubmitButton, FormError } from "@/components/form-
 import { FlashToast } from "@/components/flash-toast";
 import { ComboboxField } from "@/components/combobox-field";
 import { MapPicker } from "@/components/map-picker";
+import { ToolbarSearch, ToolbarTabs } from "@/components/crud-toolbar";
 import { requirePermission, getUserPermissions } from "@/lib/permissions";
-import { firstValue, formField, type SearchParams } from "@/lib/search-params";
+import { firstValue, formField, parseCrudParams, type SearchParams } from "@/lib/search-params";
 import { LOCATION_TYPE_LABELS, type LocationType } from "@/lib/labels";
 import { listLocations, getLocationById, locationTagSuggestions, locationTypeCounts } from "@/lib/queries/locations";
 import { saveLocation } from "./actions";
@@ -41,16 +42,10 @@ export default async function LocationsPage({
     ? (typeParam as LocationType)
     : ("all" as const);
   const q = (firstValue(sp.q) ?? "").trim();
-  const editId = (firstValue(sp.edit) ?? "").trim();
-  const errorCode = firstValue(sp.error);
-  const isNew = firstValue(sp.new) === "1";
-  const savedFlash = firstValue(sp.saved);
-  const savedMessage =
-    savedFlash === "1"
-      ? "位置已保存"
-      : savedFlash === "status"
-        ? "状态已更新"
-        : undefined;
+  const { editId, errorCode, isNew, savedMessage } = parseCrudParams(sp, {
+    "1": "位置已保存",
+    status: "状态已更新"
+  });
 
   const [locations, counts, editing, tagSuggestions] = await Promise.all([
     listLocations({ type: typeFilter, q }),
@@ -87,28 +82,21 @@ export default async function LocationsPage({
 
       <section aria-label="位置名单">
         <div className="toolbar">
-          <nav className="tabs" aria-label="按类型筛选">
-            {tabs.map(tab => {
-              const params = new URLSearchParams();
-              if (q) params.set("q", q);
-              if (tab.key !== "all") params.set("type", tab.key);
-              const active = typeFilter === tab.key;
-              return (
-                <Link
-                  key={tab.key}
-                  href={`/dashboard/locations${params.toString() ? `?${params.toString()}` : ""}`}
-                  {...(active ? { "aria-current": "page" as const } : {})}
-                >
-                  {tab.label}<b>{tab.count}</b>
-                </Link>
-              );
-            })}
-          </nav>
-          <form className="search" action="/dashboard/locations" method="get">
-            {typeFilter !== "all" && <input type="hidden" name="type" value={typeFilter} />}
-            <input type="search" name="q" defaultValue={q} placeholder="搜索代码或名称" aria-label="搜索位置" />
-            <button type="submit">搜索</button>
-          </form>
+          <ToolbarTabs
+            tabs={tabs}
+            basePath="/dashboard/locations"
+            paramKey="type"
+            activeKey={typeFilter}
+            baseParams={new URLSearchParams(q ? { q } : {})}
+            ariaLabel="按类型筛选"
+          />
+          <ToolbarSearch
+            basePath="/dashboard/locations"
+            query={q}
+            placeholder="搜索代码或名称"
+            ariaLabel="搜索位置"
+            hiddenFields={typeFilter !== "all" ? { type: typeFilter } : undefined}
+          />
         </div>
 
         <LedgerPanel>

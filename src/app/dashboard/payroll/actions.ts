@@ -10,10 +10,7 @@ import {
   getLinkedDriverId
 } from "@/lib/permissions";
 import { syncStatements } from "@/lib/statements";
-
-function str(formData: FormData, key: string) {
-  return String(formData.get(key) ?? "").trim();
-}
+import { str } from "@/lib/action-helpers";
 
 function revalidateStatementViews() {
   revalidatePath("/dashboard/payroll");

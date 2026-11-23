@@ -1,27 +1,27 @@
 "use server";
 
+import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/permissions";
+import { withFlash } from "@/lib/search-params";
+import { codeTaken, makeBackWithError, setRecordStatus, str } from "@/lib/action-helpers";
 
 const TYPES = ["BASE", "AMAZON", "OTHER"] as const;
 
-function str(formData: FormData, key: string) {
-  return String(formData.get(key) ?? "").trim();
-}
+const FIELDS = [
+  "code",
+  "name",
+  "location_type",
+  "class_tag",
+  "address_line",
+  "city",
+  "state_code",
+  "postal_code"
+] as const;
 
-function backWithError(error: string, formData: FormData): never {
-  const params = new URLSearchParams();
-  const id = str(formData, "id");
-  if (id) params.set("edit", id);
-  params.set("error", error);
-  for (const field of ["code", "name", "location_type", "class_tag", "address_line", "city", "state_code", "postal_code"]) {
-    const value = str(formData, field);
-    if (value) params.set(`f_${field}`, value);
-  }
-  redirect(`/dashboard/locations?${params.toString()}`);
-}
+const backWithError = makeBackWithError({ basePath: "/dashboard/locations", fields: FIELDS });
 
 export async function saveLocation(formData: FormData) {
   await requirePermission("location.write");
@@ -65,16 +65,9 @@ export async function saveLocation(formData: FormData) {
     if (knownState.length === 0) backWithError("bad_state", formData);
   }
 
-  const conflicts = id
-    ? await prisma.$queryRaw<{ one: number }[]>`
-        SELECT 1 AS one FROM ops.locations
-        WHERE code = ${code} AND id <> ${id}::bigint LIMIT 1
-      `
-    : await prisma.$queryRaw<{ one: number }[]>`
-        SELECT 1 AS one FROM ops.locations
-        WHERE code = ${code} LIMIT 1
-      `;
-  if (conflicts.length > 0) backWithError("dup_code", formData);
+  if (await codeTaken({ table: Prisma.sql`ops.locations`, column: Prisma.sql`code`, value: code, excludeId: id || undefined })) {
+    backWithError("dup_code", formData);
+  }
 
   if (id) {
     await prisma.$executeRaw`
@@ -100,21 +93,14 @@ export async function saveLocation(formData: FormData) {
 
   revalidatePath("/dashboard/locations");
   revalidatePath("/dashboard");
-  redirect("/dashboard/locations?saved=1");
+  redirect(withFlash("/dashboard/locations", "", "saved"));
 }
 
 export async function setLocationStatus(formData: FormData) {
-  await requirePermission("location.write");
-  const id = str(formData, "id");
-  const status = str(formData, "status");
-  if (!id || !["ACTIVE", "INACTIVE"].includes(status)) redirect("/dashboard/locations");
-
-  await prisma.$executeRaw`
-    UPDATE ops.locations
-    SET status = ${status}::common.record_status, updated_at = now()
-    WHERE id = ${id}::bigint
-  `;
-  revalidatePath("/dashboard/locations");
-  revalidatePath("/dashboard");
-  redirect("/dashboard/locations?saved=status");
+  await setRecordStatus(formData, {
+    permission: "location.write",
+    table: Prisma.sql`ops.locations`,
+    basePath: "/dashboard/locations",
+    revalidatePaths: ["/dashboard"]
+  });
 }

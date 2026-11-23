@@ -15,8 +15,9 @@ import {
   SubmitButton,
   FormError
 } from "@/components/form-fields";
+import { ToolbarSearch, ToolbarTabs } from "@/components/crud-toolbar";
 import { requirePermission, getUserPermissions } from "@/lib/permissions";
-import { firstValue, formField, type SearchParams } from "@/lib/search-params";
+import { firstValue, formField, parseCrudParams, type SearchParams } from "@/lib/search-params";
 import { todayIso, odometerMi } from "@/lib/format";
 import {
   listTrucks,
@@ -53,21 +54,13 @@ export default async function TrucksPage({
   const ownFilter =
     ownParam === "company" || ownParam === "owner" ? ownParam : ("all" as const);
   const q = (firstValue(sp.q) ?? "").trim();
-  const editId = (firstValue(sp.edit) ?? "").trim();
   const odoId = (firstValue(sp.odo) ?? "").trim();
-  const errorCode = firstValue(sp.error);
-  const isNew = firstValue(sp.new) === "1";
-  const savedFlash = firstValue(sp.saved);
-  const savedMessage =
-    savedFlash === "1"
-      ? "车辆已保存"
-      : savedFlash === "status"
-        ? "状态已更新"
-        : savedFlash === "odometer"
-          ? "读数已记入"
-          : savedFlash === "deleted"
-            ? "读数已删除"
-            : undefined;
+  const { editId, errorCode, isNew, savedMessage } = parseCrudParams(sp, {
+    "1": "车辆已保存",
+    status: "状态已更新",
+    odometer: "读数已记入",
+    deleted: "读数已删除"
+  });
 
   const filterQuery = new URLSearchParams();
   if (ownFilter !== "all") filterQuery.set("own", ownFilter);
@@ -127,28 +120,21 @@ export default async function TrucksPage({
 
       <section aria-label="车辆名单">
         <div className="toolbar">
-          <nav className="tabs" aria-label="按归属筛选">
-            {tabs.map(tab => {
-              const params = new URLSearchParams(filterQuery);
-              if (tab.key === "all") params.delete("own");
-              else params.set("own", tab.key);
-              const active = ownFilter === tab.key;
-              return (
-                <Link
-                  key={tab.key}
-                  href={`/dashboard/trucks${params.toString() ? `?${params.toString()}` : ""}`}
-                  {...(active ? { "aria-current": "page" as const } : {})}
-                >
-                  {tab.label}<b>{tab.count}</b>
-                </Link>
-              );
-            })}
-          </nav>
-          <form className="search" action="/dashboard/trucks" method="get">
-            {ownFilter !== "all" && <input type="hidden" name="own" value={ownFilter} />}
-            <input type="search" name="q" defaultValue={q} placeholder="搜索车号、车牌、车型或车主" aria-label="搜索车辆" />
-            <button type="submit">搜索</button>
-          </form>
+          <ToolbarTabs
+            tabs={tabs}
+            basePath="/dashboard/trucks"
+            paramKey="own"
+            activeKey={ownFilter}
+            baseParams={filterQuery}
+            ariaLabel="按归属筛选"
+          />
+          <ToolbarSearch
+            basePath="/dashboard/trucks"
+            query={q}
+            placeholder="搜索车号、车牌、车型或车主"
+            ariaLabel="搜索车辆"
+            hiddenFields={ownFilter !== "all" ? { own: ownFilter } : undefined}
+          />
         </div>
 
         <LedgerPanel>

@@ -11,14 +11,7 @@ import { syncStatements, type StatementRef } from "@/lib/statements";
 import { periodOf } from "@/lib/period";
 import { todayIso } from "@/lib/format";
 import { getTripById, type TripEditRow } from "@/lib/queries/trips";
-
-function str(formData: FormData, key: string) {
-  return String(formData.get(key) ?? "").trim();
-}
-
-function isIsoDate(value: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(value).toString() !== "Invalid Date";
-}
+import { isIsoDate, str } from "@/lib/action-helpers";
 
 /** Bad or negative numbers fall back to 0 - same lenient semantics as entry */
 function num0(value: string) {

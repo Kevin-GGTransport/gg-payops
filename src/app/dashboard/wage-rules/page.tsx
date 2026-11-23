@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { FormError, FormGrid, SubmitButton, TextField } from "@/components/form-fields";
 import { FlashToast } from "@/components/flash-toast";
 import { requirePermission, getUserPermissions } from "@/lib/permissions";
-import { firstValue, formField, type SearchParams } from "@/lib/search-params";
+import { firstValue, formField, parseCrudParams, type SearchParams } from "@/lib/search-params";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeOperationOptions } from "@/lib/queries/operations";
 import { activeLocationOptions } from "@/lib/queries/locations";
@@ -50,18 +50,12 @@ export default async function WageRulesPage({
   // Read-only for accounts without wage_rule.write (actions re-check anyway)
   const canWrite = (await getUserPermissions()).has("wage_rule.write");
   const viewId = (firstValue(sp.v) ?? "").trim();
-  const errorCode = firstValue(sp.error);
-  const isNew = firstValue(sp.new) === "1";
   const fromId = (firstValue(sp.from) ?? "").trim();
-  const savedFlash = firstValue(sp.saved);
-  const savedMessage =
-    savedFlash === "1"
-      ? "已保存；生效中版本的改动即刻计入新录入的行程。"
-      : savedFlash === "activated"
-        ? "已切换生效；新录入的行程即按此版本计价。"
-        : savedFlash === "deleted"
-          ? "版本已删除。"
-          : undefined;
+  const { errorCode, isNew, savedMessage } = parseCrudParams(sp, {
+    "1": "已保存；生效中版本的改动即刻计入新录入的行程。",
+    activated: "已切换生效；新录入的行程即按此版本计价。",
+    deleted: "版本已删除。"
+  });
 
   const [versions, drivers, operations, locations] = await Promise.all([
     wageRuleVersionsList(),

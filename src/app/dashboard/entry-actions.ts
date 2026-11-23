@@ -11,6 +11,7 @@ import { resolveEndpointId } from "@/lib/locations";
 import { syncStatements } from "@/lib/statements";
 import { periodOf } from "@/lib/period";
 import { todayIso } from "@/lib/format";
+import { isIsoDate, str } from "@/lib/action-helpers";
 
 const MAX_GROUPS = 20;
 const MAX_ROWS_PER_GROUP = 50;
@@ -65,18 +66,10 @@ type ParsedGroup = {
   feeRows: ParsedFeeRow[];
 };
 
-function str(formData: FormData, key: string) {
-  return String(formData.get(key) ?? "").trim();
-}
-
 function clampCount(value: string, max: number) {
   const n = Number.parseInt(value, 10);
   if (!Number.isFinite(n) || n < 0) return 0;
   return Math.min(n, max);
-}
-
-function isIsoDate(value: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(value).toString() !== "Invalid Date";
 }
 
 /** Bad or negative numbers fall back to 0 - entry is validation-free, the sheet numeric columns are NOT NULL DEFAULT 0 */

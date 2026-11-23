@@ -12,7 +12,7 @@ import {
 } from "@/components/form-fields";
 import { FlashToast } from "@/components/flash-toast";
 import { requirePermission, getUserPermissions } from "@/lib/permissions";
-import { firstValue, formField, type SearchParams } from "@/lib/search-params";
+import { collectPrefixedIds, firstValue, formField, parseCrudParams, type SearchParams } from "@/lib/search-params";
 import { listRoles, getRoleById } from "@/lib/queries/roles";
 import { saveRole } from "./actions";
 import { RolesTable } from "./roles-table";
@@ -39,16 +39,13 @@ export default async function RolesPage({
   const canWrite = (await getUserPermissions()).has("role.write");
   const sp = await searchParams;
 
-  const editId = (firstValue(sp.edit) ?? "").trim();
-  const errorCode = firstValue(sp.error);
+  const { editId, errorCode, savedMessage } = parseCrudParams(sp, {
+    // The save action flashes saved=1 (was mis-keyed as "saved" here, so the
+    // toast never showed); delete still flashes saved=deleted
+    "1": "角色已保存",
+    deleted: "角色已删除"
+  });
   const isNew = firstValue(sp.new) === "1" && canWrite;
-  const savedFlash = firstValue(sp.saved);
-  const savedMessage =
-    savedFlash === "saved"
-      ? "角色已保存"
-      : savedFlash === "deleted"
-        ? "角色已删除"
-        : undefined;
 
   const [roles, editing] = await Promise.all([
     listRoles(),
@@ -56,11 +53,7 @@ export default async function RolesPage({
   ]);
 
   // Failed-save refills: name/code plus the matrix checkboxes (perm_<code>)
-  const refillPerms = new Set(
-    Object.keys(sp)
-      .filter(key => key.startsWith("perm_"))
-      .map(key => key.slice("perm_".length))
-  );
+  const refillPerms = collectPrefixedIds(sp, "perm_");
   const values = {
     name: formField(sp, "name", editing?.name),
     code: formField(sp, "code")

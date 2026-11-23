@@ -6,8 +6,9 @@ import { LedgerPanel } from "@/components/ledger";
 import { DriverTypeCards } from "@/components/choice-cards";
 import { FormGrid, TextField, DateField, TextareaField, CheckboxField, SelectField, SubmitButton, FormError } from "@/components/form-fields";
 import { FlashToast } from "@/components/flash-toast";
+import { ToolbarSearch, ToolbarTabs } from "@/components/crud-toolbar";
 import { requirePermission, getUserPermissions } from "@/lib/permissions";
-import { firstValue, formField, type SearchParams } from "@/lib/search-params";
+import { firstValue, formField, parseCrudParams, type SearchParams } from "@/lib/search-params";
 import {
   DRIVER_TYPES,
   PRICING_MODE_LABELS,
@@ -38,16 +39,10 @@ export default async function DriversPage({
   const typeParam = firstValue(sp.type);
   const typeFilter = typeParam === "driver" || typeParam === "owner" ? (typeParam as DriverType) : ("all" as const);
   const q = (firstValue(sp.q) ?? "").trim();
-  const editId = (firstValue(sp.edit) ?? "").trim();
-  const errorCode = firstValue(sp.error);
-  const isNew = firstValue(sp.new) === "1";
-  const savedFlash = firstValue(sp.saved);
-  const savedMessage =
-    savedFlash === "1"
-      ? "司机已保存"
-      : savedFlash === "status"
-        ? "状态已更新"
-        : undefined;
+  const { editId, errorCode, isNew, savedMessage } = parseCrudParams(sp, {
+    "1": "司机已保存",
+    status: "状态已更新"
+  });
 
   const filterQuery = new URLSearchParams();
   if (typeFilter !== "all") filterQuery.set("type", typeFilter);
@@ -88,8 +83,8 @@ export default async function DriversPage({
 
   const tabs = [
     { key: "all", label: "全部", count: counts.total },
-    { key: "DRIVER", label: "司机", count: counts.driver },
-    { key: "OWNER", label: "车主", count: counts.owner }
+    { key: "DRIVER", label: "司机", count: counts.driver, paramValue: "driver" },
+    { key: "OWNER", label: "车主", count: counts.owner, paramValue: "owner" }
   ] as const;
 
   return (
@@ -109,28 +104,21 @@ export default async function DriversPage({
 
       <section aria-label="司机名单">
         <div className="toolbar">
-          <nav className="tabs" aria-label="按人员类型筛选">
-            {tabs.map(tab => {
-              const params = new URLSearchParams(filterQuery);
-              if (tab.key === "all") params.delete("type");
-              else params.set("type", tab.key.toLowerCase());
-              const active = typeFilter === tab.key;
-              return (
-                <Link
-                  key={tab.key}
-                  href={`/dashboard/drivers${params.toString() ? `?${params.toString()}` : ""}`}
-                  {...(active ? { "aria-current": "page" as const } : {})}
-                >
-                  {tab.label}<b>{tab.count}</b>
-                </Link>
-              );
-            })}
-          </nav>
-          <form className="search" action="/dashboard/drivers" method="get">
-            {typeFilter !== "all" && <input type="hidden" name="type" value={typeFilter.toLowerCase()} />}
-            <input type="search" name="q" defaultValue={q} placeholder="搜索姓名、电话或驾照号" aria-label="搜索司机" />
-            <button type="submit">搜索</button>
-          </form>
+          <ToolbarTabs
+            tabs={tabs}
+            basePath="/dashboard/drivers"
+            paramKey="type"
+            activeKey={typeFilter}
+            baseParams={filterQuery}
+            ariaLabel="按人员类型筛选"
+          />
+          <ToolbarSearch
+            basePath="/dashboard/drivers"
+            query={q}
+            placeholder="搜索姓名、电话或驾照号"
+            ariaLabel="搜索司机"
+            hiddenFields={typeFilter !== "all" ? { type: typeFilter.toLowerCase() } : undefined}
+          />
         </div>
 
         <LedgerPanel>

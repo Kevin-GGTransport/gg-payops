@@ -4,10 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/permissions";
-
-function str(formData: FormData, key: string) {
-  return String(formData.get(key) ?? "").trim();
-}
+import { str } from "@/lib/action-helpers";
 
 type TierInput = { miles_from: number; amount: number };
 type PriceRuleInput = {
