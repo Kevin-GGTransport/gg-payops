@@ -5,14 +5,13 @@ import Link from "next/link";
 import { type ColumnDef } from "@tanstack/react-table";
 
 import { DriverTypeBadge, StatusPill } from "@/components/badges";
-import { RosterTable, useRosterTable } from "@/components/roster-table";
+import { inactiveRowClass, LG_HIDDEN, RosterTable, useRosterTable } from "@/components/roster-table";
 import { SubmitButton } from "@/components/submit-button";
 import { daysUntil } from "@/lib/format";
 import { PRICING_MODE_LABELS } from "@/lib/labels";
 import type { DriverRow } from "@/lib/queries/drivers";
 import { setDriverStatus } from "./actions";
 
-const lgHidden = "hidden lg:table-cell";
 
 /** Driver roster on the shared TanStack + shadcn table shell */
 export function DriversTable({
@@ -64,14 +63,14 @@ export function DriversTable({
       id: "phone",
       header: "电话",
       size: 130,
-      meta: { headerClass: lgHidden, cellClass: `mono ${lgHidden}` },
+      meta: { headerClass: LG_HIDDEN, cellClass: `mono ${LG_HIDDEN}` },
       cell: ({ row }) => row.original.phone ?? "—"
     },
     {
       id: "license",
       header: "驾照号",
       size: 152,
-      meta: { headerClass: lgHidden, cellClass: `mono ${lgHidden}` },
+      meta: { headerClass: LG_HIDDEN, cellClass: `mono ${LG_HIDDEN}` },
       cell: ({ row }) => (
         <>
           {row.original.license_no ?? "—"}
@@ -85,7 +84,7 @@ export function DriversTable({
       id: "expiry",
       header: "驾照到期",
       size: 128,
-      meta: { headerClass: lgHidden, cellClass: lgHidden },
+      meta: { headerClass: LG_HIDDEN, cellClass: LG_HIDDEN },
       cell: ({ row }) => {
         const expiry = row.original.license_expires_on;
         const days = expiry ? daysUntil(expiry) : null;
@@ -103,7 +102,7 @@ export function DriversTable({
       id: "hire",
       header: "入职日期",
       size: 112,
-      meta: { headerClass: lgHidden, cellClass: `mono ${lgHidden}` },
+      meta: { headerClass: LG_HIDDEN, cellClass: `mono ${LG_HIDDEN}` },
       cell: ({ row }) => row.original.hire_date ?? "—"
     },
     {
@@ -152,7 +151,7 @@ export function DriversTable({
   return (
     <RosterTable
       table={table}
-      rowClassName={driver => (driver.status !== "ACTIVE" ? "row-off" : undefined)}
+      rowClassName={inactiveRowClass}
       empty={empty}
     />
   );

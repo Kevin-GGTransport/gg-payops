@@ -2,19 +2,17 @@
 
 import * as React from "react";
 import { type ColumnDef } from "@tanstack/react-table";
-import { toast } from "sonner";
 
 import { DriverTypeBadge, OperationBadge, PackageBadge, RoutePair } from "@/components/badges";
 import { SelectAll } from "@/components/select-all";
 import { ConfirmAction } from "@/components/confirm-action";
-import { RosterTable, useRosterTable } from "@/components/roster-table";
+import { LG_HIDDEN, RosterTable, useRosterTable } from "@/components/roster-table";
 import { miles as fmtMiles, money } from "@/lib/format";
-import { isRedirectError } from "@/lib/action-result";
+import { submitWithToast } from "@/lib/submit-action";
 import type { TripRow } from "@/lib/queries/trips";
 import { deleteTrip } from "./actions";
 import { TripEditDialog, type TripEditDictionaries } from "./trip-edit-dialog";
 
-const lgHidden = "hidden lg:table-cell";
 
 /** Trip ledger on the shared TanStack + shadcn table shell */
 export function TripsTable({
@@ -127,7 +125,7 @@ export function TripsTable({
       id: "notes",
       header: "备注",
       size: 180,
-      meta: { headerClass: lgHidden, cellClass: `notes-cell ${lgHidden}` },
+      meta: { headerClass: LG_HIDDEN, cellClass: `notes-cell ${LG_HIDDEN}` },
       cell: ({ row }) => row.original.notes ?? "—"
     },
     {
@@ -153,18 +151,14 @@ export function TripsTable({
                   删除
                 </button>
               )}
-              onConfirm={async () => {
+              onConfirm={() => {
                 const fd = new FormData();
                 fd.set("id", row.original.id);
                 fd.set("return_to", returnTo);
-                try {
-                  await deleteTrip(fd);
-                  toast.success("行程已删除");
-                } catch (error) {
-                  // The action's redirect rejects with NEXT_REDIRECT on success
-                  if (isRedirectError(error)) toast.success("行程已删除");
-                  else toast.error("删除失败，请重试");
-                }
+                return submitWithToast(fd, deleteTrip, {
+                  success: "行程已删除",
+                  failure: "删除失败，请重试"
+                });
               }}
             />
           </>

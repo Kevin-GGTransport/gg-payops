@@ -6,7 +6,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 
 import { StatusPill } from "@/components/badges";
 import { ConfirmButton } from "@/components/confirm-button";
-import { RosterTable, useRosterTable } from "@/components/roster-table";
+import { inactiveRowClass, RosterTable, useRosterTable } from "@/components/roster-table";
 import { SubmitButton } from "@/components/submit-button";
 import type { OperationTypeRow } from "@/lib/queries/operations";
 import { deleteOperation, setOperationStatus } from "./actions";
@@ -132,7 +132,7 @@ export function OperationsTable({
   return (
     <RosterTable
       table={table}
-      rowClassName={op => (op.status !== "ACTIVE" ? "row-off" : undefined)}
+      rowClassName={inactiveRowClass}
       empty={empty}
     />
   );

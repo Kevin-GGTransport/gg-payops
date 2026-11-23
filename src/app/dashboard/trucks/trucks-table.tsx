@@ -5,7 +5,7 @@ import Link from "next/link";
 import { type ColumnDef } from "@tanstack/react-table";
 
 import { StatusPill } from "@/components/badges";
-import { RosterTable, useRosterTable } from "@/components/roster-table";
+import { inactiveRowClass, RosterTable, useRosterTable } from "@/components/roster-table";
 import { SubmitButton } from "@/components/submit-button";
 import { odometerMi } from "@/lib/format";
 import type { TruckRow } from "@/lib/queries/trucks";
@@ -128,7 +128,7 @@ export function TrucksTable({
   return (
     <RosterTable
       table={table}
-      rowClassName={truck => (truck.status !== "ACTIVE" ? "row-off" : undefined)}
+      rowClassName={inactiveRowClass}
       empty={empty}
     />
   );

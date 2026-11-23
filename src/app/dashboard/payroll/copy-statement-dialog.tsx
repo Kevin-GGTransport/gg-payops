@@ -3,10 +3,11 @@
 import * as React from "react";
 import { toast } from "sonner";
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ComboboxField } from "@/components/combobox-field";
+import { DialogFormFooter, SessionActionDialog } from "@/components/statement-action-dialog";
 import { isRedirectError } from "@/lib/action-result";
 import { DRIVER_TYPE_LABELS, type DriverType } from "@/lib/labels";
+import { shortPeriod } from "@/lib/format";
 import { copyStatement, type CopyErrorCode } from "./actions";
 
 /** Picker payloads pulled server-side by the host pages (same sources as entry) */
@@ -47,19 +48,14 @@ const COPY_ERROR_MESSAGES: Record<CopyErrorCode, string> = {
   target_has_trips: "目标该周期已有行程，为避免重复计薪已阻止，请先处理目标名下的行程。"
 };
 
-function shortPeriod(start: string, end: string) {
-  const fmt = (iso: string) => iso.slice(5).replace("-", "/");
-  return `${fmt(start)} ~ ${fmt(end)}`;
-}
-
 /**
  * Copy a draft statement's whole leg set onto another driver. Submission calls
- * the copyStatement action imperatively (the VerifyStatementButton pattern):
- * a refusal maps its error code to a Chinese message that stays in the dialog,
- * a success redirects from inside the action to the target's detail sheet.
- * Amounts are copied verbatim; when source and target driver types differ
- * (owner pricing ≠ driver pricing) a red warning asks for a manual recheck.
- * Picks reset per open via the session key - no effects.
+ * the copyStatement action imperatively: a refusal maps its error code to a
+ * Chinese message that stays in the dialog, a success redirects from inside
+ * the action to the target's detail sheet. Amounts are copied verbatim; when
+ * source and target driver types differ (owner pricing ≠ driver pricing) a
+ * red warning asks for a manual recheck. The shared SessionActionDialog owns
+ * the open/close/session skeleton.
  */
 export function CopyStatementButton({
   statement,
@@ -75,43 +71,22 @@ export function CopyStatementButton({
   triggerClassName?: string;
   triggerLabel?: string;
 }) {
-  // null = closed; every open bumps the number so the form remounts fresh
-  const [session, setSession] = React.useState<number | null>(null);
-
   return (
-    <>
-      <button
-        type="button"
-        className={triggerClassName}
-        onClick={() => setSession(s => (s ?? 0) + 1)}
-      >
-        {triggerLabel}
-      </button>
-      <Dialog
-        open={session !== null}
-        onOpenChange={open => {
-          if (!open) setSession(null);
-        }}
-      >
-        <DialogContent aria-label="复制工资单" className="max-h-[90vh]">
-          <DialogHeader className="mb-0 border-b border-dashed border-line px-5 pt-4 pb-3">
-            <DialogTitle>
-              复制工资单 · {statement.full_name}（
-              {shortPeriod(statement.period_start, statement.period_end)}）
-            </DialogTitle>
-          </DialogHeader>
-          {session !== null && (
-            <CopyForm
-              key={session}
-              statement={statement}
-              drivers={drivers}
-              trucks={trucks}
-              onClose={() => setSession(null)}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </>
+    <SessionActionDialog
+      ariaLabel="复制工资单"
+      title={
+        <>
+          复制工资单 · {statement.full_name}（
+          {shortPeriod(statement.period_start, statement.period_end)}）
+        </>
+      }
+      triggerLabel={triggerLabel}
+      triggerClassName={triggerClassName}
+    >
+      {close => (
+        <CopyForm statement={statement} drivers={drivers} trucks={trucks} onClose={close} />
+      )}
+    </SessionActionDialog>
   );
 }
 
@@ -215,19 +190,14 @@ function CopyForm({
       />
       {typeWarning && <p className="text-xs leading-relaxed text-red-700">{typeWarning}</p>}
       {error && <p className="text-xs leading-relaxed text-red-700">{error}</p>}
-      <div className="flex justify-end gap-2">
-        <button type="button" className="button button-quiet" disabled={pending} onClick={onClose}>
-          取消
-        </button>
-        <button
-          type="button"
-          className="button button-dark"
-          disabled={!driverId || !truckId || pending}
-          onClick={submit}
-        >
-          {pending ? "复制中…" : "复制"}
-        </button>
-      </div>
+      <DialogFormFooter
+        pending={pending}
+        canConfirm={Boolean(driverId && truckId)}
+        confirmLabel="复制"
+        pendingLabel="复制中…"
+        onCancel={onClose}
+        onConfirm={submit}
+      />
     </div>
   );
 }

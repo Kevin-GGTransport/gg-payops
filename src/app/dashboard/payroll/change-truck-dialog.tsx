@@ -2,10 +2,11 @@
 
 import * as React from "react";
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ComboboxField } from "@/components/combobox-field";
+import { DialogFormFooter, SessionActionDialog } from "@/components/statement-action-dialog";
 import { isRedirectError } from "@/lib/action-result";
 import type { StatementStatus } from "@/lib/labels";
+import { shortPeriod } from "@/lib/format";
 import { changeStatementTruck, type ChangeTruckErrorCode } from "./actions";
 import type { CopyTruckOption } from "./copy-statement-dialog";
 
@@ -29,19 +30,14 @@ const CHANGE_TRUCK_ERROR_MESSAGES: Record<ChangeTruckErrorCode, string> = {
   no_trips: "本周期没有行程可改。"
 };
 
-function shortPeriod(start: string, end: string) {
-  const fmt = (iso: string) => iso.slice(5).replace("-", "/");
-  return `${fmt(start)} ~ ${fmt(end)}`;
-}
-
 /**
  * Re-stamp a statement's whole period onto a different truck (the wrong-truck
  * fix: entry picked the wrong one and the whole week follows it). Submission
- * calls the action imperatively (the copy-dialog pattern): a refusal maps its
- * error code to a Chinese message that stays in the dialog, a success
- * redirects back to the sheet with the shared saved toast. VERIFIED sheets
- * may change trucks too, with an up-front red note that they will be flagged.
- * The pick resets per open via the session key - no effects.
+ * calls the action imperatively: a refusal maps its error code to a Chinese
+ * message that stays in the dialog, a success redirects back to the sheet
+ * with the shared saved toast. VERIFIED sheets may change trucks too, with an
+ * up-front red note that they will be flagged. The shared SessionActionDialog
+ * owns the open/close/session skeleton.
  */
 export function ChangeTruckButton({
   statement,
@@ -57,42 +53,27 @@ export function ChangeTruckButton({
   triggerClassName?: string;
   triggerLabel?: string;
 }) {
-  // null = closed; every open bumps the number so the form remounts fresh
-  const [session, setSession] = React.useState<number | null>(null);
-
   return (
-    <>
-      <button
-        type="button"
-        className={triggerClassName}
-        onClick={() => setSession(s => (s ?? 0) + 1)}
-      >
-        {triggerLabel}
-      </button>
-      <Dialog
-        open={session !== null}
-        onOpenChange={open => {
-          if (!open) setSession(null);
-        }}
-      >
-        <DialogContent aria-label="改车号" className="max-h-[90vh]">
-          <DialogHeader className="mb-0 border-b border-dashed border-line px-5 pt-4 pb-3">
-            <DialogTitle>
-              改车号 · {statement.full_name}（{shortPeriod(statement.period_start, statement.period_end)}）
-            </DialogTitle>
-          </DialogHeader>
-          {session !== null && (
-            <ChangeTruckForm
-              key={session}
-              statement={statement}
-              trucks={trucks}
-              returnTo={returnTo}
-              onClose={() => setSession(null)}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </>
+    <SessionActionDialog
+      ariaLabel="改车号"
+      title={
+        <>
+          改车号 · {statement.full_name}（
+          {shortPeriod(statement.period_start, statement.period_end)}）
+        </>
+      }
+      triggerLabel={triggerLabel}
+      triggerClassName={triggerClassName}
+    >
+      {close => (
+        <ChangeTruckForm
+          statement={statement}
+          trucks={trucks}
+          returnTo={returnTo}
+          onClose={close}
+        />
+      )}
+    </SessionActionDialog>
   );
 }
 
@@ -171,19 +152,14 @@ function ChangeTruckForm({
         </p>
       )}
       {error && <p className="text-xs leading-relaxed text-red-700">{error}</p>}
-      <div className="flex justify-end gap-2">
-        <button type="button" className="button button-quiet" disabled={pending} onClick={onClose}>
-          取消
-        </button>
-        <button
-          type="button"
-          className="button button-dark"
-          disabled={!truckId || pending}
-          onClick={submit}
-        >
-          {pending ? "修改中…" : "确认修改"}
-        </button>
-      </div>
+      <DialogFormFooter
+        pending={pending}
+        canConfirm={Boolean(truckId)}
+        confirmLabel="确认修改"
+        pendingLabel="修改中…"
+        onCancel={onClose}
+        onConfirm={submit}
+      />
     </div>
   );
 }

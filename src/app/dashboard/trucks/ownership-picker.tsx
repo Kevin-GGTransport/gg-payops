@@ -5,14 +5,16 @@ import { BuildingIcon, TruckIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { ComboboxField } from "@/components/combobox-field";
+import {
+  radioCardBase as cardBase,
+  radioCardNameClass as nameClass,
+  radioCardDescClass,
+  radioCardInputClass as inputClass
+} from "@/components/choice-cards";
 
 type OwnerOption = { id: string; full_name: string; phone: string | null };
 
-const cardBase =
-  "grid cursor-pointer grid-cols-[auto_1fr] items-center gap-x-2.5 rounded-md border border-line bg-card px-3 py-2.5 transition-colors hover:border-slate-300 has-[input:focus-visible]:outline has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-route";
-const nameClass = "text-sm font-bold";
-const descClass = "text-[11px] leading-tight text-muted-foreground";
-const inputClass = "sr-only";
+const descClass = radioCardDescClass;
 const cardOn = "border-route bg-route/5 [&_svg]:text-route [&_.name]:text-route";
 
 /**

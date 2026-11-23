@@ -229,3 +229,13 @@ export function RosterTable<TData>({
     </Table>
   );
 }
+
+/** Shared cell-visibility class: columns that only wide (lg+) viewports show */
+export const LG_HIDDEN = "hidden lg:table-cell";
+
+/** Row tint for inactive/empty roster rows (the "off" state of a record) */
+export function inactiveRowClass<T extends { status: string | null }>(
+  row: T
+): string | undefined {
+  return row.status !== "ACTIVE" ? "row-off" : undefined;
+}

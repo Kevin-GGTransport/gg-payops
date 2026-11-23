@@ -158,6 +158,9 @@ export default async function WageRulesPage({
         closeHref="/dashboard/wage-rules"
         title="新建版本"
       >
+        {/* Footer stays INSIDE the form (not ModalShell's footer prop):
+            useFormStatus pending state and the submit association only work
+            for descendants of the form element */}
         <form action={createVersion} aria-label="新建版本">
           <input type="hidden" name="source_id" value={createSourceId} />
           <div className="grid gap-4 px-5 py-4">

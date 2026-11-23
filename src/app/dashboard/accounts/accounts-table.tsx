@@ -5,12 +5,11 @@ import Link from "next/link";
 import { type ColumnDef } from "@tanstack/react-table";
 
 import { RoleBadge, StatusPill } from "@/components/badges";
-import { RosterTable, useRosterTable } from "@/components/roster-table";
+import { LG_HIDDEN, RosterTable, useRosterTable } from "@/components/roster-table";
 import { SubmitButton } from "@/components/submit-button";
 import type { AccountRow } from "@/lib/queries/accounts";
 import { setAccountStatus } from "./actions";
 
-const lgHidden = "hidden lg:table-cell";
 
 /** Account roster on the shared TanStack + shadcn table shell */
 export function AccountsTable({
@@ -83,7 +82,7 @@ export function AccountsTable({
         id: "last_login",
         header: "最后登录",
         size: 130,
-        meta: { cellClass: `mono ${lgHidden}`, headerClass: lgHidden },
+        meta: { cellClass: `mono ${LG_HIDDEN}`, headerClass: LG_HIDDEN },
         cell: ({ row }) => row.original.last_login_at ?? "—"
       },
       {

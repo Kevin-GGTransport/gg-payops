@@ -1,19 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { toast } from "sonner";
 
-import { ConfirmAction } from "@/components/confirm-action";
 import { StatementStatusBadge } from "@/components/badges";
-import { miles as fmtMiles, money } from "@/lib/format";
-import { isRedirectError } from "@/lib/action-result";
+import { StatusActionButton } from "@/components/status-action-button";
+import { miles as fmtMiles, money, shortPeriod } from "@/lib/format";
 import type { StatementListRow } from "@/lib/queries/statements";
 import { confirmDriverStatement } from "./actions";
-
-function shortPeriod(start: string, end: string) {
-  const fmt = (iso: string) => iso.slice(5).replace("-", "/");
-  return `${fmt(start)} ~ ${fmt(end)}`;
-}
 
 /**
  * VERIFIED -> DONE straight from the card, mirroring the ledger's confirm
@@ -21,28 +14,18 @@ function shortPeriod(start: string, end: string) {
  */
 function ConfirmCardButton({ statementId }: { statementId: string }) {
   return (
-    <ConfirmAction
-      title="标记司机确认？"
-      description="标记后该工资单视为司机已确认（金额不变，仍冻结）。"
-      confirmLabel="司机确认"
-      pendingLabel="确认中…"
-      trigger={props => (
-        <button {...props} className="button button-dark h-11 flex-1 text-[15px]">
-          司机确认
-        </button>
-      )}
-      onConfirm={async () => {
-        const fd = new FormData();
-        fd.set("id", statementId);
-        fd.set("return_to", window.location.pathname + window.location.search);
-        try {
-          await confirmDriverStatement(fd);
-          toast.success("司机已确认");
-        } catch (error) {
-          // The action's redirect rejects with NEXT_REDIRECT on success
-          if (isRedirectError(error)) toast.success("司机已确认");
-          else toast.error("标记失败，请重试");
-        }
+    <StatusActionButton
+      statementId={statementId}
+      action={confirmDriverStatement}
+      triggerClass="button button-dark h-11 flex-1 text-[15px]"
+      labels={{
+        title: "标记司机确认？",
+        description: "标记后该工资单视为司机已确认（金额不变，仍冻结）。",
+        confirmLabel: "司机确认",
+        pendingLabel: "确认中…",
+        trigger: "司机确认",
+        successToast: "司机已确认",
+        failureToast: "标记失败，请重试"
       }}
     />
   );

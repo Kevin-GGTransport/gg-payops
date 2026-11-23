@@ -68,3 +68,9 @@ export function currentWeekRange() {
   sunday.setDate(monday.getDate() + 6);
   return { start: dateIso(monday), end: dateIso(sunday) };
 }
+
+/** Compact period label for tight table cells: "11/14 ~ 11/20" */
+export function shortPeriod(start: string, end: string) {
+  const fmt = (iso: string) => iso.slice(5).replace("-", "/");
+  return `${fmt(start)} ~ ${fmt(end)}`;
+}

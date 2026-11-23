@@ -5,7 +5,7 @@ import Link from "next/link";
 import { type ColumnDef } from "@tanstack/react-table";
 
 import { LocationTypeBadge, StatusPill } from "@/components/badges";
-import { RosterTable, useRosterTable } from "@/components/roster-table";
+import { inactiveRowClass, RosterTable, useRosterTable } from "@/components/roster-table";
 import { SubmitButton } from "@/components/submit-button";
 import { fullAddress } from "@/lib/format";
 import type { LocationRow } from "@/lib/queries/locations";
@@ -107,7 +107,7 @@ export function LocationsTable({
   return (
     <RosterTable
       table={table}
-      rowClassName={location => (location.status !== "ACTIVE" ? "row-off" : undefined)}
+      rowClassName={inactiveRowClass}
       empty={empty}
     />
   );

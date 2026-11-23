@@ -3,13 +3,11 @@
 import * as React from "react";
 import Link from "next/link";
 import { type ColumnDef } from "@tanstack/react-table";
-import { toast } from "sonner";
 
-import { ConfirmAction } from "@/components/confirm-action";
 import { DriverTypeBadge, StatementStatusBadge } from "@/components/badges";
-import { RosterTable, useRosterTable } from "@/components/roster-table";
-import { fuel as fmtFuel, miles as fmtMiles, money } from "@/lib/format";
-import { isRedirectError } from "@/lib/action-result";
+import { LG_HIDDEN, RosterTable, useRosterTable } from "@/components/roster-table";
+import { StatusActionButton } from "@/components/status-action-button";
+import { fuel as fmtFuel, miles as fmtMiles, money, shortPeriod } from "@/lib/format";
 import type { StatementListRow } from "@/lib/queries/statements";
 import { confirmDriverStatement, verifyStatement } from "./actions";
 import {
@@ -17,82 +15,6 @@ import {
   type CopyDriverOption,
   type CopyTruckOption
 } from "./copy-statement-dialog";
-
-const lgHidden = "hidden lg:table-cell";
-
-function shortPeriod(start: string, end: string) {
-  const fmt = (iso: string) => iso.slice(5).replace("-", "/");
-  return `${fmt(start)} ~ ${fmt(end)}`;
-}
-
-/**
- * Draft -> verified straight from the ledger, no detour into the detail
- * sheet: one click freezes the numbers (permanent, so a confirm guards the
- * misclick). Calls the server action directly - a <form> per row inside the
- * table cell works too, but this keeps the cell markup flat.
- */
-function VerifyStatementButton({ statementId }: { statementId: string }) {
-  return (
-    <ConfirmAction
-      title="标记核对？"
-      description="标记核对后金额冻结、不可退回（再改行程只会标红）。"
-      confirmLabel="核对"
-      pendingLabel="核对中…"
-      trigger={props => (
-        <button {...props} className="linklike">
-          核对
-        </button>
-      )}
-      onConfirm={async () => {
-        const fd = new FormData();
-        fd.set("id", statementId);
-        fd.set("return_to", window.location.pathname + window.location.search);
-        try {
-          await verifyStatement(fd);
-          toast.success("已核对，金额已冻结");
-        } catch (error) {
-          // The action's redirect rejects with NEXT_REDIRECT on success
-          if (isRedirectError(error)) toast.success("已核对，金额已冻结");
-          else toast.error("核对失败，请重试");
-        }
-      }}
-    />
-  );
-}
-
-/**
- * VERIFIED -> driver-confirmed (DONE) straight from the ledger, mirroring the
- * verify button: one click, a confirm dialog guards the misclick, and the
- * numbers were already frozen at verification so nothing recomputes.
- */
-function ConfirmDriverButton({ statementId }: { statementId: string }) {
-  return (
-    <ConfirmAction
-      title="标记司机确认？"
-      description="标记后该工资单视为司机已确认（金额不变，仍冻结）。"
-      confirmLabel="司机确认"
-      pendingLabel="确认中…"
-      trigger={props => (
-        <button {...props} className="linklike">
-          司机确认
-        </button>
-      )}
-      onConfirm={async () => {
-        const fd = new FormData();
-        fd.set("id", statementId);
-        fd.set("return_to", window.location.pathname + window.location.search);
-        try {
-          await confirmDriverStatement(fd);
-          toast.success("司机已确认");
-        } catch (error) {
-          // The action's redirect rejects with NEXT_REDIRECT on success
-          if (isRedirectError(error)) toast.success("司机已确认");
-          else toast.error("标记失败，请重试");
-        }
-      }}
-    />
-  );
-}
 
 /** Statement ledger on the shared TanStack + shadcn table shell */
 export function StatementsTable({
@@ -159,7 +81,7 @@ export function StatementsTable({
       id: "trucks",
       header: "车号",
       size: 96,
-      meta: { cellClass: `mono ${lgHidden}`, headerClass: lgHidden },
+      meta: { cellClass: `mono ${LG_HIDDEN}`, headerClass: LG_HIDDEN },
       cell: ({ row }) => row.original.trucks || "—"
     },
     {
@@ -264,11 +186,38 @@ export function StatementsTable({
                 {canCopy && (
                   <CopyStatementButton statement={{ ...s, id: s.id }} drivers={drivers} trucks={trucks} />
                 )}
-                <VerifyStatementButton statementId={s.id} />
+                {/* One click freezes the numbers (permanent, so a confirm
+                    guards the misclick) - no detour into the detail sheet */}
+                <StatusActionButton
+                  statementId={s.id}
+                  action={verifyStatement}
+                  labels={{
+                    title: "标记核对？",
+                    description: "标记核对后金额冻结、不可退回（再改行程只会标红）。",
+                    confirmLabel: "核对",
+                    pendingLabel: "核对中…",
+                    trigger: "核对",
+                    successToast: "已核对，金额已冻结",
+                    failureToast: "核对失败，请重试"
+                  }}
+                />
               </>
             )}
             {canConfirm && s.id && s.status === "VERIFIED" && (
-              <ConfirmDriverButton statementId={s.id} />
+              /* Numbers already froze at verification - nothing recomputes */
+              <StatusActionButton
+                statementId={s.id}
+                action={confirmDriverStatement}
+                labels={{
+                  title: "标记司机确认？",
+                  description: "标记后该工资单视为司机已确认（金额不变，仍冻结）。",
+                  confirmLabel: "司机确认",
+                  pendingLabel: "确认中…",
+                  trigger: "司机确认",
+                  successToast: "司机已确认",
+                  failureToast: "标记失败，请重试"
+                }}
+              />
             )}
           </>
         );

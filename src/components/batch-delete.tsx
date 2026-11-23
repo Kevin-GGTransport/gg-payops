@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
 import { ConfirmAction } from "@/components/confirm-action";
-import { isRedirectError } from "@/lib/action-result";
 import { deleteTripsBatch } from "@/app/dashboard/trips/actions";
+import { submitWithToast } from "@/lib/submit-action";
 
 /** 行程台账批量删除：实时显示选中数，确认弹窗后调服务端 action */
 export function BatchDeleteTrips({ returnTo }: { returnTo: string }) {
@@ -39,14 +38,10 @@ export function BatchDeleteTrips({ returnTo }: { returnTo: string }) {
         const formData = new FormData();
         for (const box of checked) formData.append("selected", box.value);
         formData.set("return_to", returnTo);
-        try {
-          await deleteTripsBatch(formData);
-          toast.success(`已删除 ${checked.length} 条行程`);
-        } catch (error) {
-          // The action's redirect rejects with NEXT_REDIRECT on success
-          if (isRedirectError(error)) toast.success(`已删除 ${checked.length} 条行程`);
-          else toast.error("批量删除失败，请重试");
-        }
+        await submitWithToast(formData, deleteTripsBatch, {
+          success: `已删除 ${checked.length} 条行程`,
+          failure: "批量删除失败，请重试"
+        });
       }}
     />
   );
