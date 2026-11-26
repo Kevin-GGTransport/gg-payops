@@ -518,12 +518,12 @@ td.ctr {
 .roster tbody tr {
   transition: background-color 120ms ease;
 }
-/* 防疲劳斑马纹：宽表扫行不串行。语义行（小计/合计/停用/标红/状态整行/日期分隔带）
+/* 防疲劳斑马纹：宽表扫行不串行。语义行（小计/合计/停用/标红/日期分隔带）
    不染，保持自身信号；hover 与特殊行 hover 同落 td 级，层叠互不遮蔽 */
-.roster tbody tr:nth-child(even):not(.matrix-sub):not(.matrix-total):not(.row-off):not(.row-flagged):not(.row-verified):not(.row-confirmed):not(.day-sep) > td {
+.roster tbody tr:nth-child(even):not(.matrix-sub):not(.matrix-total):not(.row-off):not(.row-flagged):not(.day-sep) > td {
   @apply bg-muted/35;
 }
-.roster tbody tr:hover:not(.row-off):not(.row-flagged):not(.row-verified):not(.row-confirmed) > td {
+.roster tbody tr:hover:not(.row-off):not(.row-flagged) > td {
   @apply bg-muted/50;
 }
 .roster tbody tr.row-off:hover > td {
@@ -546,47 +546,17 @@ td.ctr {
 .roster .row-flagged .mono {
   @apply text-red-700;
 }
-/* Statement lifecycle floods the whole ledger row: checked = ledger green,
-   driver-confirmed = closing-stamp red, white ink throughout. Emerald/red
-   700 keeps white text AA-compliant (5.5:1 / 6.5:1) while staying bright;
-   hover darkens one step; zebra stays off. */
-.roster tbody tr.row-verified > td {
+/* Statement lifecycle rides on the driver name only (user-corrected: NOT the
+   whole row): solid ledger green / closing-stamp red chip with white ink,
+   square corners per the stamp language; the row keeps zebra and hover */
+.name-chip {
+  @apply inline-block rounded-[3px] px-1.5 py-px text-sm leading-5 font-medium;
+}
+.name-chip-green {
   @apply bg-emerald-700 text-white;
 }
-.roster tbody tr.row-verified:hover > td {
-  @apply bg-emerald-800;
-}
-.roster tbody tr.row-confirmed > td {
+.name-chip-red {
   @apply bg-red-700 text-white;
-}
-.roster tbody tr.row-confirmed:hover > td {
-  @apply bg-red-800;
-}
-/* Route-blue links and the emphasis ink flip to white on the colored ground */
-.roster .row-verified .cell-link,
-.roster .row-confirmed .cell-link,
-.roster .row-verified .actions a,
-.roster .row-confirmed .actions a,
-.roster .row-verified .linklike,
-.roster .row-confirmed .linklike,
-.roster .row-verified .strong,
-.roster .row-confirmed .strong {
-  @apply text-white;
-}
-/* Secondary sublines (fee total etc.) step back to translucent white */
-.roster .row-verified .text-muted-foreground,
-.roster .row-confirmed .text-muted-foreground {
-  @apply text-white/75;
-}
-/* Drift warning only ever renders on confirmed rows: amber keeps the
-   app's warning hue legible on deep red */
-.roster .row-confirmed .text-red-600 {
-  @apply text-amber-200;
-}
-/* Stamps invert to translucent white - lighter ink pass on the same paper */
-.roster .row-verified .stamp,
-.roster .row-confirmed .stamp {
-  @apply border-white/50 bg-white/15 text-white;
 }
 /* The td itself must stay a table cell: display:flex on a td makes the
    browser wrap it in an anonymous cell that drops out of the row's

@@ -54,10 +54,17 @@ export function StatementsTable({
       id: "driver",
       header: "司机 / 车主",
       size: 140,
-      // Lifecycle ink now lives on the whole row (row-verified / row-confirmed
-      // in globals.css); drafts stay neutral. Edits after checking are a
-      // detail-sheet concern - the list never flags them
-      cell: ({ row }) => row.original.full_name
+      // Lifecycle ink rides on the name chip: solid green once checked, solid
+      // red once driver-confirmed; drafts stay plain. Edits after checking
+      // are a detail-sheet concern - the list never flags them
+      cell: ({ row }) =>
+        row.original.status === "DONE" ? (
+          <span className="name-chip name-chip-red">{row.original.full_name}</span>
+        ) : row.original.status === "VERIFIED" ? (
+          <span className="name-chip name-chip-green">{row.original.full_name}</span>
+        ) : (
+          row.original.full_name
+        )
     },
     {
       id: "type",
@@ -241,17 +248,7 @@ export function StatementsTable({
   return (
     <RosterTable
       table={table}
-      // Status floods the row (see row-verified/row-confirmed in globals.css);
-      // empty merged rows keep the muted "off" treatment
-      rowClassName={r =>
-        r.status === "DONE"
-          ? "row-confirmed"
-          : r.status === "VERIFIED"
-            ? "row-verified"
-            : r.status === null && r.leg_count === 0
-              ? "row-off"
-              : undefined
-      }
+      rowClassName={r => (r.status === null && r.leg_count === 0 ? "row-off" : undefined)}
       empty={empty}
     />
   );
