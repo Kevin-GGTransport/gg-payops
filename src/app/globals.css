@@ -546,17 +546,24 @@ td.ctr {
 .roster .row-flagged .mono {
   @apply text-red-700;
 }
-/* Statement lifecycle rides on the driver name only (user-corrected: NOT the
-   whole row): solid ledger green / closing-stamp red chip with white ink,
-   square corners per the stamp language; the row keeps zebra and hover */
-.name-chip {
-  @apply inline-block rounded-[3px] px-1.5 py-px text-sm leading-5 font-medium;
+/* Statement lifecycle fills the whole driver-name CELL (user-corrected: not
+   the whole row, and not just the name text): negative margins bleed the
+   block over the td's own padding so the solid green/red reaches the cell
+   edges; the row's border line and zebra stay untouched */
+.cell-fill {
+  @apply block -mx-3 -my-2.5 px-3 py-2.5;
 }
-.name-chip-green {
+.cell-fill-green {
   @apply bg-emerald-700 text-white;
 }
-.name-chip-red {
+.cell-fill-red {
   @apply bg-red-700 text-white;
+}
+.roster tbody tr:hover .cell-fill-green {
+  @apply bg-emerald-800;
+}
+.roster tbody tr:hover .cell-fill-red {
+  @apply bg-red-800;
 }
 /* The td itself must stay a table cell: display:flex on a td makes the
    browser wrap it in an anonymous cell that drops out of the row's

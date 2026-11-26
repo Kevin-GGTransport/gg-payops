@@ -54,17 +54,19 @@ export function StatementsTable({
       id: "driver",
       header: "司机 / 车主",
       size: 140,
-      // Lifecycle ink rides on the name chip: solid green once checked, solid
-      // red once driver-confirmed; drafts stay plain. Edits after checking
-      // are a detail-sheet concern - the list never flags them
-      cell: ({ row }) =>
-        row.original.status === "DONE" ? (
-          <span className="name-chip name-chip-red">{row.original.full_name}</span>
-        ) : row.original.status === "VERIFIED" ? (
-          <span className="name-chip name-chip-green">{row.original.full_name}</span>
-        ) : (
-          row.original.full_name
-        )
+      // Lifecycle color fills the name cell: solid green once checked, solid
+      // red once driver-confirmed (cell-fill bleeds over the td padding);
+      // drafts stay plain. Edits after checking are a detail-sheet concern -
+      // the list never flags them
+      cell: ({ row }) => {
+        const s = row.original;
+        if (s.status !== "DONE" && s.status !== "VERIFIED") return s.full_name;
+        return (
+          <span className={`cell-fill ${s.status === "DONE" ? "cell-fill-red" : "cell-fill-green"}`}>
+            {s.full_name}
+          </span>
+        );
+      }
     },
     {
       id: "type",
