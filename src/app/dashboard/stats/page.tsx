@@ -45,20 +45,22 @@ export default async function StatsPage({
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
 
-  const [stateMiles, loads, pickerTotals] = await Promise.all([
+  const [stateMiles, allocations, pickerTotals] = await Promise.all([
     stateMileageByPeriod(period),
     periodLoadAllocations(period),
     statementPeriodTotals()
   ]);
+  const loads = allocations.rows;
   const stateMilesTotal = stateMiles.reduce((acc, r) => acc + Number(r.miles), 0);
-  const loadsMilesTotal = loads.reduce((acc, r) => acc + Number(r.miles), 0);
-  const loadsPayTotal = loads.reduce((acc, r) => acc + Number(r.payAmount), 0);
+  // 未回 Base trips keep their numbers hidden - totals only count closed trips
+  const loadsMilesTotal = loads.reduce((acc, r) => acc + (r.unreturned ? 0 : Number(r.miles)), 0);
+  const loadsPayTotal = loads.reduce((acc, r) => acc + (r.unreturned ? 0 : Number(r.payAmount)), 0);
 
   return (
     <>
       <PageHeader
         title="数据统计"
-        description="按周期汇总全队：01 各州里程（来自加油·按州区登记的里程）与 02 按趟分摊至 Load #（每趟 100% 计入其货单）。"
+        description="按周期汇总全队：01 各州里程（来自加油·按州区登记的里程）与 02 按趟分摊至 Load #（Base 出发至回 Base 为一趟、可跨天，整趟里程与工资按柜号权重分摊）。"
       />
 
       <div className="trip-filter">
@@ -139,8 +141,10 @@ export default async function StatsPage({
               <>
                 02 · 按趟分摊至 Load #
                 <b>
-                  {loads.length > 0
-                    ? `${loads.length} 趟 · ${fmtMiles(loadsMilesTotal.toString())} mi · ${money(loadsPayTotal.toString())}`
+                  {allocations.tripCount > 0
+                    ? `${allocations.tripCount} 趟 · ${loads.length} 单 · ${fmtMiles(loadsMilesTotal.toString())} mi · ${money(loadsPayTotal.toString())}${
+                        allocations.unreturnedCount > 0 ? ` · ${allocations.unreturnedCount} 趟未回 Base` : ""
+                      }`
                     : "本周期无行程"}
                 </b>
               </>
@@ -158,22 +162,40 @@ export default async function StatsPage({
                 </tr>
               </thead>
               <tbody>
-                {loads.length === 0 ? (
+                {allocations.tripCount === 0 ? (
                   <tr>
                     <td colSpan={6} className="empty">
                       本周期没有行程。
                     </td>
                   </tr>
+                ) : loads.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="empty">
+                      本周期行程没有挂柜号，无可分摊货单。
+                    </td>
+                  </tr>
                 ) : (
                   <>
                     {loads.map(row => (
-                      <tr key={`${row.driverId}-${row.tripDate}-${row.tripNo}`}>
+                      <tr key={`${row.driverId}-${row.tripNo}-${row.loadNo}`}>
                         <td>{row.driverName}</td>
                         <td className="mono">{mdOf(row.tripDate)} · 第{row.tripNo}趟</td>
                         <td className="mono">{row.loadNo || "—"}</td>
-                        <td className="mono num">100.0%</td>
-                        <td className="mono num">{fmtMiles(row.miles)}</td>
-                        <td className="mono num">{money(row.payAmount)}</td>
+                        <td className="mono num">{row.unreturned ? "—" : row.share}</td>
+                        <td className="mono num">
+                          {row.unreturned ? (
+                            <span className="text-amber-600">未回 Base</span>
+                          ) : (
+                            fmtMiles(row.miles)
+                          )}
+                        </td>
+                        <td className="mono num">
+                          {row.unreturned ? (
+                            <span className="text-amber-600">未回 Base</span>
+                          ) : (
+                            money(row.payAmount)
+                          )}
+                        </td>
                       </tr>
                     ))}
                     <tr>

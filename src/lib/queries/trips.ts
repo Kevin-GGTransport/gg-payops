@@ -208,14 +208,21 @@ export type DriverPeriodTripRow = {
   settle_date: string | null;
 };
 
+/** Minimal leg shape the day-chainer keys off (ids are stable slot keys) */
+export type ChainableLeg = {
+  id: string;
+  from_location_id: string | null;
+  to_location_id: string | null;
+};
+
 /**
  * Try to walk the whole day as ONE route: an Eulerian trail over the leg
  * multigraph (each leg is an edge, its destination feeds the next origin).
  * Choices and the start anchor follow entry order (id); the step budget
  * guards pathological days. Returns null when no full trail exists.
  */
-function oneDayTrail(chainable: DriverPeriodTripRow[]): DriverPeriodTripRow[] | null {
-  const outgoing = new Map<string, DriverPeriodTripRow[]>();
+function oneDayTrail<T extends ChainableLeg>(chainable: T[]): T[] | null {
+  const outgoing = new Map<string, T[]>();
   for (const leg of chainable) {
     // Chaining keys by origin; a null-from leg can only ever start a trail,
     // so it never needs an outgoing bucket
@@ -224,7 +231,7 @@ function oneDayTrail(chainable: DriverPeriodTripRow[]): DriverPeriodTripRow[] | 
     if (bucket) bucket.push(leg);
     else outgoing.set(leg.from_location_id, [leg]);
   }
-  const trail: DriverPeriodTripRow[] = [];
+  const trail: T[] = [];
   const used = new Set<string>();
   let budget = 5000;
 
@@ -258,8 +265,8 @@ function oneDayTrail(chainable: DriverPeriodTripRow[]): DriverPeriodTripRow[] | 
  * tours): follow origin -> destination while possible, restart from the
  * earliest entered leftover when the chain breaks.
  */
-function greedyChain(chainable: DriverPeriodTripRow[]): DriverPeriodTripRow[] {
-  const chained: DriverPeriodTripRow[] = [];
+function greedyChain<T extends ChainableLeg>(chainable: T[]): T[] {
+  const chained: T[] = [];
   const remaining = [...chainable];
   while (remaining.length > 0) {
     const last = chained[chained.length - 1];
@@ -277,7 +284,7 @@ function greedyChain(chainable: DriverPeriodTripRow[]): DriverPeriodTripRow[] {
  * come out as a single unbroken chain; otherwise entry order (id) decides
  * ties and restarts. NULL-origin legs never chain and go last.
  */
-function chainDayLegs(legs: DriverPeriodTripRow[]): DriverPeriodTripRow[] {
+export function chainDayLegs<T extends ChainableLeg>(legs: T[]): T[] {
   const chainable = legs.filter(l => l.from_location_id !== null);
   const orphans = legs.filter(l => l.from_location_id === null);
   return [...(oneDayTrail(chainable) ?? greedyChain(chainable)), ...orphans];
