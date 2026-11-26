@@ -1,10 +1,17 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { type ColumnDef } from "@tanstack/react-table";
 import { PlusIcon } from "lucide-react";
 import { toast } from "sonner";
 
+import {
+  DragHandleCell,
+  DRAG_HANDLE_COLUMN,
+  useRosterDrag,
+  type RosterDragState
+} from "@/components/roster-drag";
 import { ComboboxField } from "@/components/combobox-field";
 import { ConfirmAction } from "@/components/confirm-action";
 import { DateField } from "@/components/date-field";
@@ -17,7 +24,7 @@ import { calcFuelSubsidy, calcTripWage, type WageRuleData } from "@/lib/wage";
 import type { OperationType } from "@/lib/labels";
 import type { OperationOption } from "../trip-entry-form";
 import type { DriverPeriodTripRow } from "@/lib/queries/trips";
-import { deleteTrip } from "./actions";
+import { deleteTrip, reorderDayLegs } from "./actions";
 import { useSheetReport } from "./[driverId]/statement-sheet";
 
 const DOW = ["日", "一", "二", "三", "四", "五", "六"];
@@ -64,6 +71,7 @@ const cellHint = "block text-[10px] leading-tight font-normal text-muted-foregro
 
 /** Stable column set (module scope: a fresh array per render churns TanStack's sizing sync) */
 const SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
+  DRAG_HANDLE_COLUMN,
   { id: "date", header: "日期", size: 132, minSize: 118 },
   { id: "from", header: "起点", size: 138 },
   { id: "to", header: "终点", size: 138 },
@@ -90,9 +98,9 @@ type PaySpan = { span: number; members: DriverPeriodTripRow[] };
 
 /**
  * Per day, annotate package carriers with the length of their contiguous
- * same-package stretch. Chained order keeps circuits together and the carrier
- * is the day's earliest-entered package leg, so it heads the stretch in the
- * common case; a stretch split by chaining degrades to today's per-cell rows.
+ * same-package stretch. The head is the stretch's money holder (see the
+ * in-loop rule); legs parked ABOVE the head render their own per-cell rows -
+ * the same degradation a chain-split stretch has always had.
  */
 function planPaySpans(days: DayGroup[]) {
   const spans = new Map<string, PaySpan>();
@@ -102,8 +110,15 @@ function planPaySpans(days: DayGroup[]) {
       if (!leg.package_id || !leg.package_note) return;
       let k = i + 1;
       while (k < day.legs.length && day.legs[k].package_id === leg.package_id) k++;
-      spans.set(leg.id, { span: k - i, members: day.legs.slice(i + 1, k) });
-      for (let j = i + 1; j < k; j++) folded.add(day.legs[j].id);
+      // Head = the stretch's money holder, not merely the first in render
+      // order: a drag can park a $0 member first, and a rowSpan only extends
+      // downward - the amount must sit on the head row (ties keep the first)
+      let head = i;
+      for (let j = i + 1; j < k; j++) {
+        if (Number(day.legs[j].pay_amount) > Number(day.legs[head].pay_amount)) head = j;
+      }
+      spans.set(day.legs[head].id, { span: k - head, members: day.legs.slice(head + 1, k) });
+      for (let j = head + 1; j < k; j++) folded.add(day.legs[j].id);
     });
   }
   return { spans, folded };
@@ -126,6 +141,13 @@ const EditableLegRow = React.memo(function EditableLegRow({
   payFolded,
   changedFields,
   added,
+  onArmDrag,
+  onRowDragStart,
+  onRowDragEnd,
+  onRowDragOver,
+  onRowDrop,
+  draggable,
+  dropMark,
   onDirty,
   onValues
 }: {
@@ -143,6 +165,16 @@ const EditableLegRow = React.memo(function EditableLegRow({
   changedFields?: string[];
   /** Leg created after verification (whole-row tint + tag) */
   added?: boolean;
+  /** Grip press arms / releases whole-row native drag (same-day reorder) */
+  onArmDrag: (id: string, armed: boolean) => void;
+  onRowDragStart: (event: React.DragEvent<HTMLTableRowElement>, id: string) => void;
+  onRowDragEnd: () => void;
+  onRowDragOver: (event: React.DragEvent<HTMLTableRowElement>, id: string) => void;
+  onRowDrop: (event: React.DragEvent<HTMLTableRowElement>) => void;
+  /** This row is the armed drag source */
+  draggable: boolean;
+  /** Insertion indicator while a same-day drag hovers this row */
+  dropMark: "before" | "after" | null;
   onDirty: (id: string) => void;
   onValues: (id: string, values: LegValues) => void;
 }) {
@@ -292,7 +324,15 @@ const EditableLegRow = React.memo(function EditableLegRow({
           : "";
 
   return (
-    <tr className={added ? "bg-red-50/40" : undefined}>
+    <tr
+      draggable={draggable}
+      onDragStart={event => onRowDragStart(event, leg.id)}
+      onDragEnd={onRowDragEnd}
+      onDragOver={event => onRowDragOver(event, leg.id)}
+      onDrop={onRowDrop}
+      className={`${draggable ? "row-dragging" : ""}${dropMark ? ` drop-${dropMark}` : ""}${added ? " bg-red-50/40" : ""}`}
+    >
+      <DragHandleCell id={leg.id} label={`拖拽调整${legLabel}顺序`} onArmDrag={onArmDrag} />
       <td className="px-1.5">
         <DateField
           name={`${prefix}trip_date`}
@@ -630,6 +670,8 @@ const NewLegRow = React.memo(function NewLegRow({
 
   return (
     <tr>
+      {/* Handle slot stays visually consistent; appended rows never drag */}
+      <td className="ctr px-1" />
       <td className="px-1.5">
         <DateField
           name={`${prefix}trip_date`}
@@ -880,9 +922,113 @@ export function PayrollLegsTable({
   const [newTouched, setNewTouched] = React.useState<Set<number>>(new Set());
   const nextNewSlotId = React.useRef(1);
 
+  // Same-day drag order (save-on-drop): date -> ordered leg ids, derived over
+  // the server prop per render (never a copied days state) so a racing save /
+  // router.refresh flows straight through. A day whose leg set no longer
+  // matches its overlay falls back to the server order (length guard below).
+  const [dayOrder, setDayOrder] = React.useState<Record<string, string[]>>({});
+  const legDateById = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const day of days) for (const l of day.legs) map.set(l.id, day.date);
+    return map;
+  }, [days]);
+  const viewDays = React.useMemo(
+    () =>
+      days.map(day => {
+        const order = dayOrder[day.date];
+        if (!order) return day;
+        const byId = new Map(day.legs.map(l => [l.id, l]));
+        const legs = order
+          .map(id => byId.get(id))
+          .filter((l): l is DriverPeriodTripRow => Boolean(l));
+        return legs.length === day.legs.length ? { ...day, legs } : day;
+      }),
+    [days, dayOrder]
+  );
+
+  const router = useRouter();
+  // One in-flight order save: further drops stay optimistic-only until it lands
+  const reorderPending = React.useRef(false);
+  const commitReorder = React.useCallback(
+    (fromId: string, toId: string, before: boolean) => {
+      // One save in flight: ignore further drops entirely - an optimistic
+      // splice whose persist never runs would silently diverge from the DB
+      if (reorderPending.current) return;
+      const date = legDateById.get(fromId);
+      const day = date ? viewDays.find(d => d.date === date) : undefined;
+      if (!day) return;
+      const ids = day.legs.map(l => l.id);
+      const from = ids.indexOf(fromId);
+      const to = ids.indexOf(toId);
+      if (from < 0 || to < 0 || from === to) return;
+      const next = [...ids];
+      next.splice(from, 1);
+      next.splice(next.indexOf(toId) + (before ? 0 : 1), 0, fromId);
+      setDayOrder(prev => ({ ...prev, [day.date]: next }));
+      reorderPending.current = true;
+      (async () => {
+        try {
+          const res = await reorderDayLegs({
+            driverId: newLegCtx.driverId,
+            tripDate: day.date,
+            orderedIds: next
+          });
+          if (res.ok) {
+            toast.success("顺序已保存");
+          } else if (res.code === "trips_changed") {
+            // The day's leg set changed underneath - drop the overlay to the
+            // refreshed server truth (NOT location.reload: unsaved field
+            // edits in keyed rows survive a router refresh)
+            toast.error("行程刚有变动，顺序未保存，已刷新");
+            setDayOrder(prev => {
+              const copy = { ...prev };
+              delete copy[day.date];
+              return copy;
+            });
+            router.refresh();
+          } else {
+            toast.error("保存顺序失败，请重试");
+            setDayOrder(prev => ({ ...prev, [day.date]: ids }));
+          }
+        } catch (err) {
+          if (isRedirectError(err)) {
+            // A redirecting guard (requirePermission) rejects with
+            // NEXT_REDIRECT - the navigation itself is success (same
+            // contract as DeleteLegButton); roll back to the server order
+            setDayOrder(prev => {
+              const copy = { ...prev };
+              delete copy[day.date];
+              return copy;
+            });
+          } else {
+            toast.error("保存顺序失败，请重试");
+            setDayOrder(prev => ({ ...prev, [day.date]: ids }));
+          }
+        } finally {
+          reorderPending.current = false;
+        }
+      })();
+    },
+    [legDateById, viewDays, newLegCtx.driverId, router]
+  );
+  const [dragging, setDragging] = React.useState<RosterDragState<string, string>>(null);
+  // Same-day guard identity: the rendered day block (server trip_date - an
+  // unsaved date edit does not move the row between drop groups)
+  const legGroupOf = React.useCallback(
+    (id: string) => legDateById.get(id) ?? "",
+    [legDateById]
+  );
+  const drag = useRosterDrag<string, string>({
+    groupOf: legGroupOf,
+    onMove: commitReorder,
+    dragging,
+    onDraggingChange: setDragging
+  });
+
   // Package pay cells merge across each carrier's contiguous run (stable
-  // across renders: EditableLegRow is memo'd on these props)
-  const { spans, folded } = React.useMemo(() => planPaySpans(days), [days]);
+  // across renders: EditableLegRow is memo'd on these props); contiguity
+  // follows the rendered (possibly dragged) order
+  const { spans, folded } = React.useMemo(() => planPaySpans(viewDays), [viewDays]);
   // Post-verify additions as a lookup (diff data arrives from the server)
   const addedLegIds = React.useMemo(
     () => new Set(changes?.addedLegIds ?? []),
@@ -922,7 +1068,7 @@ export function PayrollLegsTable({
       { miles: number; fuel: number; pay: number; subsidy: number }
     >();
     const weekAcc = { miles: 0, fuel: 0, pay: 0, subsidy: 0 };
-    for (const day of days) {
+    for (const day of viewDays) {
       const acc = { miles: 0, fuel: 0, pay: 0, subsidy: 0 };
       for (const l of day.legs) {
         const v = live[l.id] ?? { miles: 0, fuel: 0, pay: 0, subsidy: 0 };
@@ -938,7 +1084,7 @@ export function PayrollLegsTable({
       weekAcc.subsidy += acc.subsidy;
     }
     return { totalsByDay, week: weekAcc };
-  }, [days, live]);
+  }, [viewDays, live]);
 
   const table = useRosterTable({ data: NO_ROWS, columns: SHEET_COLUMNS, storageKey });
   const dirtyCount = dirty.size;
@@ -956,15 +1102,15 @@ export function PayrollLegsTable({
       <input type="hidden" name="dirty_ids" value={[...dirty].join(",")} />
       <input type="hidden" name="new_row_count" value={newSlots.length} />
       <RosterTable table={table}>
-        <tbody>
-          {days.length === 0 && (
+        <tbody onDragLeave={drag.dragLeave}>
+          {viewDays.length === 0 && (
             <tr>
               <td colSpan={SHEET_COLUMNS.length} className="empty">
                 本周期没有行程记录。
               </td>
             </tr>
           )}
-          {days.flatMap(day => [
+          {viewDays.flatMap(day => [
             ...day.legs.map(leg => (
               <EditableLegRow
                 key={leg.id}
@@ -977,6 +1123,13 @@ export function PayrollLegsTable({
                 payFolded={folded.has(leg.id)}
                 changedFields={changes?.changedFieldsByLeg[leg.id]}
                 added={addedLegIds.has(leg.id)}
+                draggable={drag.armedRow === leg.id}
+                dropMark={drag.dropAt?.id === leg.id ? (drag.dropAt.before ? "before" : "after") : null}
+                onArmDrag={drag.armDrag}
+                onRowDragStart={drag.dragStart}
+                onRowDragEnd={drag.endDrag}
+                onRowDragOver={drag.dragOver}
+                onRowDrop={drag.drop}
                 onDirty={onDirty}
                 onValues={onValues}
               />
@@ -986,7 +1139,7 @@ export function PayrollLegsTable({
               const t = totalsByDay.get(day.date) ?? { miles: 0, fuel: 0, pay: 0, subsidy: 0 };
               return (
                 <tr key={`sub-${day.date}`} className="matrix-sub">
-                  <td colSpan={5}>
+                  <td colSpan={6}>
                     小计 · {day.date.slice(5).replace("-", "/")} 周{dowOf(day.date)}
                   </td>
                   <td>{fmtMiles(t.miles.toString())}</td>
@@ -998,9 +1151,9 @@ export function PayrollLegsTable({
               );
             })()
           ])}
-          {days.length > 1 && (
+          {viewDays.length > 1 && (
             <tr className="matrix-total">
-              <td colSpan={5}>周合计 · {days.length} 天</td>
+              <td colSpan={6}>周合计 · {viewDays.length} 天</td>
               <td>{fmtMiles(week.miles.toString())}</td>
               <td>{fmtFuel(week.fuel.toString())}</td>
               <td>{week.subsidy > 0 ? money(week.subsidy.toString()) : "—"}</td>

@@ -236,6 +236,11 @@ model Trip {
   driverName     String?       @map("driver_name") @db.VarChar(120)
   /// Submit-time full truck snapshot {truck_id, truck_code, plate_no, truck_type, capacity_note}
   truckSnapshot  Json?         @map("truck_snapshot")
+  /// Manual intra-day order from the payroll sheet drag handle; NULL = auto
+  /// chain order (chainDayLegs). Reset to NULL when trip_date changes
+  /// (the leg then appends by id in a manual day, or re-chains in an
+  /// all-NULL day).
+  sortOrder      Int?          @map("sort_order")
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 

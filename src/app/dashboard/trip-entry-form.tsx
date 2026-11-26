@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CameraIcon, ChevronDownIcon, GripVerticalIcon, PlusIcon } from "lucide-react";
+import { CameraIcon, ChevronDownIcon, PlusIcon } from "lucide-react";
 import type { ColumnDef, Table as TanstackTable } from "@tanstack/react-table";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,12 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PeriodPicker } from "@/components/period-picker";
 import { RosterTable, useRosterTable } from "@/components/roster-table";
+import {
+  DragHandleCell,
+  DRAG_HANDLE_COLUMN,
+  useRosterDrag,
+  type RosterDragState
+} from "@/components/roster-drag";
 import { ComboboxField } from "@/components/combobox-field";
 import { ConfirmAction } from "@/components/confirm-action";
 import { SubmitButton } from "@/components/submit-button";
@@ -203,7 +209,7 @@ const cellHint = "block text-[10px] leading-tight font-normal text-muted-foregro
  * horizontally; widths persist per storageKey and reset on double-click.
  */
 const SHEET_COLUMNS: ColumnDef<unknown, unknown>[] = [
-  { id: "handle", header: "", size: 28, enableResizing: false, meta: { headerClass: "px-1" } },
+  DRAG_HANDLE_COLUMN,
   // Row ordinal = render index, so drag/delete/add renumber it for free
   { id: "seq", header: "序号", size: 48, enableResizing: false, meta: { headerClass: "ctr" } },
   { id: "trip_date", header: "日期", size: 132, minSize: 112 },
@@ -667,17 +673,7 @@ const EntryRow = React.memo(function EntryRow({
       onDrop={onRowDrop}
       className={`${draggable ? "row-dragging" : ""}${dropMark ? ` drop-${dropMark}` : ""}`}
     >
-      <td className="ctr px-1">
-        <span
-          className="drag-handle"
-          aria-label={`拖拽调整${legLabel}顺序`}
-          onPointerDown={() => onArmDrag(rowId, true)}
-          onPointerUp={() => onArmDrag(rowId, false)}
-          onPointerCancel={() => onArmDrag(rowId, false)}
-        >
-          <GripVerticalIcon className="size-3.5" />
-        </span>
-      </td>
+      <DragHandleCell id={rowId} label={`拖拽调整${legLabel}顺序`} onArmDrag={onArmDrag} />
       <td className="ctr px-1.5 font-mono text-[12px] tabular-nums text-foreground">
         {rowIndex + 1}
       </td>
@@ -1188,8 +1184,8 @@ const GroupSection = React.memo(function GroupSection({
   onFilledChange: (groupId: number, count: number) => void;
   onDirty: () => void;
   /** Live drag source shared across groups (a group only accepts its own) */
-  dragging: { groupId: number; rowId: number } | null;
-  onDraggingChange: (source: { groupId: number; rowId: number } | null) => void;
+  dragging: RosterDragState<number, number>;
+  onDraggingChange: (state: RosterDragState<number, number>) => void;
   paySum: number;
   /** Owner fuel subsidy of this group's current rows (primitives keep the memo) */
   subsidyRate: number;
@@ -1224,10 +1220,6 @@ const GroupSection = React.memo(function GroupSection({
   );
   // Row ids that have at least one endpoint (what the buttons count)
   const [filledIds, setFilledIds] = React.useState<Set<number>>(new Set());
-  // Grip pressed but drag not confirmed yet; only that row turns draggable
-  const [armedRow, setArmedRow] = React.useState<number | null>(null);
-  // Insertion point while a same-group drag hovers this sheet
-  const [dropAt, setDropAt] = React.useState<{ id: number; before: boolean } | null>(null);
   // Fuel section: explicit defaults (saved week / draft / refill) win at
   // mount, else the saved rows of the group's opening driver, else blanks.
   // Driver switches re-load the picked driver's saved set (mirroring the
@@ -1252,7 +1244,6 @@ const GroupSection = React.memo(function GroupSection({
     columns: FEE_SHEET_COLUMNS,
     storageKey: "payops.entry.fees.cols"
   });
-  const dragActive = dragging?.groupId === group.id;
   const driverRecord = drivers.find(d => d.id === driverId);
   const driverType = driverRecord?.driver_type;
   // Pricing identity: an owner flagged price_as_driver bills as a driver
@@ -1452,11 +1443,15 @@ const GroupSection = React.memo(function GroupSection({
     [onDirty]
   );
 
-  const endDrag = React.useCallback(() => {
-    setArmedRow(null);
-    setDropAt(null);
-    onDraggingChange(null);
-  }, [onDraggingChange]);
+  // Same-group drag mechanics (armed grip + insertion marker + commit);
+  // `dragging` is parent-lifted so sibling groups render no-drop
+  const dragGroupOf = React.useCallback((): number => group.id, [group.id]);
+  const drag = useRosterDrag<number, number>({
+    groupOf: dragGroupOf,
+    onMove: moveRow,
+    dragging,
+    onDraggingChange
+  });
 
   const handleToChange = React.useCallback((rowId: number, value: string) => {
     setToByRow(current =>
@@ -1573,46 +1568,6 @@ const GroupSection = React.memo(function GroupSection({
       amount: acc.amount + (Number(slot.value.amount) || 0)
     }),
     { miles: 0, amount: 0 }
-  );
-
-  const armDrag = React.useCallback((rowId: number, armed: boolean) => {
-    setArmedRow(armed ? rowId : null);
-  }, []);
-
-  const dragStart = React.useCallback(
-    (event: React.DragEvent<HTMLTableRowElement>, rowId: number) => {
-      event.dataTransfer.effectAllowed = "move";
-      // Firefox only fires dragover when the drag carries some payload
-      event.dataTransfer.setData("text/plain", String(rowId));
-      onDraggingChange({ groupId: group.id, rowId });
-    },
-    [group.id, onDraggingChange]
-  );
-
-  const dragOver = React.useCallback(
-    (event: React.DragEvent<HTMLTableRowElement>, rowId: number) => {
-      // Same-group reorder only: a foreign group's drag keeps the no-drop cursor
-      if (!dragActive) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-      const rect = event.currentTarget.getBoundingClientRect();
-      const before = event.clientY < rect.top + rect.height / 2;
-      setDropAt(current =>
-        current?.id === rowId && current.before === before
-          ? current
-          : { id: rowId, before }
-      );
-    },
-    [dragActive]
-  );
-
-  const drop = React.useCallback(
-    (event: React.DragEvent<HTMLTableRowElement>) => {
-      event.preventDefault();
-      if (dragging && dropAt) moveRow(dragging.rowId, dropAt.id, dropAt.before);
-      endDrag();
-    },
-    [dragging, dropAt, moveRow, endDrag]
   );
 
   const prefix = `g_${index}`;
@@ -1785,12 +1740,7 @@ const GroupSection = React.memo(function GroupSection({
       <RosterTable table={sheetTable}>
         <tbody
           className="tb-group"
-          onDragLeave={event => {
-            // Drag left this sheet entirely (moving between our own rows doesn't)
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-              setDropAt(null);
-            }
-          }}
+          onDragLeave={drag.dragLeave}
         >
             {rows.map((slot, i) => {
               // Day separator band: whenever this row's date differs from the
@@ -1830,17 +1780,17 @@ const GroupSection = React.memo(function GroupSection({
                     onFromChange={handleFromChange}
                     onDateChange={handleDateChange}
                     onFillChange={handleFill}
-                    draggable={armedRow === slot.id}
-                    dropMark={dropAt?.id === slot.id ? (dropAt.before ? "before" : "after") : null}
+                    draggable={drag.armedRow === slot.id}
+                    dropMark={drag.dropAt?.id === slot.id ? (drag.dropAt.before ? "before" : "after") : null}
                     packagePay={pkgByRow[slot.id]?.pay ?? null}
                     packageId={pkgByRow[slot.id]?.id ?? null}
                     packageNote={pkgByRow[slot.id]?.note ?? null}
                     isPackageCarrier={pkgByRow[slot.id]?.carrier ?? false}
-                    onArmDrag={armDrag}
-                    onRowDragStart={dragStart}
-                    onRowDragEnd={endDrag}
-                    onRowDragOver={dragOver}
-                    onRowDrop={drop}
+                    onArmDrag={drag.armDrag}
+                    onRowDragStart={drag.dragStart}
+                    onRowDragEnd={drag.endDrag}
+                    onRowDragOver={drag.dragOver}
+                    onRowDrop={drag.drop}
                   />
                 </React.Fragment>
               );
@@ -2092,7 +2042,7 @@ export function TripEntryForm({
   // rows are skipped by the server and stay out of every count)
   const [filledCounts, setFilledCounts] = React.useState<Record<number, number>>({});
   // Live drag source across groups (groupId gates which sheet accepts the drop)
-  const [dragging, setDragging] = React.useState<{ groupId: number; rowId: number } | null>(null);
+  const [dragging, setDragging] = React.useState<RosterDragState<number, number>>(null);
   // Whether the user has changed anything (guards photo-import replacement)
   const dirtyRef = React.useRef(false);
 

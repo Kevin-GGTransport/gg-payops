@@ -108,7 +108,7 @@ export async function confirmDriverStatement(formData: FormData) {
                 'fuel_gallons', to_char(t.fuel_gallons, 'FM999999990.000'),
                 'pay_amount', to_char(t.pay_amount, 'FM999999990.00'),
                 'notes', t.notes
-              ) ORDER BY t.id)
+              ) ORDER BY t.trip_date, t.sort_order NULLS LAST, t.id)
               FROM pay.trips t
               LEFT JOIN ops.locations f ON f.id = t.from_location_id
               LEFT JOIN ops.locations o ON o.id = t.to_location_id

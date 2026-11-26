@@ -169,6 +169,8 @@ export type DriverPeriodTripRow = {
   notes: string | null;
   package_id: string | null;
   package_note: string | null;
+  /** Manual intra-day order (payroll sheet drag); NULL = auto chain order */
+  sort_order: number | null;
 };
 
 /**
@@ -261,7 +263,8 @@ export async function driverPeriodTrips(period: Period, driverId: string) {
            f.code AS from_code, o.code AS to_code,
            t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.fuel_subsidy::text,
            t.notes,
-           t.package_id, t.package_note
+           t.package_id, t.package_note,
+           t.sort_order
     FROM pay.trips t
     JOIN ops.drivers d ON d.id = t.driver_id
     LEFT JOIN ops.locations f ON f.id = t.from_location_id
@@ -269,7 +272,7 @@ export async function driverPeriodTrips(period: Period, driverId: string) {
     WHERE t.driver_id = ${driverId}::bigint
       AND t.trip_date >= ${period.start}::date
       AND t.trip_date <= ${period.end}::date
-    ORDER BY t.trip_date, t.id
+    ORDER BY t.trip_date, t.sort_order NULLS LAST, t.id
   `;
   // created_at ties within a submitted batch (one multi-row INSERT shares the
   // transaction timestamp), so id - the entry order - is the only stable base
@@ -280,7 +283,11 @@ export async function driverPeriodTrips(period: Period, driverId: string) {
     if (day && day[0].trip_date === row.trip_date) day.push(row);
     else days.push([row]);
   }
-  return days.flatMap(chainDayLegs);
+  // Any manual sort_order freezes the day's order as-is (a clerk dragged it);
+  // new NULL legs already sit at the day's end by id per the SQL order
+  return days.flatMap(day =>
+    day.some(l => l.sort_order !== null) ? day : chainDayLegs(day)
+  );
 }
 
 /**

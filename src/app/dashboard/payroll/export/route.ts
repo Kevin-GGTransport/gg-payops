@@ -46,7 +46,14 @@ const PAY_COL = 8;
  * run length; members covered by a run land in the folded set. Mirrors the
  * detail page's planPaySpans so both views merge the same way.
  */
-function planPayRuns(legs: Array<{ package_id: string | null; package_note: string | null; trip_date: string }>) {
+function planPayRuns(
+  legs: Array<{
+    package_id: string | null;
+    package_note: string | null;
+    trip_date: string;
+    pay_amount: string;
+  }>
+) {
   const runs = new Map<number, number>();
   const folded = new Set<number>();
   for (let i = 0; i < legs.length; i++) {
@@ -62,8 +69,15 @@ function planPayRuns(legs: Array<{ package_id: string | null; package_note: stri
       legs[k].package_id === leg.package_id &&
       legs[k].trip_date === leg.trip_date
     ) k++;
-    runs.set(i, k - i);
-    for (let j = i + 1; j < k; j++) folded.add(j);
+    // Head = the run's money holder, not merely the first in render order: a
+    // drag can park a $0 member first, and the merge starts at the head row
+    // (same rule as the sheet's planPaySpans; ties keep the first)
+    let head = i;
+    for (let j = i + 1; j < k; j++) {
+      if (Number(legs[j].pay_amount) > Number(legs[head].pay_amount)) head = j;
+    }
+    runs.set(head, k - head);
+    for (let j = head + 1; j < k; j++) folded.add(j);
   }
   return { runs, folded };
 }

@@ -110,7 +110,8 @@ async function applyTripUpdate(
       fuel_gallons = ${Math.round(num0(str(formData, `${prefix}fuel_gallons`)) * 100) / 100},
       pay_amount = ${Math.round(num0(str(formData, `${prefix}pay_amount`)) * 100) / 100},
       fuel_subsidy = ${calcFuelSubsidy({ driverType: current.driver_type ?? undefined, miles: milesNum, rate: fuelSubsidyRate })},
-      notes = ${str(formData, `${prefix}notes`) || null}
+      notes = ${str(formData, `${prefix}notes`) || null},
+      sort_order = CASE WHEN ${newDate}::date <> ${current.trip_date}::date THEN NULL ELSE sort_order END
     WHERE id = ${id}::bigint
   `;
 
@@ -474,6 +475,67 @@ export async function saveStatementSheet(formData: FormData) {
   revalidatePath("/dashboard/trips");
   revalidatePath("/dashboard/payroll");
   redirect(`${backTo}${backTo.includes("?") ? "&" : "?"}saved=1`);
+}
+
+/** Why a day reorder was refused; the sheet maps the code to Chinese */
+export type ReorderDayErrorCode = "bad_request" | "trips_changed";
+
+/**
+ * Persist one day's drag order (save-on-drop, independent of the big sheet
+ * save). orderedIds must be EXACTLY the day's current leg set - anything else
+ * (another tab added/deleted a leg, a batch save landed first) refuses with
+ * trips_changed instead of guessing. Positions land as array ordinals via
+ * unnest WITH ORDINALITY; statements then re-sync so a DONE sheet keeps the
+ * permanent edited_after_verify convention (order never changes aggregates).
+ * Return-value action: no redirect, no revalidatePath - the client already
+ * holds the optimistic order and the page is auth-dynamic.
+ */
+export async function reorderDayLegs(input: {
+  driverId: string;
+  tripDate: string;
+  orderedIds: string[];
+}): Promise<{ ok: true } | { ok: false; code: ReorderDayErrorCode }> {
+  await requirePermission("trip.write");
+  const { driverId = "", tripDate = "", orderedIds = [] } = input ?? {};
+  const ids = [...new Set(orderedIds.filter(id => /^\d+$/.test(id)))];
+  if (
+    !/^\d+$/.test(driverId) ||
+    !isIsoDate(tripDate) ||
+    ids.length === 0 ||
+    ids.length !== orderedIds.length
+  ) {
+    return { ok: false, code: "bad_request" };
+  }
+  await assertDriverScope(driverId);
+
+  return prisma.$transaction(
+    async tx => {
+      // Fresh truth for the set-match guard; racing saves may interleave
+      // under READ COMMITTED with benign outcomes (a concurrently inserted
+      // leg keeps NULL and appends; a deleted one is skipped by the
+      // positional UPDATE)
+      const current = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id::text FROM pay.trips
+        WHERE driver_id = ${driverId}::bigint AND trip_date = ${tripDate}::date
+      `;
+      const currentSet = new Set(current.map(r => r.id));
+      if (currentSet.size !== ids.length || ids.some(id => !currentSet.has(id))) {
+        return { ok: false as const, code: "trips_changed" as const };
+      }
+      await tx.$executeRaw`
+        UPDATE pay.trips t
+        SET sort_order = o.pos::int
+        FROM unnest(ARRAY[${Prisma.join(ids.map(id => Prisma.sql`${id}::bigint`))}])
+          WITH ORDINALITY AS o(id, pos)
+        WHERE t.id = o.id
+          AND t.driver_id = ${driverId}::bigint
+          AND t.trip_date = ${tripDate}::date
+      `;
+      await syncStatementsInTx(tx, [{ driverId, periodStart: periodOf(tripDate).start }]);
+      return { ok: true as const };
+    },
+    { timeout: 30_000 }
+  );
 }
 
 
