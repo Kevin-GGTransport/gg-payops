@@ -54,22 +54,10 @@ export function StatementsTable({
       id: "driver",
       header: "司机 / 车主",
       size: 140,
-      // Same muted tones as the detail masthead: dark green = verified, dark
-      // red = driver confirmed; drafts stay neutral. Edits after checking are
-      // a detail-sheet concern - the list never flags them
-      cell: ({ row }) => (
-        <span
-          className={
-            row.original.status === "DONE"
-              ? "text-red-800"
-              : row.original.status === "VERIFIED"
-                ? "text-emerald-800"
-                : undefined
-          }
-        >
-          {row.original.full_name}
-        </span>
-      )
+      // Lifecycle ink now lives on the whole row (row-verified / row-confirmed
+      // in globals.css); drafts stay neutral. Edits after checking are a
+      // detail-sheet concern - the list never flags them
+      cell: ({ row }) => row.original.full_name
     },
     {
       id: "type",
@@ -253,7 +241,17 @@ export function StatementsTable({
   return (
     <RosterTable
       table={table}
-      rowClassName={r => (r.status === null && r.leg_count === 0 ? "row-off" : undefined)}
+      // Status floods the row (see row-verified/row-confirmed in globals.css);
+      // empty merged rows keep the muted "off" treatment
+      rowClassName={r =>
+        r.status === "DONE"
+          ? "row-confirmed"
+          : r.status === "VERIFIED"
+            ? "row-verified"
+            : r.status === null && r.leg_count === 0
+              ? "row-off"
+              : undefined
+      }
       empty={empty}
     />
   );

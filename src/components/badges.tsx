@@ -11,8 +11,10 @@ import {
   type StatementStatus
 } from "@/lib/labels";
 
-/* Stamp-style label: square corners, thin outline, pale fill */
-const pillBase = "inline-flex items-center rounded-[3px] border px-1.5 py-px text-[11px] font-semibold leading-4";
+/* Stamp-style label: square corners, thin outline, pale fill. `stamp` is a
+ * styling hook only (no rules of its own) - solid status rows invert stamps
+ * to translucent white ink */
+const pillBase = "stamp inline-flex items-center rounded-[3px] border px-1.5 py-px text-[11px] font-semibold leading-4";
 const tagBase = pillBase;
 
 export function DriverTypeBadge({ type }: { type: DriverType }) {
