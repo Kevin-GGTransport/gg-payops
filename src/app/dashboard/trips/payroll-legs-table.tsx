@@ -24,7 +24,7 @@ import { calcFuelSubsidy, calcTripWage, type WageRuleData } from "@/lib/wage";
 import type { OperationType } from "@/lib/labels";
 import type { OperationOption } from "../trip-entry-form";
 import type { DriverPeriodTripRow } from "@/lib/queries/trips";
-import { deleteTrip, reorderDayLegs } from "./actions";
+import { deleteTrip, reorderDayLegs, unsettleTrip } from "./actions";
 import { useSheetReport } from "./[driverId]/statement-sheet";
 
 const DOW = ["日", "一", "二", "三", "四", "五", "六"];
@@ -873,6 +873,37 @@ function DeleteLegButton({ legId, returnTo }: { legId: string; returnTo: string 
   );
 }
 
+/** Release a claimed leg back to unsettled - same imperative pattern as the
+ *  delete (a nested form inside the sheet form would be invalid HTML) */
+function UnsettleLegButton({ legId, returnTo }: { legId: string; returnTo: string }) {
+  return (
+    <ConfirmAction
+      title="移出本周期？"
+      description="移出后该行程工资将不再计入本周期，回到「未结行程」待重新认领。"
+      confirmLabel="移出"
+      pendingLabel="移出中…"
+      trigger={props => (
+        <button {...props} className="linklike">
+          移出
+        </button>
+      )}
+      onConfirm={async () => {
+        const fd = new FormData();
+        fd.set("id", legId);
+        fd.set("return_to", returnTo);
+        try {
+          await unsettleTrip(fd);
+          toast.success("已移出本周期");
+        } catch (error) {
+          // The action's redirect rejects with NEXT_REDIRECT on success
+          if (isRedirectError(error)) toast.success("已移出本周期");
+          else toast.error("移出失败，请重试");
+        }
+      }}
+    />
+  );
+}
+
 /**
  * Drill-down ledger for one driver's period - directly editable like the
  * entry sheet: click a cell and change it, then one 保存修改 writes every
@@ -889,7 +920,14 @@ export function PayrollLegsTable({
   storageKey = "payops.payroll.legs.cols",
   /** Verification-snapshot diff: field keys per changed leg + post-verify
    *  additions (undefined on legacy statements without a snapshot) */
-  changes
+  changes,
+  /** Claimed unsettled legs paying in this period: read-only rows in a
+   *  trailing group - real trip dates shown as-is, no day chaining, no drag
+   *  handles, no attendance days */
+  deferred = [],
+  /** The target statement itself is driver-confirmed: the deferred legs sit
+   *  in its frozen snapshot, so the release action hides (server refuses) */
+  deferredLocked = false
 }: {
   days: DayGroup[];
   /** Where the per-row delete redirects back to (full path with ?period=) */
@@ -898,6 +936,8 @@ export function PayrollLegsTable({
   newLegCtx: NewLegContext;
   storageKey?: string;
   changes?: { changedFieldsByLeg: Record<string, string[]>; addedLegIds: string[] };
+  deferred?: DriverPeriodTripRow[];
+  deferredLocked?: boolean;
 }) {
   // Live per-leg numbers (initial = stored), recomputed subtotals read these
   const [live, setLive] = React.useState<Record<string, LegValues>>(() =>
@@ -986,6 +1026,14 @@ export function PayrollLegsTable({
               return copy;
             });
             router.refresh();
+          } else if (res.code === "archived") {
+            // A frozen leg sits in the day - the sheet only reorders live ones
+            toast.error("已确认工资单只读，顺序未保存");
+            setDayOrder(prev => {
+              const copy = { ...prev };
+              delete copy[day.date];
+              return copy;
+            });
           } else {
             toast.error("保存顺序失败，请重试");
             setDayOrder(prev => ({ ...prev, [day.date]: ids }));
@@ -1161,6 +1209,66 @@ export function PayrollLegsTable({
               <td colSpan={2} />
             </tr>
           )}
+          {deferred.length > 0 &&
+            (() => {
+              // Claimed legs carry their own subtotal block: the money pays
+              // here, the dates never join the day groups above
+              const t = deferred.reduce(
+                (acc, l) => ({
+                  miles: acc.miles + Number(l.miles),
+                  fuel: acc.fuel + Number(l.fuel_gallons),
+                  pay: acc.pay + Number(l.pay_amount),
+                  subsidy: acc.subsidy + Number(l.fuel_subsidy)
+                }),
+                { miles: 0, fuel: 0, pay: 0, subsidy: 0 }
+              );
+              return (
+                <>
+                  <tr className="matrix-sub">
+                    <td colSpan={SHEET_COLUMNS.length}>
+                      顺延补录 · {deferred.length} 段 · 工资计入本周期，日期为实际业务日期（不计出勤日）
+                    </td>
+                  </tr>
+                  {deferred.map(leg => (
+                    <tr key={leg.id}>
+                      <td />
+                      <td className="mono">
+                        {leg.trip_date}
+                        <span className="ml-1.5 rounded-sm bg-amber-100 px-1 py-px text-[10px] font-medium text-amber-800">
+                          顺延
+                        </span>
+                      </td>
+                      <td className="mono">{leg.from_code ?? "?"}</td>
+                      <td className="mono">{leg.to_code ?? "?"}</td>
+                      <td className="mono">{leg.operation}</td>
+                      <td className="mono">{leg.load_no || "—"}</td>
+                      <td className="mono num">{fmtMiles(leg.miles)}</td>
+                      <td className="mono num">
+                        {Number(leg.fuel_gallons) > 0 ? fmtFuel(leg.fuel_gallons) : "—"}
+                      </td>
+                      <td className="mono num">
+                        {leg.driver_type === "OWNER" && Number(leg.fuel_subsidy) > 0
+                          ? money(leg.fuel_subsidy)
+                          : "—"}
+                      </td>
+                      <td className="mono num">{money(leg.pay_amount)}</td>
+                      <td className="notes-cell">{leg.notes ?? "—"}</td>
+                      <td className="px-1.5">
+                        {!deferredLocked && <UnsettleLegButton legId={leg.id} returnTo={returnTo} />}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="matrix-sub">
+                    <td colSpan={6}>顺延小计</td>
+                    <td>{fmtMiles(t.miles.toString())}</td>
+                    <td>{fmtFuel(t.fuel.toString())}</td>
+                    <td>{t.subsidy > 0 ? money(t.subsidy.toString()) : "—"}</td>
+                    <td>{money(t.pay.toString())}</td>
+                    <td colSpan={2} />
+                  </tr>
+                </>
+              );
+            })()}
           {newSlots.length > 0 && (
             <>
               {/* Appended rows sit below the week total: their date may belong

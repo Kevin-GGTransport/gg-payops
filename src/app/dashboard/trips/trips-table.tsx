@@ -135,7 +135,7 @@ export function TripsTable({
       enableResizing: false,
       meta: { cellClass: "actions" },
       cell: ({ row }) =>
-        edit ? (
+        edit && !row.original.locked ? (
           <>
             <button type="button" className="linklike" onClick={() => setEditing(row.original)}>
               编辑
@@ -162,6 +162,10 @@ export function TripsTable({
               }}
             />
           </>
+        ) : row.original.locked ? (
+          // Frozen inside a driver-confirmed snapshot - the only door back
+          // to editable is reopening that statement on the payroll side
+          <span className="text-muted-foreground">已确认只读</span>
         ) : (
           <span className="text-muted-foreground">只读</span>
         )

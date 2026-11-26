@@ -17,26 +17,35 @@ export type ReadOnlyDay = {
 
 /**
  * Read-only settlement sheet for driver-linked accounts (and anyone without
- * trip.write): the same three sections as the editable sheet - day ledger,
- * fuel by state, custom fees. Phones get card/stacked layouts (a 7-column
- * table has no business on a 390px screen), md+ keeps the ledger tables.
- * No editors, no save bar; the 司机确认 button stays on the page header.
+ * trip.write): the same sections as the editable sheet - day ledger, claimed
+ * deferred legs, fuel by state, custom fees. Phones get card/stacked layouts
+ * (a 7-column table has no business on a 390px screen), md+ keeps the ledger
+ * tables. No editors, no save bar; the 司机确认 button stays on the page
+ * header.
  */
 export function ReadOnlyStatement({
   days,
+  deferred = [],
   fuelDetail,
   feeDetail,
   feeTotal
 }: {
   days: ReadOnlyDay[];
+  /** Claimed unsettled legs paying in this period (real dates sit in older
+   *  frozen periods) - a trailing group after the day ledger */
+  deferred?: DriverPeriodTripRow[];
   fuelDetail: FuelDetailRow[];
   feeDetail: FeeDetailRow[];
   feeTotal: number;
 }) {
-  const legCount = days.reduce((n, d) => n + d.legs.length, 0);
+  // Deferred legs count toward the period's totals (that is the point of
+  // the claim) but never toward attendance days
+  const deferredPay = deferred.reduce((n, l) => n + Number(l.pay_amount), 0);
+  const deferredSubsidy = deferred.reduce((n, l) => n + Number(l.fuel_subsidy), 0);
+  const legCount = days.reduce((n, d) => n + d.legs.length, 0) + deferred.length;
   const totalMiles = days.reduce((n, d) => n + d.miles, 0);
-  const totalPay = days.reduce((n, d) => n + d.pay, 0);
-  const totalSubsidy = days.reduce((n, d) => n + d.subsidy, 0);
+  const totalPay = days.reduce((n, d) => n + d.pay, 0) + deferredPay;
+  const totalSubsidy = days.reduce((n, d) => n + d.subsidy, 0) + deferredSubsidy;
   const fuelRollup = fuelDetail.reduce(
     (acc, row) => ({
       gallons: acc.gallons + row.gallons,
@@ -143,6 +152,80 @@ export function ReadOnlyStatement({
           </table>
         </LedgerPanel>
       </section>
+
+      {deferred.length > 0 && (
+        <section aria-label="顺延补录" className="mt-4">
+          <LedgerPanel
+            label={
+              <>
+                顺延补录
+                <b>
+                  {deferred.length} 段 · {money(deferredPay.toFixed(2))} · 工资计入本周期，日期为实际业务日期
+                </b>
+              </>
+            }
+          >
+            <div className="md:hidden">
+              {deferred.map(leg => (
+                <div
+                  key={leg.id}
+                  className="flex items-baseline justify-between gap-3 border-b border-line px-4 py-2.5 last:border-b-0"
+                >
+                  <div className="min-w-0">
+                    <p className="m-0 font-mono text-[13px] font-semibold">
+                      {leg.operation}
+                      {leg.load_no ? <span className="text-muted-foreground">{leg.load_no}</span> : null}
+                      <span className="ml-2 font-normal">{leg.trip_date}</span>
+                      <span className="ml-1.5 rounded-sm bg-amber-100 px-1 py-px text-[10px] font-medium text-amber-800">
+                        顺延
+                      </span>
+                    </p>
+                    <p className="m-0 mt-0.5 font-mono text-xs text-muted-foreground">
+                      {leg.from_code ?? "?"} → {leg.to_code ?? "?"} · {fmtMiles(leg.miles)} mi
+                    </p>
+                  </div>
+                  <span className="shrink-0 font-mono text-[13px] font-semibold tabular-nums">
+                    {money(leg.pay_amount)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <table className="roster hidden md:table">
+              <thead>
+                <tr>
+                  <th>实际日期</th>
+                  <th>操作</th>
+                  <th>Load #</th>
+                  <th>起点 → 终点</th>
+                  <th className="num">里程 (mi)</th>
+                  <th className="num">加油 (gal)</th>
+                  <th className="num">工资</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deferred.map(leg => (
+                  <tr key={leg.id}>
+                    <td className="mono">
+                      {leg.trip_date}
+                      <span className="ml-1.5 rounded-sm bg-amber-100 px-1 py-px text-[10px] font-medium text-amber-800">
+                        顺延
+                      </span>
+                    </td>
+                    <td className="mono">{leg.operation}</td>
+                    <td className="mono">{leg.load_no || "—"}</td>
+                    <td className="mono">
+                      {leg.from_code ?? "?"} → {leg.to_code ?? "?"}
+                    </td>
+                    <td className="mono num">{fmtMiles(leg.miles)}</td>
+                    <td className="mono num">{fmtFuel(leg.fuel_gallons)}</td>
+                    <td className="mono num">{money(leg.pay_amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </LedgerPanel>
+        </section>
+      )}
 
       <section aria-label="加油按州汇总" className="mt-4">
         <LedgerPanel

@@ -66,10 +66,12 @@ export async function verifyStatement(formData: FormData) {
 /**
  * Driver confirmation (DONE) is the archive step: the flip and the snapshot
  * land atomically - the same UPDATE freezes the numbers AND captures the
- * period's whole editable leg set plus the then fuel_detail, so the detail
- * sheet can later diff cell-by-cell. Only a VERIFIED sheet can advance
- * (verification stays the required first step). One-way: no un-confirm
- * exists, and later changes only set the red edited_after_verify flag.
+ * period's whole editable leg set (settlement attribution included) plus the
+ * then fuel_detail, so the detail sheet can later diff cell-by-cell. Only a
+ * VERIFIED sheet can advance (verification stays the required first step).
+ * While DONE the sheet is read-only (edits are refused server-side); the
+ * only door back to editable is reopenStatement, and re-confirming through
+ * it rewrites the snapshot.
  */
 export async function confirmDriverStatement(formData: FormData) {
   await requirePermission("payroll.confirm");
@@ -113,14 +115,68 @@ export async function confirmDriverStatement(formData: FormData) {
               LEFT JOIN ops.locations f ON f.id = t.from_location_id
               LEFT JOIN ops.locations o ON o.id = t.to_location_id
               WHERE t.driver_id = s.driver_id
-                AND t.trip_date >= s.period_start
-                AND t.trip_date <= s.period_end
+                AND COALESCE(t.settle_date, t.trip_date) >= s.period_start
+                AND COALESCE(t.settle_date, t.trip_date) <= s.period_end
             ), '[]'::jsonb),
             'fuel', s.fuel_detail
           )
         )
     WHERE s.id = ${id}::bigint AND s.status = 'VERIFIED'
   `;
+
+  revalidateStatementViews();
+  redirect(returnTo || "/dashboard/payroll");
+}
+
+/**
+ * Reopen a driver-confirmed (DONE) statement back to editable (VERIFIED):
+ * the flip restores live tracking and the read-only guards lift, so fixes
+ * and late additions fold into the live numbers; the sheet freezes again
+ * only on the next driver confirmation, which rewrites the snapshot (the
+ * previous one is replaced - no history is kept). Flipping BEFORE the sync
+ * keeps the DONE flag-arm out of the way; the flag resets on reopen (the
+ * archived-diff machinery no longer applies to a live sheet).
+ */
+export async function reopenStatement(formData: FormData) {
+  await requirePermission("payroll.confirm");
+
+  const id = str(formData, "id");
+  const returnTo = str(formData, "return_to");
+  if (!id) redirect("/dashboard/payroll");
+
+  // Reopening is a clerk-side correction (the driver confirmation itself is
+  // the driver-facing step); driver-scoped accounts never reopen
+  const linked = await getLinkedDriverId();
+  if (linked !== null) {
+    redirect("/dashboard/forbidden");
+  }
+
+  const rows = await prisma.$queryRaw<
+    Array<{ driver_id: string; period_start: string }>
+  >`
+    SELECT driver_id::text, to_char(period_start, 'YYYY-MM-DD') AS period_start
+    FROM pay.payroll_statements
+    WHERE id = ${id}::bigint AND status = 'DONE'
+    LIMIT 1
+  `;
+  const target = rows[0];
+  if (target) {
+    await prisma.$transaction(
+      async tx => {
+        const flipped = await tx.$executeRaw`
+          UPDATE pay.payroll_statements
+          SET status = 'VERIFIED', edited_after_verify = false, updated_at = now()
+          WHERE id = ${id}::bigint AND status = 'DONE'
+        `;
+        if (flipped > 0) {
+          await syncStatementsInTx(tx, [
+            { driverId: target.driver_id, periodStart: target.period_start }
+          ]);
+        }
+      },
+      { timeout: 30_000 }
+    );
+  }
 
   revalidateStatementViews();
   redirect(returnTo || "/dashboard/payroll");
@@ -232,8 +288,8 @@ export async function copyStatement(
     const counts = await tx.$queryRaw<Array<{ count: bigint }>>`
       SELECT count(*) AS count FROM pay.trips
       WHERE driver_id = ${targetDriverId}::bigint
-        AND trip_date >= ${source.period_start}::date
-        AND trip_date <= ${source.period_end}::date
+        AND COALESCE(settle_date, trip_date) >= ${source.period_start}::date
+        AND COALESCE(settle_date, trip_date) <= ${source.period_end}::date
     `;
     if (Number(counts[0]?.count ?? 0) > 0) return { code: "target_has_trips" as const };
 
@@ -269,18 +325,18 @@ export async function copyStatement(
     const inserted = await tx.$executeRaw`
       INSERT INTO pay.trips(driver_id, trip_date, operation, load_no,
         from_location_id, to_location_id, miles, fuel_gallons, pay_amount, fuel_subsidy, notes,
-        driver_name, truck_snapshot, package_id, package_note)
+        driver_name, truck_snapshot, package_id, package_note, settle_date)
       SELECT ${targetDriverId}::bigint, t.trip_date, t.operation, t.load_no,
              t.from_location_id, t.to_location_id, t.miles, t.fuel_gallons, t.pay_amount,
              CASE WHEN ${target.driver_type} = 'OWNER'
                   THEN round(t.miles * ${fuelSubsidyRate}::numeric, 2)
                   ELSE 0 END,
              t.notes, ${target.full_name}, ${truckSnapshot}::jsonb,
-             t.package_id, t.package_note
+             t.package_id, t.package_note, t.settle_date
       FROM pay.trips t
       WHERE t.driver_id = ${source.driver_id}::bigint
-        AND t.trip_date >= ${source.period_start}::date
-        AND t.trip_date <= ${source.period_end}::date
+        AND COALESCE(t.settle_date, t.trip_date) >= ${source.period_start}::date
+        AND COALESCE(t.settle_date, t.trip_date) <= ${source.period_end}::date
     `;
     if (inserted === 0) return { code: "no_trips" as const };
     return { periodStart: source.period_start };
@@ -379,8 +435,8 @@ export async function changeStatementTruck(
       UPDATE pay.trips
       SET truck_snapshot = ${truckSnapshot}::jsonb, updated_at = now()
       WHERE driver_id = ${statement.driver_id}::bigint
-        AND trip_date >= ${statement.period_start}::date
-        AND trip_date <= ${statement.period_end}::date
+        AND COALESCE(settle_date, trip_date) >= ${statement.period_start}::date
+        AND COALESCE(settle_date, trip_date) <= ${statement.period_end}::date
     `;
     if (updated === 0) return { code: "no_trips" as const };
     return {
@@ -408,8 +464,8 @@ export async function changeStatementTruck(
           SELECT string_agg(DISTINCT t.truck_snapshot->>'truck_code', ', ' ORDER BY t.truck_snapshot->>'truck_code') AS trucks
           FROM pay.trips t
           WHERE t.driver_id = ${result.driverId}::bigint
-            AND t.trip_date >= ${result.periodStart}::date
-            AND t.trip_date <= ${result.periodEnd}::date
+            AND COALESCE(t.settle_date, t.trip_date) >= ${result.periodStart}::date
+            AND COALESCE(t.settle_date, t.trip_date) <= ${result.periodEnd}::date
         ) agg
         WHERE s.driver_id = ${result.driverId}::bigint
           AND s.period_start = ${result.periodStart}::date

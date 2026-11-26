@@ -7,17 +7,23 @@ import { FlashToast } from "@/components/flash-toast";
 import { FormError } from "@/components/form-fields";
 import { LedgerPanel } from "@/components/ledger";
 import { SubmitButton } from "@/components/submit-button";
+import { StatusActionButton } from "@/components/status-action-button";
 import { DriverTypeBadge, StatementStatusBadge } from "@/components/badges";
 import { PeriodPicker } from "@/components/period-picker";
 import { requirePermission, getLinkedDriverId, getUserPermissions } from "@/lib/permissions";
 import { firstValue, type SearchParams } from "@/lib/search-params";
-import { fuel as fmtFuel, miles as fmtMiles, money, todayIso } from "@/lib/format";
+import { fuel as fmtFuel, miles as fmtMiles, money, shortPeriod, todayIso } from "@/lib/format";
 import { defaultPeriod, periodLabel, periodOf, shiftPeriod } from "@/lib/period";
 import { getDriverById } from "@/lib/queries/drivers";
 import { activeOperationOptions } from "@/lib/queries/operations";
 import { activeLocationOptions } from "@/lib/queries/locations";
 import { currentWageRule } from "@/lib/queries/wage-rules";
-import { driverPeriodTrips, periodPayTotals, type DriverPeriodTripRow } from "@/lib/queries/trips";
+import {
+  driverPeriodTrips,
+  periodPayTotals,
+  unsettledTripsForDriver,
+  type DriverPeriodTripRow
+} from "@/lib/queries/trips";
 import { getStatementByDriverPeriod, parseVerifySnapshot } from "@/lib/queries/statements";
 import { activeStateOptions, parseFuelDetail } from "@/lib/queries/fuel";
 import { feesTotal, parseCustomFees } from "@/lib/queries/fees";
@@ -26,10 +32,11 @@ import { FeeEditor, type FeeEditRow } from "./fee-editor";
 import { StatementSheetForm } from "./statement-sheet";
 import { activeDriverOptions } from "@/lib/queries/drivers";
 import { activeTruckOptions } from "@/lib/queries/trucks";
-import { confirmDriverStatement, verifyStatement } from "../../payroll/actions";
+import { confirmDriverStatement, reopenStatement, verifyStatement } from "../../payroll/actions";
 import { CopyStatementButton } from "../../payroll/copy-statement-dialog";
 import { ChangeTruckButton } from "../../payroll/change-truck-dialog";
 import { PayrollLegsTable } from "../payroll-legs-table";
+import { settleTripsIntoPeriod } from "../actions";
 import { ReadOnlyStatement } from "./read-only-statement";
 
 export const metadata: Metadata = { title: "周期工资单 · G&G PayOps" };
@@ -43,6 +50,14 @@ const FUEL_ERRORS: Record<string, string> = {
 /** Fee-editor error copy (the action redirects back with these codes) */
 const FEE_ERRORS: Record<string, string> = {
   fee_missing_label: "该行费用未填写名称。"
+};
+
+/** Leg/claim error copy (the actions redirect back with these codes) */
+const LEG_ERRORS: Record<string, string> = {
+  leg_locked: "该行程属司机已确认的工资单（只读），请先「退回编辑」后再修改。",
+  fuel_locked: "加油明细属已确认的工资单（只读），请先「退回编辑」后再修改。",
+  claim_frozen: "本周期工资单已冻结，无法计入未结行程。",
+  claim_none: "所选行程已不是未结状态，请刷新后重试。"
 };
 
 const arrowClass =
@@ -129,7 +144,7 @@ export default async function DriverPeriodPage({
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
 
-  const [legs, periodTotals, statement, stateOptions, locations, wageRule, operationOptions, driverOptions, truckOptions] =
+  const [legs, periodTotals, statement, stateOptions, locations, wageRule, operationOptions, driverOptions, truckOptions, unsettled] =
     await Promise.all([
       driverPeriodTrips(period, driver.id),
       periodPayTotals(),
@@ -142,14 +157,21 @@ export default async function DriverPeriodPage({
       activeOperationOptions(),
       // Copy-dialog pickers (copy this draft statement onto another driver)
       activeDriverOptions(),
-      activeTruckOptions()
+      activeTruckOptions(),
+      // Claim panel feed (unsettled legs of older frozen periods)
+      !readOnly ? unsettledTripsForDriver(driver.id) : Promise.resolve([])
     ]);
   // Fuel-by-state (frozen once verified) and custom fees (stay editable after
   // verify, no red marks) parse straight off the statement row - the detail
   // SELECT carries both payloads (two point queries on the same row dropped)
   const fuelDetail = statement ? parseFuelDetail(statement.fuel_detail) : [];
   const feeDetail = statement ? parseCustomFees(statement.custom_fees) : [];
-  const days = groupByDay(legs);
+  // Deferred (claimed unsettled) legs pay in this period but keep real dates
+  // outside it: they never join day groups (no chaining, no intra-day freeze,
+  // no attendance day) - the sheet renders them as a trailing read-only group.
+  // Totals below still count every leg: the period's pay must include them.
+  const deferredLegs = legs.filter(l => l.settle_date !== null);
+  const days = groupByDay(legs.filter(l => l.settle_date === null));
   const totals = legs.reduce(
     (acc, leg) => ({
       miles: acc.miles + Number(leg.miles),
@@ -206,6 +228,10 @@ export default async function DriverPeriodPage({
     errorCode && errorCode in FUEL_ERRORS
       ? `${Number.isFinite(fuelRowNo) && fuelRowNo >= 1 ? `第 ${fuelRowNo} 行：` : ""}${FUEL_ERRORS[errorCode]}`
       : undefined;
+  // Leg/claim refusals (read-only archive, frozen claim target, stale panel)
+  const legError = errorCode && errorCode in LEG_ERRORS ? LEG_ERRORS[errorCode] : undefined;
+  // Claim success flash (count comes from the action's redirect)
+  const claimedCount = firstValue(sp.claimed);
 
   // Fee editor feed: a failed save's URL refill wins over the stored rows
   const feeRefillCount = Number.parseInt(firstValue(sp.f_fee_row_count) ?? "", 10);
@@ -314,6 +340,12 @@ export default async function DriverPeriodPage({
         .filter(Boolean)
         .join(" · ")
     : "";
+  // The permanent audit flag keeps firing for resolved diversions (a claimed
+  // leg left, a sanctioned fee edit landed); with a snapshot the localized
+  // diff decides visibility - legacy no-snapshot rows keep the flag-only form
+  const flagVisible = snapshot
+    ? changeSummary !== "" && statement !== null && statement.edited_after_verify
+    : statement !== null && statement.edited_after_verify;
   // Muted name tone for the whole page: dark green once verified, dark red
   // once driver-confirmed (archived) or edited after confirmation - dim
   // shades only
@@ -328,8 +360,10 @@ export default async function DriverPeriodPage({
   return (
     <>
       {saved && <FlashToast message="修改已保存" param="saved" />}
+      {claimedCount && <FlashToast message={`已计入 ${claimedCount} 段行程`} param="claimed" />}
       {fuelError && <FormError message={fuelError} />}
       {feeError && <FormError message={feeError} />}
+      {legError && <FormError message={legError} />}
       <PageHeader
         title={
           <>
@@ -338,7 +372,7 @@ export default async function DriverPeriodPage({
         }
         description={
           statement ? (
-            statement.edited_after_verify ? (
+            flagVisible ? (
               <>
                 <StatementStatusBadge status={statement.status} edited />
                 <span className="text-red-700">
@@ -349,7 +383,7 @@ export default async function DriverPeriodPage({
               <>
                 工资单 <StatementStatusBadge status={statement.status} />
                 {statement.status === "DONE"
-                  ? " 司机已确认（留档），金额冻结；再改行程只在详情页标红。"
+                  ? " 司机已确认（留档），行程只读；修改须「退回编辑」后重新确认。"
                   : statement.status === "VERIFIED"
                     ? " 已核对（数字仍实时跟随行程）；可标记司机确认，确认后冻结留档。"
                     : " 草稿中，数字实时跟随行程。"}
@@ -407,6 +441,25 @@ export default async function DriverPeriodPage({
                   司机确认
                 </SubmitButton>
               </form>
+            )}
+            {canConfirm && !readOnly && statement && statement.status === "DONE" && (
+              /* The only door back from the frozen archive: reopen to edit,
+                 fix, then confirm again to re-lock a fresh snapshot */
+              <StatusActionButton
+                statementId={statement.id}
+                action={reopenStatement}
+                triggerClass="button button-quiet"
+                labels={{
+                  title: "退回编辑？",
+                  description:
+                    "该工资单已司机确认。退回后行程恢复可编辑、数字实时跟随，修改后需重新点「司机确认」更新并锁定快照（原留档快照将被覆盖，不留历史）。",
+                  confirmLabel: "退回编辑",
+                  pendingLabel: "退回中…",
+                  trigger: "退回编辑",
+                  successToast: "已退回编辑",
+                  failureToast: "退回失败，请重试"
+                }}
+              />
             )}
           </div>
         }
@@ -476,11 +529,83 @@ export default async function DriverPeriodPage({
         </div>
       </section>
 
+      {!archived && !readOnly && unsettled.length > 0 && (
+        /* Legs entered after their own period was driver-confirmed: their
+           wage counts nowhere. Checking rows moves the money into THIS
+           period (settle_date) while the real business dates stay. */
+        <section aria-label="未结行程" className="mt-4">
+          <LedgerPanel
+            label={
+              <>
+                未结行程
+                <b>{unsettled.length} 段 · 工资未计入任何工资单</b>
+              </>
+            }
+          >
+            <form action={settleTripsIntoPeriod}>
+              <input type="hidden" name="driver_id" value={driver.id} />
+              <input type="hidden" name="period" value={period.start} />
+              <input type="hidden" name="return_to" value={returnTo} />
+              <table className="roster">
+                <thead>
+                  <tr>
+                    <th>日期</th>
+                    <th>操作</th>
+                    <th>Load #</th>
+                    <th>起点 → 终点</th>
+                    <th className="num">里程 (mi)</th>
+                    <th className="num">工资</th>
+                    <th>原属周期</th>
+                    <th>计入</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unsettled.map(u => (
+                    <tr key={u.id}>
+                      <td className="mono">{u.trip_date}</td>
+                      <td className="mono">{u.operation}</td>
+                      <td className="mono">{u.load_no || "—"}</td>
+                      <td className="mono">
+                        {u.from_code ?? "?"} <span className="text-muted-foreground">→</span> {u.to_code ?? "?"}
+                      </td>
+                      <td className="mono num">{fmtMiles(u.miles)}</td>
+                      <td className="mono num">{money(u.pay_amount)}</td>
+                      <td className="mono">
+                        {shortPeriod(u.frozen_period_start, u.frozen_period_end)}（已冻结）
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          name="claim"
+                          value={u.id}
+                          defaultChecked
+                          aria-label={`计入行程 ${u.trip_date} ${u.operation}`}
+                          className="size-4"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3">
+                <p className="m-0 text-xs text-muted-foreground">
+                  勾选的行程工资将计入 {periodLabel(period)}，业务日期保持不变。
+                </p>
+                <SubmitButton className="button button-dark" pendingLabel="计入中…">
+                  计入本周期结算
+                </SubmitButton>
+              </div>
+            </form>
+          </LedgerPanel>
+        </section>
+      )}
+
       {readOnly ? (
         /* Driver-linked / write-less accounts: static sheet, confirm stays in
            the header - no editors, no save bar, nothing to corrupt */
         <ReadOnlyStatement
           days={days}
+          deferred={deferredLegs}
           fuelDetail={fuelDetail}
           feeDetail={feeDetail}
           feeTotal={feeTotal}
@@ -510,6 +635,8 @@ export default async function DriverPeriodPage({
             >
               <PayrollLegsTable
                 days={days}
+                deferred={deferredLegs}
+                deferredLocked={archived}
                 returnTo={returnTo}
                 edit={{ locations, operations: operationOptions, wageRule }}
                 newLegCtx={{

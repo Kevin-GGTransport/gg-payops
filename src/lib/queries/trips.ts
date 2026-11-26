@@ -30,6 +30,11 @@ export type TripRow = {
   package_id: string | null;
   /** Carrier-side label, e.g. 往返打包 $200.00 (null on $0 member legs) */
   package_note: string | null;
+  /** Pay-settlement period override (a period start); null = follow trip_date */
+  settle_date: string | null;
+  /** True while the leg sits inside a DONE statement's confirmation
+   *  snapshot - the read-only archive guard keys off this */
+  locked: boolean;
 };
 
 const TRIP_SELECT = Prisma.sql`
@@ -43,7 +48,18 @@ const TRIP_SELECT = Prisma.sql`
          f.code AS from_code, o.code AS to_code,
          t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.fuel_subsidy::text,
          t.notes, t.created_at,
-         t.package_id, t.package_note
+         t.package_id, t.package_note,
+         to_char(t.settle_date, 'YYYY-MM-DD') AS settle_date,
+         EXISTS (
+           SELECT 1 FROM pay.payroll_statements s
+           WHERE s.driver_id = t.driver_id
+             AND s.period_start = (COALESCE(t.settle_date, t.trip_date)
+                 - ((extract(dow from COALESCE(t.settle_date, t.trip_date)) + 1) % 7)
+                   * interval '1 day')::date
+             AND s.status = 'DONE'
+             AND (s.verify_snapshot->'legs')
+                 @> jsonb_build_array(jsonb_build_object('id', t.id::text))
+         ) AS locked
   FROM pay.trips t
   JOIN ops.drivers d ON d.id = t.driver_id
   LEFT JOIN ops.locations f ON f.id = t.from_location_id
@@ -76,6 +92,11 @@ export type TripEditRow = {
   notes: string | null;
   package_id: string | null;
   package_note: string | null;
+  /** Pay-settlement period override (a period start); null = follow trip_date */
+  settle_date: string | null;
+  /** True while the leg sits inside a DONE statement's confirmation
+   *  snapshot - the read-only archive guard keys off this */
+  locked: boolean;
 };
 
 export async function getTripById(id: string): Promise<TripEditRow | null> {
@@ -97,7 +118,18 @@ export async function getTripsByIds(ids: string[]): Promise<TripEditRow[]> {
            f.code AS from_code, o.code AS to_code,
            t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.fuel_subsidy::text,
            t.notes,
-           t.package_id, t.package_note
+           t.package_id, t.package_note,
+           to_char(t.settle_date, 'YYYY-MM-DD') AS settle_date,
+           EXISTS (
+             SELECT 1 FROM pay.payroll_statements s
+             WHERE s.driver_id = t.driver_id
+               AND s.period_start = (COALESCE(t.settle_date, t.trip_date)
+                   - ((extract(dow from COALESCE(t.settle_date, t.trip_date)) + 1) % 7)
+                     * interval '1 day')::date
+               AND s.status = 'DONE'
+               AND (s.verify_snapshot->'legs')
+                   @> jsonb_build_array(jsonb_build_object('id', t.id::text))
+           ) AS locked
     FROM pay.trips t
     LEFT JOIN ops.drivers d ON d.id = t.driver_id
     LEFT JOIN ops.locations f ON f.id = t.from_location_id
@@ -171,6 +203,9 @@ export type DriverPeriodTripRow = {
   package_note: string | null;
   /** Manual intra-day order (payroll sheet drag); NULL = auto chain order */
   sort_order: number | null;
+  /** Pay-settlement period override (a period start); non-NULL = deferred
+   *  into this period (real trip_date sits in another, frozen period) */
+  settle_date: string | null;
 };
 
 /**
@@ -264,14 +299,15 @@ export async function driverPeriodTrips(period: Period, driverId: string) {
            t.miles::text, t.fuel_gallons::text, t.pay_amount::text, t.fuel_subsidy::text,
            t.notes,
            t.package_id, t.package_note,
-           t.sort_order
+           t.sort_order,
+           to_char(t.settle_date, 'YYYY-MM-DD') AS settle_date
     FROM pay.trips t
     JOIN ops.drivers d ON d.id = t.driver_id
     LEFT JOIN ops.locations f ON f.id = t.from_location_id
     LEFT JOIN ops.locations o ON o.id = t.to_location_id
     WHERE t.driver_id = ${driverId}::bigint
-      AND t.trip_date >= ${period.start}::date
-      AND t.trip_date <= ${period.end}::date
+      AND COALESCE(t.settle_date, t.trip_date) >= ${period.start}::date
+      AND COALESCE(t.settle_date, t.trip_date) <= ${period.end}::date
     ORDER BY t.trip_date, t.sort_order NULLS LAST, t.id
   `;
   // created_at ties within a submitted batch (one multi-row INSERT shares the
@@ -293,10 +329,13 @@ export async function driverPeriodTrips(period: Period, driverId: string) {
 /**
  * Wage totals keyed by period start (Sat~Fri) across all history —
  * small dataset, powers the period picker's per-period wage column.
+ * Keys off the settlement override so claimed legs count in their paying
+ * period.
  */
 export async function periodPayTotals() {
   const rows = await prisma.$queryRaw<Array<{ period_start: string; legs: number; pay: string }>>`
-    SELECT (t.trip_date - ((extract(dow from t.trip_date) + 1) % 7) * interval '1 day')::date::text
+    SELECT (COALESCE(t.settle_date, t.trip_date)
+            - ((extract(dow from COALESCE(t.settle_date, t.trip_date)) + 1) % 7) * interval '1 day')::date::text
              AS period_start,
            count(*)::int AS legs,
            COALESCE(SUM(t.pay_amount), 0)::text AS pay
@@ -306,4 +345,52 @@ export async function periodPayTotals() {
   return Object.fromEntries(
     rows.map(r => [r.period_start, { legs: r.legs, pay: Number(r.pay) }] as const)
   );
+}
+
+/** One unsettled leg as listed on the claim panel of the open period sheet */
+export type UnsettledTripRow = {
+  id: string;
+  trip_date: string;
+  operation: string;
+  load_no: string;
+  from_code: string | null;
+  to_code: string | null;
+  miles: string;
+  fuel_gallons: string;
+  pay_amount: string;
+  /** The already-confirmed (frozen) period the leg's own date falls into */
+  frozen_period_start: string;
+  frozen_period_end: string;
+};
+
+/**
+ * Unsettled legs of one driver: entered after their own period's statement
+ * was driver-confirmed (DONE) and absent from its confirmation snapshot, so
+ * their wage counts in no sheet - and never claimed into another period
+ * (settle_date NULL). Legacy DONE rows without a snapshot are treated as
+ * fully settled to avoid false positives. These are the legs the open
+ * period's claim panel offers to fold into the current settlement.
+ */
+export async function unsettledTripsForDriver(driverId: string): Promise<UnsettledTripRow[]> {
+  return prisma.$queryRaw<UnsettledTripRow[]>`
+    SELECT t.id::text,
+           to_char(t.trip_date, 'YYYY-MM-DD') AS trip_date,
+           t.operation::text AS operation, t.load_no,
+           f.code AS from_code, o.code AS to_code,
+           t.miles::text, t.fuel_gallons::text, t.pay_amount::text,
+           to_char(s.period_start, 'YYYY-MM-DD') AS frozen_period_start,
+           to_char(s.period_end, 'YYYY-MM-DD') AS frozen_period_end
+    FROM pay.trips t
+    LEFT JOIN ops.locations f ON f.id = t.from_location_id
+    LEFT JOIN ops.locations o ON o.id = t.to_location_id
+    JOIN pay.payroll_statements s
+      ON s.driver_id = t.driver_id
+     AND s.period_start = (t.trip_date - ((extract(dow from t.trip_date) + 1) % 7) * interval '1 day')::date
+    WHERE t.driver_id = ${driverId}::bigint
+      AND t.settle_date IS NULL
+      AND s.status = 'DONE'
+      AND s.verify_snapshot IS NOT NULL
+      AND NOT ((s.verify_snapshot->'legs') @> jsonb_build_array(jsonb_build_object('id', t.id::text)))
+    ORDER BY t.trip_date, t.id
+  `;
 }

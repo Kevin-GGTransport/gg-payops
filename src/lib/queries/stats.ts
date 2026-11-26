@@ -55,8 +55,8 @@ export async function periodLoadAllocations(period: Period): Promise<LoadAllocat
            t.pay_amount::text AS "payAmount"
     FROM pay.trips t
     JOIN ops.drivers d ON d.id = t.driver_id
-    WHERE t.trip_date >= ${period.start}::date
-      AND t.trip_date <= ${period.end}::date
+    WHERE COALESCE(t.settle_date, t.trip_date) >= ${period.start}::date
+      AND COALESCE(t.settle_date, t.trip_date) <= ${period.end}::date
     ORDER BY t.trip_date, d.full_name, t.id
   `;
 }

@@ -20,7 +20,7 @@ function ConfirmCardButton({ statementId }: { statementId: string }) {
       triggerClass="button button-dark h-11 flex-1 text-[15px]"
       labels={{
         title: "标记司机确认？",
-        description: "标记后该工资单视为司机已确认（金额不变，仍冻结）。",
+        description: "标记后金额冻结留档、行程只读；如需修改须「退回编辑」后重新确认。",
         confirmLabel: "司机确认",
         pendingLabel: "确认中…",
         trigger: "司机确认",
@@ -69,7 +69,7 @@ export function StatementCards({
                 {s.status && (
                   <StatementStatusBadge
                     status={s.status}
-                    edited={s.edited_after_verify}
+                    edited={drifted}
                   />
                 )}
               </div>
@@ -77,10 +77,12 @@ export function StatementCards({
                 {s.leg_count} 段 · {fmtMiles(s.total_miles)} mi · {s.trip_days} 天
                 {s.trucks ? ` · 车号 ${s.trucks}` : ""}
               </p>
-              {(s.edited_after_verify || drifted) && (
+              {/* Money drift is the actionable signal here (the permanent
+                  audit flag also fires for sanctioned fee edits, which need
+                  no re-check) */}
+              {drifted && (
                 <p className="m-0 mt-1.5 text-xs text-red-600">
-                  {s.edited_after_verify ? "司机确认后行程有改动，请复核；" : ""}
-                  {drifted ? `实时工资 ${money(s.live_pay)}` : ""}
+                  司机确认后行程有改动，请复核；实时工资 {money(s.live_pay)}
                 </p>
               )}
             </div>

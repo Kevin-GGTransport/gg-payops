@@ -9,7 +9,7 @@ import { LG_HIDDEN, RosterTable, useRosterTable } from "@/components/roster-tabl
 import { StatusActionButton } from "@/components/status-action-button";
 import { fuel as fmtFuel, miles as fmtMiles, money, shortPeriod } from "@/lib/format";
 import type { StatementListRow } from "@/lib/queries/statements";
-import { confirmDriverStatement, verifyStatement } from "./actions";
+import { confirmDriverStatement, reopenStatement, verifyStatement } from "./actions";
 import {
   CopyStatementButton,
   type CopyDriverOption,
@@ -186,36 +186,55 @@ export function StatementsTable({
                 {canCopy && (
                   <CopyStatementButton statement={{ ...s, id: s.id }} drivers={drivers} trucks={trucks} />
                 )}
-                {/* One click freezes the numbers (permanent, so a confirm
-                    guards the misclick) - no detour into the detail sheet */}
+                {/* One click marks the sheet checked (live tracking stays on;
+                    the confirm guards the misclick) - no detour into the
+                    detail sheet */}
                 <StatusActionButton
                   statementId={s.id}
                   action={verifyStatement}
                   labels={{
                     title: "标记核对？",
-                    description: "标记核对后金额冻结、不可退回（再改行程只会标红）。",
+                    description: "标记核对后数字仍实时跟随行程（不可退回）；司机确认后才会冻结留档。",
                     confirmLabel: "核对",
                     pendingLabel: "核对中…",
                     trigger: "核对",
-                    successToast: "已核对，金额已冻结",
+                    successToast: "已核对",
                     failureToast: "核对失败，请重试"
                   }}
                 />
               </>
             )}
             {canConfirm && s.id && s.status === "VERIFIED" && (
-              /* Numbers already froze at verification - nothing recomputes */
+              /* Confirmation freezes numbers + snapshot in one shot */
               <StatusActionButton
                 statementId={s.id}
                 action={confirmDriverStatement}
                 labels={{
                   title: "标记司机确认？",
-                  description: "标记后该工资单视为司机已确认（金额不变，仍冻结）。",
+                  description: "标记后金额冻结留档、行程只读；如需修改须「退回编辑」后重新确认。",
                   confirmLabel: "司机确认",
                   pendingLabel: "确认中…",
                   trigger: "司机确认",
                   successToast: "司机已确认",
                   failureToast: "标记失败，请重试"
+                }}
+              />
+            )}
+            {canConfirm && s.id && s.status === "DONE" && (
+              /* The only door back from the frozen archive: reopen to edit,
+                 fix, then confirm again to re-lock a fresh snapshot */
+              <StatusActionButton
+                statementId={s.id}
+                action={reopenStatement}
+                labels={{
+                  title: "退回编辑？",
+                  description:
+                    "该工资单已司机确认。退回后行程恢复可编辑、数字实时跟随，修改后需重新点「司机确认」更新并锁定快照（原留档快照将被覆盖，不留历史）。",
+                  confirmLabel: "退回编辑",
+                  pendingLabel: "退回中…",
+                  trigger: "退回编辑",
+                  successToast: "已退回编辑",
+                  failureToast: "退回失败，请重试"
                 }}
               />
             )}

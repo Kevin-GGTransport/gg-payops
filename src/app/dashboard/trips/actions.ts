@@ -57,9 +57,11 @@ async function pricingContext() {
  * ledger batch). Validation-free like entry: invalid date / unknown operation
  * keep the stored value, bad numbers become 0, blank endpoints clear to NULL,
  * bare endpoint text is find-or-created as a location (txt: protocol). Driver
- * and truck snapshot stay untouched - reassigning a trip is not an edit fix.
- * Returns the (driver, period) refs the caller must sync statements for - old
- * AND new period, a date edit may move the leg across the week boundary.
+ * and truck snapshot stay untouched - reassigning a trip is not an edit fix,
+ * and settle_date is never written here (claiming is its own action). Returns
+ * the (driver, period) refs the caller must sync statements for: a deferred
+ * leg's money only lives in periodOf(settle_date); a follow-date leg keeps
+ * old AND new trip_date period (a date edit may cross the week boundary).
  */
 async function applyTripUpdate(
   id: string,
@@ -115,7 +117,14 @@ async function applyTripUpdate(
     WHERE id = ${id}::bigint
   `;
 
-  // Statements follow the mutation on both sides of a possible period move
+  // Statements follow the money: a deferred leg pays in its settle period
+  // only (its trip_date period never counted it), a follow-date leg keeps
+  // both sides of a possible period move
+  if (current.settle_date) {
+    return [
+      { driverId: current.driver_id, periodStart: periodOf(current.settle_date).start }
+    ];
+  }
   return [
     { driverId: current.driver_id, periodStart: periodOf(current.trip_date).start },
     { driverId: current.driver_id, periodStart: periodOf(newDate).start }
@@ -124,7 +133,9 @@ async function applyTripUpdate(
 
 /**
  * Edit one trip (the ledger dialog's save). See applyTripUpdate for the
- * lenient field semantics.
+ * lenient field semantics. A leg inside a DONE statement's confirmation
+ * snapshot is a read-only archive row - the only door back to editable is
+ * reopening that statement (payroll/actions reopenStatement).
  */
 export async function updateTrip(formData: FormData) {
   await requirePermission("trip.write");
@@ -135,11 +146,15 @@ export async function updateTrip(formData: FormData) {
   const current = await getTripById(id);
   if (!current) redirect(backTo);
   await assertDriverScope(current.driver_id);
+  if (current.locked) {
+    redirect(`${backTo}${backTo.includes("?") ? "&" : "?"}error=leg_locked`);
+  }
 
   const { validOperations, fuelSubsidyRate } = await pricingContext();
   const refs = await applyTripUpdate(id, current, formData, "", validOperations, fuelSubsidyRate);
 
-  // DRAFT recomputes; VERIFIED only gets the permanent edited flag
+  // DRAFT and VERIFIED recompute live; DONE only ever got the read-only
+  // refusal above (the flag arm stays for the fuel/fee bookkeeping paths)
   await syncStatements(refs);
 
   revalidatePath("/dashboard");
@@ -283,17 +298,17 @@ export async function saveStatementSheet(formData: FormData) {
   // clear (an existing statement may hold rows the editor just emptied);
   // a stray empty submit with no statement at all is a plain no-op
   const hasSectionContent = fuelRows.length > 0 || feeRows.length > 0;
-  const existingStatement = await prisma.$queryRaw<Array<{ id: string }>>`
-    SELECT id::text FROM pay.payroll_statements
+  const existingStatement = await prisma.$queryRaw<Array<{ id: string; status: string }>>`
+    SELECT id::text, status::text AS status FROM pay.payroll_statements
     WHERE driver_id = ${driverId}::bigint AND period_start = ${period.start}::date
     LIMIT 1
   `;
-  const statementExists = existingStatement.length > 0;
+  const statementStatus = existingStatement[0]?.status ?? null;
   if (
     ids.length === 0 &&
     newRows.length === 0 &&
     !hasSectionContent &&
-    !statementExists
+    statementStatus === null
   ) {
     redirect(backTo);
   }
@@ -321,6 +336,13 @@ export async function saveStatementSheet(formData: FormData) {
     ])
   ]);
   const currentById = new Map((await getTripsByIds(ids)).map(row => [row.id, row]));
+
+  // Read-only archive backstop: a leg frozen inside a DONE statement's
+  // snapshot refuses the whole batch (the frozen sheet already renders
+  // read-only; this closes the server door for any other caller)
+  if (ids.some(id => currentById.get(id)?.locked)) {
+    backWithError("leg_locked", 0);
+  }
 
   // One driver lookup feeds every appended row: the name snapshot and the
   // subsidy's driver type
@@ -388,12 +410,14 @@ export async function saveStatementSheet(formData: FormData) {
         }
       }
 
-      // ---- Fuel: merge same states (sums per column, first note wins), then
-      // the standard two arms - DRAFT upserts, VERIFIED/DONE take fuel + flag.
-      // Rows emptied to zero still write (an existing statement may hold the
-      // set being cleared)
-      if (hasSectionContent || statementExists) {
-        if (fuelRows.length > 0 || statementExists) {
+      // ---- Fuel: merge same states (sums per column, first note wins);
+      // DRAFT/VERIFIED take the payload, DONE is a read-only archive whose
+      // fuel is part of the confirmation snapshot - an identical rewrite
+      // (the editor always submits its rows) passes as a no-op, any real
+      // change must reopen the sheet first. Rows emptied to zero still write
+      // on live sheets (an existing statement may hold the set being cleared)
+      if (hasSectionContent || statementStatus !== null) {
+        if (fuelRows.length > 0 || statementStatus !== null) {
           const merged = new Map<string, FuelRow>();
           for (const row of fuelRows) {
             const dup = merged.get(row.stateCode);
@@ -416,21 +440,25 @@ export async function saveStatementSheet(formData: FormData) {
               ...(r.note ? { note: r.note } : {})
             }))
           );
-          await tx.$executeRaw`
-            INSERT INTO pay.payroll_statements
-              (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay, fuel_detail)
-            VALUES (${driverId}::bigint, ${period.start}::date, ${period.end}::date,
-                    0, 0, 0, 0, 0, ${payload}::jsonb)
-            ON CONFLICT (driver_id, period_start) DO UPDATE SET
-              fuel_detail = EXCLUDED.fuel_detail, updated_at = now()
-            WHERE pay.payroll_statements.status IN ('DRAFT', 'VERIFIED')
-          `;
-          await tx.$executeRaw`
-            UPDATE pay.payroll_statements
-            SET fuel_detail = ${payload}::jsonb, edited_after_verify = true, updated_at = now()
-            WHERE driver_id = ${driverId}::bigint AND period_start = ${period.start}::date
-              AND status = 'DONE'
-          `;
+          if (statementStatus === "DONE") {
+            // redirect() throws, so the shared transaction rolls back
+            const same = await tx.$queryRaw<Array<{ same: boolean }>>`
+              SELECT (COALESCE(fuel_detail, '[]'::jsonb) IS NOT DISTINCT FROM ${payload}::jsonb) AS same
+              FROM pay.payroll_statements
+              WHERE driver_id = ${driverId}::bigint AND period_start = ${period.start}::date
+            `;
+            if (!same[0]?.same) backWithError("fuel_locked", 1);
+          } else {
+            await tx.$executeRaw`
+              INSERT INTO pay.payroll_statements
+                (driver_id, period_start, period_end, trip_days, leg_count, total_miles, total_fuel, total_pay, fuel_detail)
+              VALUES (${driverId}::bigint, ${period.start}::date, ${period.end}::date,
+                      0, 0, 0, 0, 0, ${payload}::jsonb)
+              ON CONFLICT (driver_id, period_start) DO UPDATE SET
+                fuel_detail = EXCLUDED.fuel_detail, updated_at = now()
+              WHERE pay.payroll_statements.status IN ('DRAFT', 'VERIFIED')
+            `;
+          }
         }
       }
 
@@ -478,7 +506,7 @@ export async function saveStatementSheet(formData: FormData) {
 }
 
 /** Why a day reorder was refused; the sheet maps the code to Chinese */
-export type ReorderDayErrorCode = "bad_request" | "trips_changed";
+export type ReorderDayErrorCode = "bad_request" | "trips_changed" | "archived";
 
 /**
  * Persist one day's drag order (save-on-drop, independent of the big sheet
@@ -514,13 +542,30 @@ export async function reorderDayLegs(input: {
       // under READ COMMITTED with benign outcomes (a concurrently inserted
       // leg keeps NULL and appends; a deleted one is skipped by the
       // positional UPDATE)
-      const current = await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT id::text FROM pay.trips
-        WHERE driver_id = ${driverId}::bigint AND trip_date = ${tripDate}::date
+      const current = await tx.$queryRaw<Array<{ id: string; locked: boolean }>>`
+        SELECT t.id::text,
+               EXISTS (
+                 SELECT 1 FROM pay.payroll_statements s
+                 WHERE s.driver_id = t.driver_id
+                   AND s.period_start = (COALESCE(t.settle_date, t.trip_date)
+                       - ((extract(dow from COALESCE(t.settle_date, t.trip_date)) + 1) % 7)
+                         * interval '1 day')::date
+                   AND s.status = 'DONE'
+                   AND (s.verify_snapshot->'legs')
+                       @> jsonb_build_array(jsonb_build_object('id', t.id::text))
+               ) AS locked
+        FROM pay.trips t
+        WHERE t.driver_id = ${driverId}::bigint AND t.trip_date = ${tripDate}::date
       `;
       const currentSet = new Set(current.map(r => r.id));
       if (currentSet.size !== ids.length || ids.some(id => !currentSet.has(id))) {
         return { ok: false as const, code: "trips_changed" as const };
+      }
+      // Read-only archive: a frozen leg in the day refuses the reorder (the
+      // day may still hold unsettled legs, which stay draggable - but the
+      // set-match guard needs the whole day, so any frozen leg blocks it)
+      if (current.some(r => r.locked)) {
+        return { ok: false as const, code: "archived" as const };
       }
       await tx.$executeRaw`
         UPDATE pay.trips t
@@ -549,11 +594,16 @@ export async function deleteTrip(formData: FormData) {
   const current = await getTripById(id);
   if (!current) redirect(backTo);
   await assertDriverScope(current.driver_id);
+  // Read-only archive: a frozen leg refuses the delete (reopen first)
+  if (current.locked) {
+    redirect(`${backTo}${backTo.includes("?") ? "&" : "?"}error=leg_locked`);
+  }
 
   await prisma.$executeRaw`DELETE FROM pay.trips WHERE id = ${id}::bigint`;
 
+  // A deferred leg's money lives in its settle period, not its date's
   await syncStatements([
-    { driverId: current.driver_id, periodStart: periodOf(current.trip_date).start }
+    { driverId: current.driver_id, periodStart: periodOf(current.settle_date ?? current.trip_date).start }
   ]);
 
   revalidatePath("/dashboard/trips");
@@ -570,25 +620,146 @@ export async function deleteTripsBatch(formData: FormData) {
   if (ids.length === 0) redirect(backTo);
 
   // Affected (driver, period) pairs before the rows disappear
-  const doomed = await prisma.$queryRaw<Array<{ driver_id: string; trip_date: string }>>`
-    SELECT driver_id::text, to_char(trip_date, 'YYYY-MM-DD') AS trip_date
-    FROM pay.trips
-    WHERE id IN (${Prisma.join(ids.map(id => Prisma.sql`${id}::bigint`))})
+  const doomed = await prisma.$queryRaw<
+    Array<{ driver_id: string; trip_date: string; settle_date: string | null; locked: boolean }>
+  >`
+    SELECT t.driver_id::text,
+           to_char(t.trip_date, 'YYYY-MM-DD') AS trip_date,
+           to_char(t.settle_date, 'YYYY-MM-DD') AS settle_date,
+           EXISTS (
+             SELECT 1 FROM pay.payroll_statements s
+             WHERE s.driver_id = t.driver_id
+               AND s.period_start = (COALESCE(t.settle_date, t.trip_date)
+                   - ((extract(dow from COALESCE(t.settle_date, t.trip_date)) + 1) % 7)
+                     * interval '1 day')::date
+               AND s.status = 'DONE'
+               AND (s.verify_snapshot->'legs')
+                   @> jsonb_build_array(jsonb_build_object('id', t.id::text))
+           ) AS locked
+    FROM pay.trips t
+    WHERE t.id IN (${Prisma.join(ids.map(id => Prisma.sql`${id}::bigint`))})
   `;
   // Driver-linked accounts may only batch-delete their own legs
   const linked = await getLinkedDriverId();
   if (linked !== null && doomed.some(r => r.driver_id !== linked)) {
     redirect("/dashboard/forbidden");
   }
+  // Read-only archive: any frozen leg refuses the whole batch
+  if (doomed.some(r => r.locked)) {
+    redirect(`${backTo}${backTo.includes("?") ? "&" : "?"}error=leg_locked`);
+  }
 
   await prisma.$executeRaw`DELETE FROM pay.trips WHERE id IN (${Prisma.join(ids.map(id => Prisma.sql`${id}::bigint`))})`;
 
   await syncStatements(
-    doomed.map(r => ({ driverId: r.driver_id, periodStart: periodOf(r.trip_date).start }))
+    doomed.map(r => ({
+      driverId: r.driver_id,
+      periodStart: periodOf(r.settle_date ?? r.trip_date).start
+    }))
   );
 
   revalidatePath("/dashboard/trips");
   revalidatePath("/dashboard/payroll");
   revalidatePath("/dashboard");
   redirect(backTo);
+}
+
+/**
+ * Claim unsettled legs into the open settlement period: each claimed leg's
+ * money moves to periodOf(settle_date) while its real trip_date stays. Only
+ * legs still unsettled are written (settle_date NULL + own period DONE +
+ * absent from that confirmation snapshot - the same predicate as
+ * unsettledTripsForDriver, re-checked inline so concurrent claims and stale
+ * panels collapse to a no-op instead of double-counting). The frozen home
+ * sheet is deliberately NOT re-synced: it never counted these legs, so
+ * there is nothing to drop there. sort_order clears with the claim - the
+ * leg leaves its home day and never joins day groups in the target period.
+ */
+export async function settleTripsIntoPeriod(formData: FormData) {
+  await requirePermission("trip.write");
+  const driverId = str(formData, "driver_id");
+  const periodRaw = str(formData, "period");
+  const ids = formData.getAll("claim").map(String).filter(id => /^\d+$/.test(id));
+  const backTo = backPath(str(formData, "return_to"));
+  if (!/^\d+$/.test(driverId) || !isIsoDate(periodRaw) || ids.length === 0) {
+    redirect("/dashboard/payroll");
+  }
+  await assertDriverScope(driverId);
+  const period = periodOf(periodRaw);
+
+  // The claim target must still be open (no sheet yet, DRAFT or VERIFIED)
+  const frozen = await prisma.$queryRaw<Array<{ one: number }>>`
+    SELECT 1 AS one FROM pay.payroll_statements
+    WHERE driver_id = ${driverId}::bigint AND period_start = ${period.start}::date
+      AND status = 'DONE'
+    LIMIT 1
+  `;
+  if (frozen.length > 0) {
+    redirect(`${backTo}${backTo.includes("?") ? "&" : "?"}error=claim_frozen`);
+  }
+
+  const claimed = await prisma.$executeRaw`
+    UPDATE pay.trips t
+    SET settle_date = ${period.start}::date, sort_order = NULL, updated_at = now()
+    FROM pay.payroll_statements s
+    WHERE t.id IN (${Prisma.join(ids.map(id => Prisma.sql`${id}::bigint`))})
+      AND t.driver_id = ${driverId}::bigint
+      AND t.settle_date IS NULL
+      AND s.driver_id = t.driver_id
+      AND s.period_start = (t.trip_date - ((extract(dow from t.trip_date) + 1) % 7) * interval '1 day')::date
+      AND s.status = 'DONE'
+      AND s.verify_snapshot IS NOT NULL
+      AND NOT ((s.verify_snapshot->'legs') @> jsonb_build_array(jsonb_build_object('id', t.id::text)))
+      AND (t.trip_date - ((extract(dow from t.trip_date) + 1) % 7) * interval '1 day')::date
+          <> ${period.start}::date
+  `;
+  if (claimed === 0) {
+    redirect(`${backTo}${backTo.includes("?") ? "&" : "?"}error=claim_none`);
+  }
+
+  await syncStatements([{ driverId, periodStart: period.start }]);
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/trips");
+  revalidatePath("/dashboard/payroll");
+  redirect(`${backTo}${backTo.includes("?") ? "&" : "?"}claimed=${claimed}`);
+}
+
+/**
+ * Release a claimed leg back to unsettled: clears settle_date so the money
+ * leaves this period's sheet and the leg re-appears on the claim panel (its
+ * home period is DONE and its confirmation snapshot never contained it).
+ * Both periods re-sync - the claim period drops the money, the home period
+ * stays flagged (DONE) or recomputes (live) as its status dictates.
+ */
+export async function unsettleTrip(formData: FormData) {
+  await requirePermission("trip.write");
+  const id = str(formData, "id");
+  const backTo = backPath(str(formData, "return_to"));
+  if (!id) redirect(backTo);
+
+  const current = await getTripById(id);
+  if (!current || !current.settle_date) redirect(backTo);
+  await assertDriverScope(current.driver_id);
+  // Read-only archive: a frozen leg keeps its settlement (reopen first)
+  if (current.locked) {
+    redirect(`${backTo}${backTo.includes("?") ? "&" : "?"}error=leg_locked`);
+  }
+
+  const claimPeriod = periodOf(current.settle_date).start;
+  await prisma.$executeRaw`
+    UPDATE pay.trips
+    SET settle_date = NULL, updated_at = now()
+    WHERE id = ${id}::bigint AND settle_date IS NOT NULL
+  `;
+
+  await syncStatements([
+    { driverId: current.driver_id, periodStart: claimPeriod },
+    { driverId: current.driver_id, periodStart: periodOf(current.trip_date).start }
+  ]);
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/trips");
+  revalidatePath("/dashboard/payroll");
+  redirect(`${backTo}${backTo.includes("?") ? "&" : "?"}saved=1`);
 }

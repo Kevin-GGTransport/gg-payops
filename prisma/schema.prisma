@@ -241,6 +241,12 @@ model Trip {
   /// (the leg then appends by id in a manual day, or re-chains in an
   /// all-NULL day).
   sortOrder      Int?          @map("sort_order")
+  /// Pay-settlement period override (always a period start / Saturday):
+  /// the leg's money lands in periodOf(settle_date) instead of
+  /// periodOf(trip_date) - set when an unsettled leg (its own period's
+  /// statement already driver-confirmed) is claimed into the open
+  /// settlement period. NULL = follow trip_date (the legacy behavior).
+  settleDate     DateTime?     @map("settle_date") @db.Date
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 

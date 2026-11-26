@@ -132,7 +132,7 @@ export function StatementSheetForm({
             {hasUnsaved ? `${unsavedParts.join(" · ")}未保存` : "行程、加油、费用一次保存"}
             {frozen && hasUnsaved && (
               <span className="text-red-700">
-                {" "}· 司机已确认（留档）：保存不会改动留档工资，行程/加油改动将标红，费用净额照常更新
+                {" "}· 已确认只读：在册行程与加油的改动将被拒绝（费用照常可调）；如需修改请先「退回编辑」
               </span>
             )}
           </span>

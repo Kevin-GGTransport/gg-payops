@@ -8,6 +8,10 @@ export type StatementRef = { driverId: string; periodStart: string };
  * Keep statements in step with trips after every mutation (entry / edit /
  * delete / batch delete). Per (driver, period):
  *
+ * A leg's money follows COALESCE(settle_date, trip_date): a claimed
+ * unsettled leg (own period already driver-confirmed) pays in the open
+ * settlement period while keeping its real trip_date.
+ *
  * - missing statement is created as DRAFT with the live aggregates
  *   (entry = generation - no separate "generate" step exists)
  * - DRAFT and VERIFIED numbers are recomputed in place (核对 is a checked
@@ -37,7 +41,11 @@ export async function syncStatementsInTx(tx: Prisma.TransactionClient, refs: Sta
         d.id,
         ${period.start}::date,
         ${period.end}::date,
-        count(DISTINCT t.trip_date)::int,
+        -- Deferred legs keep a real trip_date OUTSIDE this period (their
+        -- attendance day already counted in their real period's sheet)
+        count(DISTINCT CASE WHEN t.trip_date >= ${period.start}::date
+                             AND t.trip_date <= ${period.end}::date
+                            THEN t.trip_date END)::int,
         count(t.id)::int,
         COALESCE(SUM(t.miles), 0),
         COALESCE(SUM(t.fuel_gallons), 0),
@@ -48,8 +56,8 @@ export async function syncStatementsInTx(tx: Prisma.TransactionClient, refs: Sta
              SELECT t2.operation, count(*)::int AS cnt
              FROM pay.trips t2
              WHERE t2.driver_id = d.id
-               AND t2.trip_date >= ${period.start}::date
-               AND t2.trip_date <= ${period.end}::date
+               AND COALESCE(t2.settle_date, t2.trip_date) >= ${period.start}::date
+               AND COALESCE(t2.settle_date, t2.trip_date) <= ${period.end}::date
              GROUP BY t2.operation
            ) x),
           '{}'::jsonb
@@ -58,8 +66,8 @@ export async function syncStatementsInTx(tx: Prisma.TransactionClient, refs: Sta
       FROM ops.drivers d
       LEFT JOIN pay.trips t
         ON t.driver_id = d.id
-        AND t.trip_date >= ${period.start}::date
-        AND t.trip_date <= ${period.end}::date
+        AND COALESCE(t.settle_date, t.trip_date) >= ${period.start}::date
+        AND COALESCE(t.settle_date, t.trip_date) <= ${period.end}::date
       WHERE d.id = ${driverId}::bigint
       GROUP BY d.id
       ON CONFLICT (driver_id, period_start) DO UPDATE SET

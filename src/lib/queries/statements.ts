@@ -176,8 +176,8 @@ const STATEMENT_LIST_SELECT = Prisma.sql`
            (SELECT COALESCE(sum(t.pay_amount), 0)
             FROM pay.trips t
             WHERE t.driver_id = s.driver_id
-              AND t.trip_date >= s.period_start
-              AND t.trip_date <= s.period_end)
+              AND COALESCE(t.settle_date, t.trip_date) >= s.period_start
+              AND COALESCE(t.settle_date, t.trip_date) <= s.period_end)
          END)::text AS live_pay
   FROM pay.payroll_statements s
   JOIN ops.drivers d ON d.id = s.driver_id
@@ -200,8 +200,8 @@ const STATEMENT_DETAIL_SELECT = Prisma.sql`
          (SELECT COALESCE(sum(t.pay_amount), 0)
           FROM pay.trips t
           WHERE t.driver_id = s.driver_id
-            AND t.trip_date >= s.period_start
-            AND t.trip_date <= s.period_end)::text AS live_pay,
+            AND COALESCE(t.settle_date, t.trip_date) >= s.period_start
+            AND COALESCE(t.settle_date, t.trip_date) <= s.period_end)::text AS live_pay,
          s.verify_snapshot, s.fuel_detail
   FROM pay.payroll_statements s
   JOIN ops.drivers d ON d.id = s.driver_id

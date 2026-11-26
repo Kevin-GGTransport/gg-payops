@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
 import { FlashToast } from "@/components/flash-toast";
+import { FormError } from "@/components/form-fields";
 import { LedgerPanel } from "@/components/ledger";
 import { ComboboxField } from "@/components/combobox-field";
 import { AutoSubmitDateField } from "@/components/auto-submit";
@@ -66,6 +67,8 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
   const dateTo = dateParam(firstValue(sp.to));
   const page = intFromParam(firstValue(sp.page));
   const saved = firstValue(sp.saved) === "1";
+  // Batch-delete refusal (frozen legs inside a driver-confirmed snapshot)
+  const legLocked = firstValue(sp.error) === "leg_locked";
 
   // Driver-linked accounts are pinned to their own legs (URL params ignored);
   // they also lack the entry powers, so edit/delete/batch stay hidden
@@ -153,6 +156,9 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
         }
       />
       {saved && <FlashToast message="行程已保存" param="saved" />}
+      {legLocked && (
+        <FormError message="勾选中含司机已确认工资单内的行程（只读），请先在对应工资单「退回编辑」。" />
+      )}
 
       <CleanForm className="trip-filter" action="/dashboard/trips" method="get">
         <div className="toolbar">

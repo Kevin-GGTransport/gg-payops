@@ -3,7 +3,8 @@
 import * as React from "react";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { FormGrid, SubmitButton } from "@/components/form-fields";
+import { FormGrid, FormError, SubmitButton } from "@/components/form-fields";
+import { SubmitButton as GuardedSubmitButton } from "@/components/submit-button";
 import { ComboboxField } from "@/components/combobox-field";
 import { DateField } from "@/components/date-field";
 import { LocationPicker, type LocationOption } from "@/components/location-picker";
@@ -245,6 +246,9 @@ function EditForm({
     <form action={updateTrip} aria-label="行程编辑卡">
       <input type="hidden" name="id" value={trip.id} />
       <input type="hidden" name="return_to" value={returnTo} />
+      {trip.locked && (
+        <FormError message="该行程属司机已确认的工资单（只读）。请先在工资单中「退回编辑」，修改后重新确认。" />
+      )}
       <FormGrid>
         <DialogField label="日期">
           <DateField
@@ -391,7 +395,15 @@ function EditForm({
           />
         </DialogField>
       </FormGrid>
-      <SubmitButton>保存修改</SubmitButton>
+      {trip.locked ? (
+        // Backstop only - the entries that can open this dialog hide the
+        // edit action for locked legs; a stale page may still slip through
+        <GuardedSubmitButton disabled className="mx-4 mb-4 mt-3.5 w-[calc(100%-2rem)] opacity-60">
+          已确认只读
+        </GuardedSubmitButton>
+      ) : (
+        <SubmitButton>保存修改</SubmitButton>
+      )}
     </form>
   );
 }
