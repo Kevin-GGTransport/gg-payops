@@ -1,24 +1,37 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import type { ComponentProps } from "react";
-import { submitFormClean } from "@/lib/form";
 
-/** GET 筛选表单：拦截原生提交（按钮点击 / 回车），统一走剔除空参数的提交 */
-export function CleanForm({ onSubmit, ...rest }: ComponentProps<"form">) {
+type CleanFormProps = Omit<ComponentProps<"form">, "action" | "method"> & {
+  /** GET target path for the filtered list */
+  action: string;
+};
+
+/**
+ * GET filter form wired for App Router soft navigation.
+ *
+ * A string `action` + native submission makes the browser do a full document
+ * navigation (React only intercepts function actions), which flashes the
+ * segment loading skeleton. A function action is intercepted for every submit
+ * source — button clicks, Enter, and the requestSubmit() calls made by
+ * FilterSelect / ComboboxField(autoSubmit) / AutoSubmitDateField — so we
+ * serialize FormData into a querystring (empty values dropped, matching
+ * submitFormClean's URL hygiene) and push it through the router.
+ */
+export function CleanForm({ action, ...rest }: CleanFormProps) {
+  const router = useRouter();
   return (
     <form
       {...rest}
-      onSubmit={event => {
-        const form = event.currentTarget;
-        // submitFormClean 发起的提交：放行
-        if (form.dataset.cleanSubmitting === "1") {
-          delete form.dataset.cleanSubmitting;
-          return;
+      action={(formData: FormData) => {
+        const params = new URLSearchParams();
+        for (const [name, value] of formData.entries()) {
+          const v = String(value).trim();
+          if (v) params.append(name, v);
         }
-        event.preventDefault();
-        // submit 事件处理中同步 requestSubmit 会被浏览器忽略，推迟到下一个宏任务
-        setTimeout(() => submitFormClean(form), 0);
-        onSubmit?.(event);
+        const query = params.toString();
+        router.push(query ? `${action}?${query}` : action);
       }}
     />
   );

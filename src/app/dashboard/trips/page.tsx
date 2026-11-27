@@ -160,7 +160,7 @@ async function AllTripsView({ sp }: { sp: SearchParams }) {
         <FormError message="勾选中含司机已确认工资单内的行程（只读），请先在对应工资单「退回编辑」。" />
       )}
 
-      <CleanForm className="trip-filter" action="/dashboard/trips" method="get">
+      <CleanForm className="trip-filter" action="/dashboard/trips">
         <div className="toolbar">
           <div className="search">
             <input

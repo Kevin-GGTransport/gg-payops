@@ -57,9 +57,14 @@ export function FilterSelect({
           <ChevronDown className="trigger-caret" aria-hidden="true" />
         </button>
       </Popover.Trigger>
-      {/* 不用 Portal：面板必须留在 form DOM 内，勾选值才能随表单提交 */}
-      <Popover.Content align="start" sideOffset={4} className="filter-pop">
-        <div className="filter-pop-list">
+      {/* 不用 Portal：面板必须留在 form DOM 内，勾选值才能随表单提交。
+          forceMount 让复选框常驻 DOM——否则面板收起时控件被卸载，
+          表单其他字段（搜索词/日期/操作类型）触发提交时会丢掉已选筛选值。
+          复选框保持非受控（勾选不提交、点「应用」才提交），URL 回填靠
+          列表的 key 随 selected 变化重挂列表让 defaultChecked 重新生效；
+          关闭态由 CSS 隐藏 */}
+      <Popover.Content forceMount align="start" sideOffset={4} className="filter-pop">
+        <div className="filter-pop-list" key={selected.join(" ")}>
           {multiple ? (
             options.map(opt => (
               <label key={opt.value} className="filter-pop-item">

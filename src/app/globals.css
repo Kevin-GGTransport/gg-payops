@@ -411,6 +411,10 @@
 .filter-pop {
   @apply z-50 min-w-48 rounded-[3px] border border-line bg-card p-1 shadow-md;
 }
+/* forceMount 常驻后由我们负责隐藏关闭态（复选框需留在 form DOM 内随表单提交） */
+.filter-pop[data-state="closed"] {
+  display: none;
+}
 .filter-pop-list {
   @apply max-h-64 overflow-y-auto;
 }

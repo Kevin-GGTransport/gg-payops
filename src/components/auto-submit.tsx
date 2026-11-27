@@ -21,6 +21,10 @@ export function AutoSubmitDateField(props: Omit<ComponentProps<typeof DateField>
   return (
     <DateField
       {...props}
+      // DateField keeps its own state off defaultValue (a snapshot); remount on
+      // URL changes so resets/edits clear the box and its hidden submit value
+      // instead of resurrecting a ghost date on the next submit
+      key={props.defaultValue ?? ""}
       onValueChange={() => {
         // The hidden ISO input lands in the DOM after re-render; submit in a
         // microtask so the form reads the fresh value

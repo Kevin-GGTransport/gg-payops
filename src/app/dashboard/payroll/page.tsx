@@ -3,6 +3,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { LedgerPanel } from "@/components/ledger";
 import { PeriodPicker } from "@/components/period-picker";
+import { CleanForm } from "@/components/clean-form";
 import { requirePermission, getLinkedDriverId, getUserPermissions } from "@/lib/permissions";
 import { todayIso } from "@/lib/format";
 import { miles as fmtMiles, money } from "@/lib/format";
@@ -270,10 +271,12 @@ export default async function PayrollPage({
                 );
               })}
             </nav>
-            <form className="search" action="/dashboard/payroll" method="get">
+            <CleanForm className="search" action="/dashboard/payroll">
+              {/* This form only exists in the archive view; keep view=all on submit */}
+              <input type="hidden" name="view" value="all" />
               <input type="search" name="q" defaultValue={q} placeholder="搜索司机姓名" aria-label="搜索工资单" />
               <button type="submit">搜索</button>
-            </form>
+            </CleanForm>
           </div>
 
           <LedgerPanel label={<>工资单档案<b>{archiveRows.length} 张</b></>}>
